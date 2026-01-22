@@ -1,0 +1,72 @@
+# ═══════════════════════════════════════════════════════════════════════════════
+# AEGIS: 3D ML Language Kernel
+# Docker Compose Configuration
+# ═══════════════════════════════════════════════════════════════════════════════
+#
+# Usage:
+#   docker-compose up aegis       # Run AEGIS REPL
+#   docker-compose run aegis run examples/hello_manifold.aegis
+#   docker-compose run aegis benchmark
+# ═══════════════════════════════════════════════════════════════════════════════
+
+version: '3.8'
+
+services:
+  # ═══════════════════════════════════════════════════════════════════════════
+  # AEGIS Main Service
+  # ═══════════════════════════════════════════════════════════════════════════
+  aegis:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: aegis:latest
+    container_name: aegis-repl
+    stdin_open: true
+    tty: true
+    volumes:
+      - ./examples:/aegis/examples:ro
+      - ./scripts:/aegis/scripts:rw
+      - aegis-data:/aegis/data
+    environment:
+      - AEGIS_HOME=/aegis
+      - RUST_BACKTRACE=1
+    command: [ "repl" ]
+
+  # ═══════════════════════════════════════════════════════════════════════════
+  # AEGIS Benchmark Runner
+  # ═══════════════════════════════════════════════════════════════════════════
+  benchmark:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: aegis:latest
+    container_name: aegis-benchmark
+    volumes:
+      - ./examples:/aegis/examples:ro
+      - aegis-results:/aegis/results
+    environment:
+      - AEGIS_HOME=/aegis
+    command: [ "benchmark", "--all" ]
+
+  # ═══════════════════════════════════════════════════════════════════════════
+  # AEGIS Development Environment
+  # ═══════════════════════════════════════════════════════════════════════════
+  dev:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: builder
+    image: aegis:dev
+    container_name: aegis-dev
+    stdin_open: true
+    tty: true
+    volumes:
+      - .:/aegis
+      - cargo-cache:/usr/local/cargo/registry
+    working_dir: /aegis
+    command: [ "/bin/bash" ]
+
+volumes:
+  aegis-data:
+  aegis-results:
+  cargo-cache:

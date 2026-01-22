@@ -1,126 +1,219 @@
-# AEGIS-Shield 🛡️
+# AEGIS 🛡️
 
-**Geometric Sparse-Event Microkernel with Topological Code Authentication**
+**A 3D ML Language Kernel for Manifold-Native Machine Learning**
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+[![Docker](https://img.shields.io/badge/docker-ready-blue.svg)](https://www.docker.com/)
 [![Rust](https://img.shields.io/badge/rust-nightly-orange.svg)](https://www.rust-lang.org/)
-[![no_std](https://img.shields.io/badge/no__std-bare%20metal-blue.svg)]()
 
-> *A formally verified, event-driven microkernel that executes tasks only upon significant state deviation (Δ ≥ ε) and authenticates code via topological signature (Hₖ).*
+<p align="center">
+  <img src="docs/aegis-logo.svg" alt="AEGIS Logo" width="200"/>
+</p>
 
-## 🌟 Key Innovations
+> *A domain-specific language where code exists in 3D geometric space, regression benchmarks escalate until convergence, and answers emerge from topological structure.*
 
-1. **Sparse Triggering**: CPU only wakes when system state deviates significantly
-2. **PID-on-Manifold Governor**: Adaptive threshold prevents thrashing and oversleeping  
-3. **Topological Gatekeeper**: Uses Betti numbers to authenticate binary code shapes
-4. **AETHER Extensions**: Hierarchical block trees for nonlinear sparse attention
+---
 
-## 📐 Mathematical Foundation
+## ✨ Key Features
 
-### The Sparse Trigger (When)
-```
-Δ(t) = ||μ(t) - μ(t_last)||₂
-Execute if: Δ(t) ≥ ε(t)
-```
+| Feature | Description |
+|---------|-------------|
+| **3D Manifold Primitives** | Code in 3D geometric space using `manifold`, `block`, `regress` |
+| **Escalating Benchmarks** | Regression automatically increases complexity until perfect |
+| **Topological Convergence** | "Answers come" via Betti number stability |
+| **Docker Ready** | Full REPL and CLI in containerized environment |
 
-### The Geometric Governor (How)
-```
-e(t) = R_target - Δ(t)/ε(t)
-ε(t+1) = ε(t) + α·e(t) + β·de/dt
-```
-
-### The Topological Gatekeeper (If)
-```
-Shape(B) = (β₀, β₁) via Persistent Homology
-Reject if: d_Wasserstein(Shape(B), Shape_ref) > δ
-```
-
-## 🏗️ Architecture
-
-```
-┌─────────────────────────────────────────────────────────┐
-│                    AGIS-Shield                          │
-├─────────────────────────────────────────────────────────┤
-│  Layer 2: Topological Loader                            │
-│  ├── ELF Parser with TDA                                │
-│  └── Shape Verification (β₀, β₁)                        │
-├─────────────────────────────────────────────────────────┤
-│  Layer 1: Sparse-Event Scheduler                        │
-│  ├── GeometricGovernor (PID)                            │
-│  ├── SparseScheduler                                    │
-│  └── Entropy Pool                                       │
-├─────────────────────────────────────────────────────────┤
-│  Layer 0: Math-Metal HAL                                │
-│  ├── SystemState μ(t)                                   │
-│  ├── Deviation Metric Δ                                 │
-│  └── Interrupt Handlers                                 │
-└─────────────────────────────────────────────────────────┘
-```
+---
 
 ## 🚀 Quick Start
 
-```bash
-# Clone
-git clone https://github.com/YOUR_USERNAME/agis-shield.git
-cd agis-shield
+### Using Docker (Recommended)
 
-# Install nightly Rust
+```bash
+# Clone the repository
+git clone https://github.com/YOUR_USERNAME/aegis.git
+cd aegis
+
+# Start the REPL
+docker-compose up aegis
+
+# Run a script
+docker-compose run aegis run examples/hello_manifold.aegis
+
+# Run benchmarks
+docker-compose run aegis benchmark
+```
+
+### Using Cargo
+
+```bash
+# Install Rust nightly
 rustup install nightly
 rustup default nightly
-rustup component add rust-src llvm-tools-preview
 
 # Build
-cargo build --target x86_64-unknown-none
+cargo build --release
 
-# Run tests (on host)
-cargo test --lib --target x86_64-pc-windows-msvc
+# Run tests
+cargo test --lib
 ```
+
+---
+
+## 📝 AEGIS Language
+
+### Example Script
+
+```aegis
+// Create a 3D manifold from time-series data
+manifold M = embed(data, dim=3, tau=5)
+
+// Extract geometric blocks
+block B = M.cluster(0:64)
+centroid C = B.center
+
+// Run escalating regression
+regress {
+    model: "polynomial",
+    degree: 3,
+    escalate: true,
+    until: convergence(1e-6)
+}
+
+// Visualize in 3D
+render M {
+    color: by_density,
+    highlight: B
+}
+```
+
+### Core Constructs
+
+| Construct | Syntax | Description |
+|-----------|--------|-------------|
+| `manifold` | `manifold M = embed(data, dim=3)` | Create 3D embedded space |
+| `block` | `block B = M.cluster(0:64)` | Extract geometric region |
+| `regress` | `regress { model: "rbf", escalate: true }` | Run ML regression |
+| `render` | `render M { color: gradient }` | Visualize manifold |
+
+---
+
+## 🧠 How "Answers Come"
+
+AEGIS uses **topological convergence** instead of arbitrary loss thresholds:
+
+```
+Epoch 1:  Linear          → Error: 0.15, β = (3, 1)
+Epoch 5:  Polynomial(3)   → Error: 0.03, β = (2, 1)  ↑ escalate
+Epoch 12: RBF             → Error: 0.008, β = (1, 0) ↑ escalate
+Epoch 15: Converged!      → β stable, drift → 0 ✓
+```
+
+**Convergence is detected when:**
+1. Betti numbers (β₀, β₁) stabilize
+2. Centroid drift approaches zero
+3. Residual manifold collapses to a point
+
+---
+
+## 📐 Mathematical Foundation
+
+### Time-Delay Embedding (Takens' Theorem)
+
+```
+Φ(t) = [x(t), x(t-τ), x(t-2τ), ..., x(t-(d-1)τ)]
+```
+
+### Topological Shape Signature
+
+```
+Shape(B) = (β₀, β₁)  where β₀ = connected components, β₁ = loops
+```
+
+### Escalating Models
+
+| Level | Model | Complexity |
+|-------|-------|------------|
+| 1 | Linear | O(1) |
+| 2 | Polynomial(d) | O(d) |
+| 3 | RBF Kernel | O(n) |
+| 4 | Gaussian Process | O(n²) |
+| 5 | Geodesic Regression | O(n² log n) |
+
+---
+
+## 🐳 Docker Commands
+
+```bash
+# Build image
+docker build -t aegis .
+
+# Interactive REPL
+docker run -it aegis repl
+
+# Run script
+docker run -v $(pwd)/examples:/aegis/examples aegis run /aegis/examples/hello_manifold.aegis
+
+# Run benchmarks
+docker run aegis benchmark
+
+# Development shell
+docker-compose run dev
+```
+
+---
 
 ## 📁 Project Structure
 
 ```
-agis-shield/
+aegis/
 ├── src/
-│   ├── lib.rs           # Entry point, sparse event loop
-│   ├── state.rs         # SystemState μ(t), deviation Δ
-│   ├── governor.rs      # GeometricGovernor (PID control)
-│   ├── scheduler.rs     # SparseScheduler
-│   ├── topology.rs      # Betti numbers, shape verification
-│   ├── manifold.rs      # Time-delay embedding, sparse attention
-│   ├── aether.rs        # H-Block trees, compression, drift
-│   ├── loader.rs        # ELF parser with TDA
-│   ├── interrupts.rs    # IDT, IRQ handlers
-│   ├── allocator.rs     # Bump allocator
-│   └── serial.rs        # UART output
-├── docs/
-│   ├── ARCHITECTURE.md  # Detailed architecture
-│   ├── MATHEMATICS.md   # Mathematical specifications
-│   └── AETHER.md        # AETHER geometric extensions
-├── Cargo.toml
-└── README.md
+│   ├── lang/           # AEGIS DSL
+│   │   ├── lexer.rs    # Tokenizer
+│   │   ├── parser.rs   # AST generator
+│   │   └── interpreter.rs
+│   ├── ml/             # ML Engine
+│   │   ├── regressor.rs
+│   │   ├── convergence.rs
+│   │   └── benchmark.rs
+│   └── [kernel modules]
+├── examples/           # .aegis scripts
+├── docker/             # Docker CLI
+├── docs/               # Documentation
+├── Dockerfile
+└── docker-compose.yml
 ```
 
-## 📚 Research References
+---
 
-- **AETHER Geometric Extensions**: DOI: 10.13141/RG.2.2.14811.27684
-- **Topological Data Analysis**: Persistent Homology for binary authentication
-- **Nonlinear Control**: PID-on-Manifold for adaptive thresholding
+## 🔬 Research References
 
-## 🔬 Applications
+- **Takens' Theorem**: Time-delay embedding for attractor reconstruction
+- **Persistent Homology**: Topological data analysis for shape detection
+- **AETHER**: DOI: 10.13141/RG.2.2.14811.27684
 
-- **Security**: Topological code authentication (detects NOP sleds, ROP chains)
-- **Efficiency**: Near-zero CPU when idle (sparse triggering)
-- **ML/AI**: Geometric sparse attention for massive data visualization
-- **IoT**: Ultra-low power embedded systems
+---
+
+## 🤝 Contributing
+
+Contributions welcome! See [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines.
+
+```bash
+# Development setup
+docker-compose run dev
+cargo test
+cargo fmt
+cargo clippy
+```
+
+---
 
 ## 📄 License
 
 MIT License - See [LICENSE](LICENSE)
 
-## 🤝 Contributing
-
-Contributions welcome! See [CONTRIBUTING.md](CONTRIBUTING.md)
-
 ---
 
-*Making data 3D for everyone through topological geometry* 🌐
+<p align="center">
+  <b>Making data 3D for everyone through topological geometry</b> 🌐
+</p>

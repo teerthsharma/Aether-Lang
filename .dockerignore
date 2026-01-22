@@ -1,0 +1,42 @@
+# Build artifacts
+target/
+*.rlib
+*.rmeta
+
+# Cargo
+Cargo.lock
+.cargo/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Docker
+docker/data/
+
+# Test outputs
+*.log
+*.tmp
+
+# Documentation build
+/doc/
+
+# Coverage
+*.gcno
+*.gcda
+coverage/
+
+# Benchmarks
+/bench-results/
+
+# Local development
+.env
+.env.local
+*.local.toml

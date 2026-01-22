@@ -28,6 +28,9 @@ spin = { version = "0.9", default-features = false }
 # Mathematical operations for no_std (sqrt, abs, etc.)
 libm = "0.2"
 
+# Fixed-size collections for no_std (used by AEGIS DSL)
+heapless = "0.8"
+
 [dependencies.bootloader]
 version = "0.11"
 features = ["uefi"]

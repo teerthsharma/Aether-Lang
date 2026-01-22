@@ -1,0 +1,28 @@
+// ═══════════════════════════════════════════════════════════════════════════════
+// AEGIS Example: Hello Manifold
+// ═══════════════════════════════════════════════════════════════════════════════
+//
+// This script demonstrates basic AEGIS 3D ML language features:
+// 1. Create a 3D manifold via time-delay embedding
+// 2. Define geometric blocks and extract features
+// 3. Render the manifold in 3D space
+// ═══════════════════════════════════════════════════════════════════════════════
+
+// Create a 3D manifold from time-series data
+// dim=3: Embed into 3D space
+// tau=5: Time delay of 5 samples (Takens' theorem)
+manifold M = embed(data, dim=3, tau=5)
+
+// Extract a geometric block (first 64 points)
+block B = M.cluster(0:64)
+
+// Get geometric features
+centroid C = B.center
+radius R = B.spread
+
+// Render the manifold in 3D
+render M {
+    color: by_density,
+    highlight: B,
+    trajectory: on
+}

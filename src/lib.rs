@@ -36,6 +36,8 @@ pub mod interrupts;
 pub mod allocator;
 pub mod serial;
 pub mod loader;
+pub mod lang;  // AEGIS 3D ML Language DSL
+pub mod ml;    // ML regression engine
 
 #[cfg(test)]
 mod tests;
