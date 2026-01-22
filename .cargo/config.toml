@@ -1,0 +1,18 @@
+[unstable]
+build-std = ["core", "alloc"]
+build-std-features = ["compiler-builtins-mem"]
+
+[build]
+target = "x86_64-unknown-none"
+
+[target.'cfg(target_arch = "x86_64")']
+runner = "bootimage runner"
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# AEGIS Cargo Configuration
+#
+# build-std: We rebuild the core library for our custom target
+# compiler-builtins-mem: Provides memcpy/memset implementations
+#
+# The kernel runs on x86_64-unknown-none (freestanding, no OS)
+# ═══════════════════════════════════════════════════════════════════════════════

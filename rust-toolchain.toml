@@ -1,0 +1,15 @@
+[toolchain]
+channel = "nightly"
+components = ["rust-src", "llvm-tools-preview"]
+targets = ["x86_64-unknown-none"]
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# AEGIS Toolchain Configuration
+# 
+# We require nightly for:
+#   - #![feature(abi_x86_interrupt)] - Interrupt calling convention
+#   - #![feature(naked_functions)] - Raw assembly entry points
+#   - build-std - Building core/alloc for custom target
+#
+# Research Note: Pin to specific nightly if stability issues arise
+# ═══════════════════════════════════════════════════════════════════════════════
