@@ -1,0 +1,37 @@
+[package]
+name = "aegis-cli"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+description = "AEGIS Cross-Platform CLI - Run AEGIS on Windows, Linux, macOS"
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# AEGIS CLI (Cross-Platform Native Binary)
+# ═══════════════════════════════════════════════════════════════════════════════
+#
+# The primary user-facing tool for running AEGIS programs.
+# Compiles natively on Windows, Linux, and macOS.
+#
+# Commands:
+#   aegis repl              Interactive REPL
+#   aegis run <file.aegis>  Execute a script
+#   aegis check <file.aegis> Syntax validation
+#
+# Build:
+#   cargo build -p aegis-cli --release
+#
+# ═══════════════════════════════════════════════════════════════════════════════
+
+[features]
+default = []
+
+[dependencies]
+aegis-core = { path = "../aegis-core" }
+aegis-lang = { path = "../aegis-lang" }
+clap = { workspace = true }
+rustyline = { workspace = true }
+
+[[bin]]
+name = "aegis"
+path = "src/main.rs"

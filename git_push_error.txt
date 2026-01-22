@@ -1,0 +1,18 @@
+﻿git : Everything 
+up-to-date
+At line:1 char:1
++ git push 2>&1 | 
+Out-File -FilePath 
+git_push_error.txt 
+-Encoding utf8
++ ~~~~~~~~~~~~~
+    + CategoryInfo   
+           : NotSpe  
+  cified: (Everyth   
+ ing up-to-date:S    
+tring) [], Remot    
+eException
+    + FullyQualified 
+   ErrorId : Native  
+  CommandError
+ 

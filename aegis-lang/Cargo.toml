@@ -1,0 +1,38 @@
+[package]
+name = "aegis-lang"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+description = "AEGIS Language: Lexer, Parser, AST, and Interpreter"
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# AEGIS Language Compiler/Interpreter
+# ═══════════════════════════════════════════════════════════════════════════════
+#
+# The complete AEGIS language implementation:
+#   - Lexer: Tokenizes .aegis source files
+#   - AST: Abstract Syntax Tree with tilde (~) terminators
+#   - Parser: Builds AST from token stream
+#   - Interpreter: Executes AEGIS programs
+#
+# Features:
+#   - Seal loops (🦭) with topological convergence
+#   - Manifold primitives (embed, block, cluster)
+#   - Control flow (if, for, while, fn)
+#
+# ═══════════════════════════════════════════════════════════════════════════════
+
+[features]
+default = ["std"]
+std = ["aegis-core/std", "alloc"]
+alloc = []
+no_std = ["aegis-core/no_std"]
+
+[dependencies]
+aegis-core = { path = "../aegis-core", default-features = false }
+libm = { workspace = true }
+
+[lib]
+name = "aegis_lang"
+path = "src/lib.rs"

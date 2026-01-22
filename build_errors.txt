@@ -1,0 +1,180 @@
+﻿cargo : warning: 
+profiles for the non 
+root package will be 
+ignored, specify 
+profiles at the 
+workspace root:
+At line:1 char:1
++ cargo check 2>&1 | 
+Out-File -FilePath 
+"build_errors.txt" 
+-Encoding ut ...
++ ~~~~~~~~~~~~~~~~
+    + CategoryInfo   
+           : NotSpe  
+  cified: (warning   
+ : profil...works    
+pace root::Strin    
+g) [], RemoteExc    
+eption
+    + FullyQualified 
+   ErrorId : Native  
+  CommandError
+ 
+package:   C:\Users\t
+eert\OneDrive\Desktop
+\New folder (11)\aegi
+s\aegis-kernel\Cargo.
+toml
+workspace: C:\Users\t
+eert\OneDrive\Desktop
+\New folder 
+(11)\aegis\Cargo.toml
+    Updating 
+crates.io index
+     Locking 39 
+packages to latest 
+compatible versions
+      Adding 
+anstream v0.6.21
+      Adding anstyle 
+v1.0.13
+      Adding 
+anstyle-parse v0.2.7
+      Adding 
+anstyle-query v1.1.5
+      Adding 
+anstyle-wincon 
+v3.0.11
+      Adding 
+cfg_aliases v0.1.1
+      Adding clap 
+v4.5.54
+      Adding 
+clap_builder v4.5.54
+      Adding 
+clap_derive v4.5.49
+      Adding 
+clap_lex v0.7.7
+      Adding 
+clipboard-win v5.4.1
+      Adding 
+colorchoice v1.0.4
+      Adding 
+endian-type v0.1.2
+      Adding 
+error-code v3.3.2
+      Adding fd-lock 
+v4.0.4
+      Adding heck 
+v0.5.0
+      Adding home 
+v0.5.12
+      Adding 
+is_terminal_polyfill 
+v1.70.2
+      Adding 
+nibble_vec v0.1.0
+      Adding nix 
+v0.28.0
+      Adding 
+once_cell_polyfill 
+v1.70.2
+      Adding 
+radix_trie v0.2.1
+      Adding 
+rustyline v14.0.0 
+(available: v17.0.2)
+      Adding 
+smallvec v1.15.1
+      Adding strsim 
+v0.11.1
+      Adding 
+unicode-segmentation 
+v1.12.0
+      Adding 
+unicode-width v0.1.14
+      Adding 
+utf8parse v0.2.2
+      Adding 
+windows-sys v0.52.0
+      Adding 
+windows-sys v0.59.0
+      Adding 
+windows-targets 
+v0.52.6
+      Adding windows_
+aarch64_gnullvm 
+v0.52.6
+      Adding 
+windows_aarch64_msvc 
+v0.52.6
+      Adding 
+windows_i686_gnu 
+v0.52.6
+      Adding 
+windows_i686_gnullvm 
+v0.52.6
+      Adding 
+windows_i686_msvc 
+v0.52.6
+      Adding 
+windows_x86_64_gnu 
+v0.52.6
+      Adding windows_
+x86_64_gnullvm 
+v0.52.6
+      Adding 
+windows_x86_64_msvc 
+v0.52.6
+ Downloading crates 
+...
+  Downloaded 
+endian-type v0.1.2
+  Downloaded 
+clap_lex v0.7.7
+  Downloaded 
+error-code v3.3.2
+  Downloaded 
+nibble_vec v0.1.0
+  Downloaded fd-lock 
+v4.0.4
+  Downloaded 
+clipboard-win v5.4.1
+  Downloaded 
+unicode-segmentation 
+v1.12.0
+  Downloaded 
+rustyline v14.0.0
+  Downloaded 
+unicode-width v0.1.14
+  Downloaded 
+radix_trie v0.2.1
+  Downloaded 
+windows-sys v0.52.0
+error: can't find 
+lib `aegis_kernel` 
+at path `C:\Users\tee
+rt\OneDrive\Desktop\N
+ew folder (11)\aegis\
+aegis-kernel\src\lib.
+rs`
+ --> C:\Users\teert\O
+neDrive\Desktop\New 
+folder (11)\aegis\aeg
+is-kernel\Cargo.toml
+error: can't find 
+bin `aegis-kernel` 
+at path `C:\Users\tee
+rt\OneDrive\Desktop\N
+ew folder (11)\aegis\
+aegis-kernel\src\main
+.rs`
+ --> C:\Users\teert\O
+neDrive\Desktop\New 
+folder (11)\aegis\aeg
+is-kernel\Cargo.toml
+error: could not 
+compile due to 2 
+previous target 
+resolution errors

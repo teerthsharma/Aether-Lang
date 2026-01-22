@@ -1,0 +1,51 @@
+[package]
+name = "aegis-kernel"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+description = "AEGIS Bare-Metal Microkernel for x86_64"
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# AEGIS Kernel (Bare-Metal x86_64)
+# ═══════════════════════════════════════════════════════════════════════════════
+#
+# The original AEGIS microkernel for research and embedded scenarios.
+# Runs on bare metal x86_64 with no operating system.
+#
+# Features:
+#   - Sparse event loop (wake on deviation Δ ≥ ε)
+#   - PID-on-Manifold governor for adaptive thresholds
+#   - Topological code authentication
+#   - WFI (Wait For Interrupt) power management
+#
+# Build:
+#   cargo build -p aegis-kernel --target x86_64-unknown-none
+#
+# ═══════════════════════════════════════════════════════════════════════════════
+
+[features]
+default = []
+debug_topology = []
+profiling = []
+
+[dependencies]
+aegis-core = { path = "../aegis-core", default-features = false, features = ["no_std"] }
+aegis-lang = { path = "../aegis-lang", default-features = false, features = ["no_std"] }
+bootloader = { workspace = true }
+x86_64 = { workspace = true }
+spin = { workspace = true }
+volatile = { workspace = true }
+heapless = { workspace = true }
+libm = { workspace = true }
+serde = { workspace = true }
+
+[lib]
+name = "aegis_kernel"
+path = "src/lib.rs"
+
+[[bin]]
+name = "aegis-kernel"
+path = "src/main.rs"
+
+

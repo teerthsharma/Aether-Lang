@@ -1,15 +1,18 @@
 [toolchain]
 channel = "nightly"
 components = ["rust-src", "llvm-tools-preview"]
-targets = ["x86_64-unknown-none"]
+# Note: Multiple targets can be built from this workspace
+# x86_64-unknown-none is for aegis-kernel only
+# Native target is used for aegis-cli
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # AEGIS Toolchain Configuration
 # 
 # We require nightly for:
-#   - #![feature(abi_x86_interrupt)] - Interrupt calling convention
-#   - #![feature(naked_functions)] - Raw assembly entry points
-#   - build-std - Building core/alloc for custom target
+#   - #![feature(abi_x86_interrupt)] - Interrupt calling convention (kernel)
+#   - build-std - Building core/alloc for custom target (kernel)
+#
+# The CLI uses stable features only but benefits from nightly optimizations.
 #
 # Research Note: Pin to specific nightly if stability issues arise
 # ═══════════════════════════════════════════════════════════════════════════════

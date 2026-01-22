@@ -1,0 +1,209 @@
+﻿cargo :    Compiling 
+quote v1.0.43
+At line:1 char:1
++ cargo check -p 
+aegis-cli 2> 
+build_error.txt
++ ~~~~~~~~~~~~~~~~~~~
+~~~~~~~~~~~~~~~~~~~~~
+~~~
+    + CategoryInfo   
+           : NotSpe  
+  cified: (   Comp   
+ iling quote v1.0    
+.43:String) [],     
+RemoteException
+    + FullyQualified 
+   ErrorId : Native  
+  CommandError
+ 
+    Checking anstyle 
+v1.0.13
+    Checking memchr 
+v2.7.6
+    Checking 
+nibble_vec v0.1.0
+    Checking 
+anstyle-query v1.1.5
+    Checking home 
+v0.5.12
+    Checking fd-lock 
+v4.0.4
+error[E0152]: 
+duplicate lang item 
+in crate `core` 
+(which `smallvec` 
+depends on): `sized`
+  |
+  = note: the lang 
+item is first 
+defined in crate 
+`core` (which `std` 
+depends on)
+  = note: first 
+definition in `core` 
+loaded from C:\Users\
+teert\.rustup\toolcha
+ins\nightly-x86_64-pc
+-windows-msvc\lib\rus
+tlib\x86_64-pc-window
+s-msvc\lib\libcore-e5
+e66344ccb85fdd.rmeta
+  = note: second 
+definition in `core` 
+loaded from C:\Users\
+teert\OneDrive\Deskto
+p\New folder (11)\aeg
+is\target\debug\deps\
+libcore-fbc4940b60365
+7c8.rmeta
+
+For more information 
+about this error, 
+try `rustc --explain 
+E0152`.
+error[E0152]: 
+duplicate lang item 
+in crate `core` 
+(which `windows_sys` 
+depends on): `sized`
+  |
+  = note: the lang 
+item is first 
+defined in crate 
+`core` (which `std` 
+depends on)
+  = note: first 
+definition in `core` 
+loaded from C:\Users\
+teert\.rustup\toolcha
+ins\nightly-x86_64-pc
+-windows-msvc\lib\rus
+tlib\x86_64-pc-window
+s-msvc\lib\libcore-e5
+e66344ccb85fdd.rmeta
+  = note: second 
+definition in `core` 
+loaded from C:\Users\
+teert\OneDrive\Deskto
+p\New folder (11)\aeg
+is\target\debug\deps\
+libcore-fbc4940b60365
+7c8.rmeta
+
+error: could not 
+compile `nibble_vec` 
+(lib) due to 1 
+previous error
+warning: build 
+failed, waiting for 
+other jobs to 
+finish...
+error[E0152]: 
+duplicate lang item 
+in crate `core` 
+(which `anstyle` 
+depends on): `sized`
+  |
+  = note: the lang 
+item is first 
+defined in crate 
+`core` (which `std` 
+depends on)
+  = note: first 
+definition in `core` 
+loaded from C:\Users\
+teert\.rustup\toolcha
+ins\nightly-x86_64-pc
+-windows-msvc\lib\rus
+tlib\x86_64-pc-window
+s-msvc\lib\libcore-e5
+e66344ccb85fdd.rmeta
+  = note: second 
+definition in `core` 
+loaded from \\?\C:\Us
+ers\teert\OneDrive\De
+sktop\New folder (11)
+\aegis\target\debug\d
+eps\libcore-fbc4940b6
+03657c8.rlib
+
+error: could not 
+compile 
+`anstyle-query` 
+(lib) due to 1 
+previous error
+error[E0152]: 
+duplicate lang item 
+in crate `core` 
+(which `cfg_if` 
+depends on): `sized`
+  |
+  = note: the lang 
+item is first 
+defined in crate 
+`core` (which `std` 
+depends on)
+  = note: first 
+definition in `core` 
+loaded from C:\Users\
+teert\.rustup\toolcha
+ins\nightly-x86_64-pc
+-windows-msvc\lib\rus
+tlib\x86_64-pc-window
+s-msvc\lib\libcore-e5
+e66344ccb85fdd.rmeta
+  = note: second 
+definition in `core` 
+loaded from C:\Users\
+teert\OneDrive\Deskto
+p\New folder (11)\aeg
+is\target\debug\deps\
+libcore-fbc4940b60365
+7c8.rmeta
+
+error: could not 
+compile `home` (lib) 
+due to 1 previous 
+error
+error: could not 
+compile `anstyle` 
+(lib) due to 1 
+previous error
+error: could not 
+compile `fd-lock` 
+(lib) due to 1 
+previous error
+error[E0152]: 
+duplicate lang item 
+in crate `core` 
+(which `std` depends 
+on): `sized`
+  |
+  = note: the lang 
+item is first 
+defined in crate 
+`core` (which 
+`memchr` depends on)
+  = note: first 
+definition in `core` 
+loaded from \\?\C:\Us
+ers\teert\OneDrive\De
+sktop\New folder (11)
+\aegis\target\debug\d
+eps\libcore-fbc4940b6
+03657c8.rlib
+  = note: second 
+definition in `core` 
+loaded from C:\Users\
+teert\.rustup\toolcha
+ins\nightly-x86_64-pc
+-windows-msvc\lib\rus
+tlib\x86_64-pc-window
+s-msvc\lib\libcore-e5
+e66344ccb85fdd.rmeta
+
+error: could not 
+compile `memchr` 
+(lib) due to 1 
+previous error

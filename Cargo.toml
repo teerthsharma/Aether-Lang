@@ -1,75 +1,57 @@
-[package]
-name = "aegis-shield"
-version = "0.1.0-alpha"
+[workspace]
+members = [
+    "aegis-core",
+    "aegis-lang",
+    "aegis-kernel",
+    "aegis-cli",
+]
+resolver = "2"
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# AEGIS Workspace
+# ═══════════════════════════════════════════════════════════════════════════════
+#
+# Cross-Platform Architecture:
+#   - aegis-core:   Platform-agnostic math, topology, manifold, ML (no_std + std)
+#   - aegis-lang:   Language compiler/interpreter (lexer, parser, AST)
+#   - aegis-kernel: Bare-metal x86_64 microkernel
+#   - aegis-cli:    Cross-platform CLI (Windows/Linux/macOS)
+#
+# Build Commands:
+#   cargo build -p aegis-cli          # Native CLI for current platform
+#   cargo build -p aegis-kernel       # Bare-metal kernel (requires nightly)
+#   cargo test --workspace            # Run all tests
+#
+# ═══════════════════════════════════════════════════════════════════════════════
+
+[workspace.package]
+version = "0.1.0"
 edition = "2021"
-authors = ["AGIS-Shield Research Team"]
-description = "Geometric Sparse-Event Microkernel with Topological Code Authentication"
+authors = ["AEGIS Research Team"]
 license = "MIT"
-repository = "https://github.com/YOUR_USERNAME/agis-shield"
-keywords = ["kernel", "topology", "sparse-attention", "microkernel", "bare-metal"]
-categories = ["no-std", "embedded", "science"]
+repository = "https://github.com/teerthsharma/aegis"
 
-# ═══════════════════════════════════════════════════════════════════════════════
-# AEGIS: A Kernel as a Dynamic System on a Manifold
-# ═══════════════════════════════════════════════════════════════════════════════
-# Core Discipline: Topological Systems Engineering
-# 
-# Mathematical Foundation:
-#   - State Vector: μ(t) ∈ ℝ^d
-#   - Deviation Metric: Δ(t) = ||μ(t) - μ(t_last)||₂
-#   - Execution Condition: Δ(t) ≥ ε(t)
-#   - Topology Gatekeeper: H_k (Homology Groups)
-# ═══════════════════════════════════════════════════════════════════════════════
-
-[dependencies]
-# Spinlock for interrupt-safe synchronization (no_std compatible)
-spin = { version = "0.9", default-features = false }
-
-# Mathematical operations for no_std (sqrt, abs, etc.)
+[workspace.dependencies]
+# Shared dependencies across workspace
 libm = "0.2"
+serde = { version = "1.0", default-features = false, features = ["derive"] }
+nalgebra = { version = "0.32", default-features = false, features = ["libm"] }
 
-# Fixed-size collections for no_std (used by AEGIS DSL)
+# CLI-specific
+clap = { version = "4.0", features = ["derive"] }
+rustyline = "14.0"
+
+# Kernel-specific
+bootloader = { version = "0.11", features = ["uefi"] }
+x86_64 = { version = "0.14", default-features = false, features = ["instructions"] }
+spin = { version = "0.9", default-features = false }
+volatile = "0.5"
 heapless = "0.8"
 
-[dependencies.bootloader]
-version = "0.11"
-features = ["uefi"]
-
-[dependencies.x86_64]
-version = "0.14"
-default-features = false
-features = ["instructions"]
-
-[dependencies.volatile]
-version = "0.5"
-
-# Linear algebra for state vector operations
-# nalgebra in no_std mode uses libm for math
-[dependencies.nalgebra]
-version = "0.32"
-default-features = false
-features = ["libm"]
-
-[features]
-default = []
-# Enable for additional debugging output
-debug_topology = []
-# Enable for cycle-accurate profiling
-profiling = []
-
 [profile.dev]
-panic = "abort"
-opt-level = 1  # Some optimization even in dev for math
+opt-level = 1
 
 [profile.release]
-panic = "abort"
 lto = "fat"
 codegen-units = 1
 opt-level = 3
-
-# ═══════════════════════════════════════════════════════════════════════════════
-# Research Notes:
-# - All floating-point uses hardware FPU (SSE2 enabled by bootloader)
-# - Heap allocation via custom slab allocator (verified disjointness)
-# - No external TDA library - custom minimal implementation
-# ═══════════════════════════════════════════════════════════════════════════════
