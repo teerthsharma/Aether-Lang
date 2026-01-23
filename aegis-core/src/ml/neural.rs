@@ -437,8 +437,8 @@ pub fn adam_update(
                 + (1.0 - params.beta2) * grad_w[i][j] * grad_w[i][j];
 
             // Bias correction
-            let m_hat = state.m_weights[i][j] / (1.0 - params.beta1.powf(t));
-            let v_hat = state.v_weights[i][j] / (1.0 - params.beta2.powf(t));
+            let m_hat = state.m_weights[i][j] / (1.0 - libm::pow(params.beta1, t));
+            let v_hat = state.v_weights[i][j] / (1.0 - libm::pow(params.beta2, t));
 
             // Update weight
             weights[i][j] -= params.lr * m_hat / (sqrt(v_hat) + params.epsilon);
@@ -449,8 +449,8 @@ pub fn adam_update(
         state.v_biases[i] =
             params.beta2 * state.v_biases[i] + (1.0 - params.beta2) * grad_b[i] * grad_b[i];
 
-        let m_hat = state.m_biases[i] / (1.0 - params.beta1.powf(t));
-        let v_hat = state.v_biases[i] / (1.0 - params.beta2.powf(t));
+        let m_hat = state.m_biases[i] / (1.0 - libm::pow(params.beta1, t));
+        let v_hat = state.v_biases[i] / (1.0 - libm::pow(params.beta2, t));
 
         biases[i] -= params.lr * m_hat / (sqrt(v_hat) + params.epsilon);
     }

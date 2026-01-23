@@ -27,6 +27,7 @@ pub mod governor;
 pub mod manifold;
 pub mod ml;
 pub mod state;
+pub mod os;
 pub mod topology;
 
 // Re-export key types for convenience

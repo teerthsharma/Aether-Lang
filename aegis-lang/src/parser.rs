@@ -95,7 +95,7 @@ impl<'a> Parser<'a> {
             TokenKind::Block => self.parse_block_decl(),
             TokenKind::Regress => self.parse_regress_stmt(),
             TokenKind::Render => self.parse_render_stmt(),
-            TokenKind::Identifier(_) => self.parse_var_decl(),
+            TokenKind::Identifier(_) => self.parse_ident_start_stmt(),
 
             // Class Declaration
             TokenKind::Class => self.parse_class_decl(),
@@ -119,7 +119,11 @@ impl<'a> Parser<'a> {
             _ => {
                 let line = token.line;
                 let col = token.column;
-                Err(ParseError::new("unexpected token", line, col))
+                Err(ParseError::new(
+                    &format!("unexpected token: {:?}", token.kind),
+                    line,
+                    col,
+                ))
             }
         }
     }
@@ -144,11 +148,11 @@ impl<'a> Parser<'a> {
         Ok(Statement::Block(BlockDecl { name, source }))
     }
 
-    /// var_decl → type_hint? IDENT "=" expr
-    fn parse_var_decl(&mut self) -> Result<Statement, ParseError> {
+    /// ident_start_stmt → var_decl | expr_stmt
+    fn parse_ident_start_stmt(&mut self) -> Result<Statement, ParseError> {
         let first_ident = self.expect_ident()?;
 
-        // Check for type hint (e.g., "centroid C = ...")
+        // 1. Check for type hint: Ident Ident = Expr
         if self.check_ident() && self.peek_next_is(TokenKind::Equals) {
             let type_hint = Some(first_ident);
             let name = self.expect_ident()?;
@@ -160,7 +164,9 @@ impl<'a> Parser<'a> {
                 name,
                 value,
             }))
-        } else {
+        } 
+        // 2. Check for Var Decl without type: Ident = Expr
+        else if self.check(TokenKind::Equals) {
             self.expect(TokenKind::Equals)?;
             let value = self.parse_expr()?;
 
@@ -169,6 +175,12 @@ impl<'a> Parser<'a> {
                 name: first_ident,
                 value,
             }))
+        }
+        // 3. Expression Statement (e.g., method call) starting with Ident
+        else {
+            // We consumed the identifier. Parse the rest as an expression starting with this ident.
+            let expr = self.parse_ident_expr(first_ident)?;
+            Ok(Statement::Expr(expr))
         }
     }
 
@@ -299,7 +311,7 @@ impl<'a> Parser<'a> {
                 continue;
             }
 
-            let key = self.expect_ident()?;
+            let key = self.expect_flexible_ident()?;
             self.expect(TokenKind::Colon)?;
 
             match key.as_str() {
@@ -315,9 +327,10 @@ impl<'a> Parser<'a> {
                     }
                 }
                 "trajectory" => {
-                    if let Expr::Bool(b) = self.parse_expr()? {
-                        config.trajectory = b;
-                    } else if let Expr::Ident(id) = self.parse_expr()? {
+                    let expr = self.parse_expr()?;
+                    if let Expr::Bool(b) = &expr {
+                        config.trajectory = *b;
+                    } else if let Expr::Ident(id) = &expr {
                         config.trajectory = id.as_str() == "on";
                     }
                 }
@@ -431,7 +444,26 @@ impl<'a> Parser<'a> {
     // ═══════════════════════════════════════════════════════════════════════════
 
     fn parse_expr(&mut self) -> Result<Expr, ParseError> {
-        self.parse_primary()
+        let left = self.parse_primary()?;
+
+        if self.check(TokenKind::Colon) {
+            self.advance();
+            // AST Range currently only supports Numbers
+            if let Expr::Num(start) = left {
+                let right = self.parse_primary()?;
+                if let Expr::Num(end) = right {
+                    return Ok(Expr::Range(Range { start, end }));
+                } else {
+                    let token = self.peek();
+                    return Err(ParseError::new("range end must be a number", token.line, token.column));
+                }
+            } else {
+                 let token = self.peek();
+                 return Err(ParseError::new("range start must be a number", token.line, token.column));
+            }
+        }
+        
+        Ok(left)
     }
 
     fn parse_primary(&mut self) -> Result<Expr, ParseError> {
@@ -477,6 +509,9 @@ impl<'a> Parser<'a> {
                 s
             }),
 
+            // List literals: [1, 2, 3]
+            TokenKind::LBracket => self.parse_list_literal(),
+
             _ => Err(ParseError::new(
                 "expected expression",
                 token.line,
@@ -485,7 +520,40 @@ impl<'a> Parser<'a> {
         }
     }
 
+    fn parse_list_literal(&mut self) -> Result<Expr, ParseError> {
+        // LBracket already consumed by advance() before calling parse_primary? 
+        // No, parse_primary called advance() which returned the token. 
+        // So we are inside parse_primary match.
+        // Wait, parse_primary calls `self.advance()` at the start.
+        // So LBracket is already consumed.
+
+        let mut elements = Vec::new();
+
+        while !self.check(TokenKind::RBracket) && !self.is_at_end() {
+             // Handle newlines inside lists
+             if self.check(TokenKind::Newline) {
+                 self.advance();
+                 continue;
+             }
+             
+             elements.push(self.parse_expr()?);
+
+             if self.check(TokenKind::Comma) {
+                 self.advance();
+             }
+        }
+
+        self.expect(TokenKind::RBracket)?;
+        Ok(Expr::List(elements))
+    }
+
     fn parse_ident_expr(&mut self, name: String) -> Result<Expr, ParseError> {
+        // DEBUG
+        println!("Parsing ident expr for: {}", name);
+        if !self.is_at_end() {
+             println!("Next token: {:?}", self.peek().kind);
+        }
+
         // Check for method call: M.cluster(...)
         if self.check(TokenKind::Dot) {
             self.advance();

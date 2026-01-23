@@ -97,6 +97,12 @@ pub enum Expr {
 
     /// Object instantiation: new Point(1, 2)
     New { class: Ident, args: Vec<Expr> },
+
+    /// Range expression: 0:64 (can be passed as argument)
+    Range(Range),
+
+    /// List literal: [1, 2, 3]
+    List(Vec<Expr>),
 }
 
 /// Argument in function/method call (positional or named)
@@ -284,6 +290,12 @@ pub enum Statement {
     Return(ReturnStmt),
     Break(BreakStmt),
     Continue(ContinueStmt),
+
+    /// Continue statement
+    Continue(ContinueStmt),
+
+    /// Expression statement (method call, assignment, etc.)
+    Expr(Expr),
 
     /// Empty line or comment
     Empty,

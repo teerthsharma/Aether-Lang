@@ -74,9 +74,9 @@ impl TopologicalShape {
 
     /// Simple distance metric between shapes
     pub fn distance(&self, other: &Self) -> f64 {
-        let d0 = (self.betti_0 as f64 - other.betti_0 as f64).powi(2);
-        let d1 = (self.betti_1 as f64 - other.betti_1 as f64).powi(2);
-        let dd = (self.density - other.density).powi(2);
+        let d0 = libm::pow(self.betti_0 as f64 - other.betti_0 as f64, 2.0);
+        let d1 = libm::pow(self.betti_1 as f64 - other.betti_1 as f64, 2.0);
+        let dd = libm::pow(self.density - other.density, 2.0);
 
         libm::sqrt(d0 + d1 + dd)
     }

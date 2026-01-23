@@ -39,6 +39,7 @@ volatile = { workspace = true }
 heapless = { workspace = true }
 libm = { workspace = true }
 serde = { workspace = true }
+multiboot2 = { version = "0.24.1", default-features = false }
 
 [lib]
 name = "aegis_kernel"

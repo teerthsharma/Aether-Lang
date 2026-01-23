@@ -22,13 +22,13 @@ description = "AEGIS Core: Platform-agnostic topology, manifold, and ML primitiv
 
 [features]
 default = ["std"]
-std = ["alloc"]         # Use standard library
-alloc = []              # Use alloc crate (no_std with allocator)
-no_std = ["alloc"]      # Bare-metal mode
+std = ["alloc"]                 # Use standard library
+alloc = []                      # Use alloc crate (no_std with allocator)
+no_std = ["alloc"]              # Bare-metal mode
 
 [dependencies]
 libm = { workspace = true }
-serde = { workspace = true }
+# serde = { workspace = true }
 nalgebra = { workspace = true }
 heapless = { workspace = true }
 

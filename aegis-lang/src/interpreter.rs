@@ -79,6 +79,8 @@ pub enum Value {
     Conv2D(Box<Conv2D>),
     /// Void/Unit
     Unit,
+    /// Module Namespace
+    Module(String),
 }
 
 /// Native function pointer type
@@ -94,7 +96,8 @@ pub enum NativeFunction {
     MlpNew,
     KMeansNew,
     Conv2DNew,
-
+    // Seal Functions
+    SealTrain,
 }
 
 /// Handle to a manifold workspace
@@ -575,6 +578,10 @@ impl Interpreter {
             Statement::Return(_) => Ok(Value::Unit),
             Statement::Break(_) => Ok(Value::Unit),
             Statement::Continue(_) => Ok(Value::Unit),
+            Statement::Expr(expr) => {
+                self.evaluate_expr(expr)?;
+                Ok(Value::Unit)
+            }
 
             Statement::Empty => Ok(Value::Unit),
         }
@@ -642,7 +649,8 @@ impl Interpreter {
         match mod_name {
             "math" => self.import_math(stmt),
             "topology" => self.import_topology(stmt),
-            "ml" => self.import_ml(stmt),
+            "ml" | "Ml" => self.import_ml(stmt),
+            "Seal" => self.import_seal(stmt),
             _ => Err(format!("Module '{}' not found", mod_name)),
         }
     }
@@ -731,6 +739,37 @@ impl Interpreter {
             self.variables.insert(String::from("Conv2D"), Value::NativeFn(NativeFunction::Conv2DNew));
         }
         Ok(Value::Unit)
+    }
+
+    fn import_seal(&mut self, stmt: &ImportStmt) -> Result<Value, String> {
+        if let Some(symbol) = &stmt.symbol {
+             match symbol.as_str() {
+                  "train" => { self.variables.insert(String::from("train"), Value::NativeFn(NativeFunction::SealTrain)); },
+                  _ => return Err(format!("Symbol '{}' not found in Seal", symbol)),
+             };
+         } else {
+             // Expose 'Seal' object or functions?
+             // User wants "Seal.train(...)".
+             // If they do `import Seal`, we can add a `Seal` object to variables or just `train` if they used `from Seal import train`.
+             // But to support `Seal.train`, `Seal` needs to be an object or a struct in variables.
+             // Simplest way: Create a special Value::SealModule or just put `train` in a struct/class-like Value.
+             // Let's make `Seal` a Value::Object or similar that has `train` method.
+             // OR, cleaner: NativeFn can be called as a method? No.
+             // Let's just expose `Seal` as a Class/Object that has static methods.
+             
+             // Hack for now: Insert a "Seal" variable that acts as a namespace, 
+             // but our Value enum doesn't support Modules well.
+             // We'll treat `Seal` import by inserting `train` globally if they do `import Seal`? 
+             // No, that breaks `Seal.train`.
+             // We can insert a Value::Str("Seal") or something dummy, and handle `FieldAccess` on it?
+             // Better: Add `Value::Module(String)`
+             
+             // For this step, I'll assume we can't easily change Value enum across files heavily (already did AST).
+             // Let's add `Value::Module(String)` is safe if I add it to `Value` enum definition in interpreter.rs.
+             
+             self.variables.insert(String::from("Seal"), Value::Module(String::from("Seal")));
+         }
+         Ok(Value::Unit)
     }
 
     fn execute_manifold(&mut self, decl: &ManifoldDecl) -> Result<Value, String> {
@@ -832,6 +871,9 @@ impl Interpreter {
                 if i == 1 {
                     end = n.as_f64() as usize;
                 }
+            } else if let CallArg::Positional(Expr::Range(r)) = arg {
+                start = r.start.as_f64() as usize;
+                end = r.end.as_f64() as usize;
             }
         }
 
@@ -960,13 +1002,23 @@ impl Interpreter {
             Expr::FieldAccess { object, field } => self.evaluate_field_access(object, field),
             Expr::Call { name, args } => self.evaluate_call(name, args),
             Expr::New { class, args } => self.evaluate_new(class, args),
+            Expr::List(elements) => self.evaluate_list(elements),
             Expr::MethodCall {
                 object,
                 method,
                 args,
             } => self.evaluate_method_call(object, method, args),
+            Expr::Range(_) => Err(String::from("Ranges cannot be evaluated directly as values")),
             _ => Ok(Value::Unit),
         }
+    }
+
+    fn evaluate_list(&mut self, elements: &Vec<Expr>) -> Result<Value, String> {
+        let mut values = Vec::new();
+        for expr in elements {
+            values.push(self.evaluate_expr(expr)?);
+        }
+        Ok(Value::List(values))
     }
 
     fn evaluate_call(&mut self, name: &Ident, args: &Vec<CallArg>) -> Result<Value, String> {
@@ -1039,6 +1091,86 @@ impl Interpreter {
             NativeFunction::Conv2DNew => {
                  Ok(Value::Conv2D(Box::new(Conv2D::new(1, 1, 3, 1, 1, Activation::ReLU))))
             }
+            NativeFunction::SealTrain => self.execute_seal_train(args),
+        }
+    }
+
+    fn execute_seal_train(&mut self, args: &Vec<CallArg>) -> Result<Value, String> {
+        // Seal.train(model, data, targets)
+        if args.len() < 3 {
+            return Err(String::from("Seal.train requires model, data, and targets"));
+        }
+
+        // 1. Get Model
+        let model_val = if let CallArg::Positional(expr) = &args[0] {
+             self.evaluate_expr(expr)?
+        } else {
+             return Err(String::from("Model must be positional arg"));
+        };
+
+        // 2. Get Data
+        let data_val = if let CallArg::Positional(expr) = &args[1] {
+             self.evaluate_expr(expr)?
+        } else {
+             return Err(String::from("Data must be positional arg"));
+        };
+
+        // 3. Get Targets
+        let targets_val = if let CallArg::Positional(expr) = &args[2] {
+             self.evaluate_expr(expr)?
+        } else {
+             return Err(String::from("Targets must be positional arg"));
+        };
+
+        match model_val {
+            Value::Mlp(mut mlp) => {
+                 // Convert data to fixed size arrays (MAX_NEURONS constraint for now)
+                 // In a real impl, we'd handle this better or use Alloc
+                 let x = self.value_to_tensor(&data_val)?;
+                 let y = self.value_to_tensor(&targets_val)?;
+                 let n_samples = x.len();
+                 let output_size = 1; // Infer from y?
+
+                 let result = mlp.fit(&x, &y, n_samples, output_size, 1000, 0.001);
+                 
+                 // Update the model variable if it was passed by reference-ish logic?
+                 // Since we have ownership of the Box<MLP> here, we need to put it back?
+                 // Calling evaluate_expr gave us a CLONE of the value (Value derives Clone).
+                 // So `mlp` is a clone. Training it won't affect the original variable!
+                 // WE NEED MUTABLE ACCESS TO VARIABLES.
+                 // This is a limitation of the current `evaluate_expr` returning clones.
+                 
+                 // FIX: Re-assign the trained model to the variable *if* the first arg was an identifier.
+                 if let CallArg::Positional(Expr::Ident(name)) = &args[0] {
+                     self.variables.insert(name.clone(), Value::Mlp(mlp));
+                 }
+                 
+                 Ok(Value::Num(result.final_loss))
+            }
+            _ => Err(String::from("Seal.train only supports MLP currently")),
+        }
+    }
+
+    fn value_to_tensor(&self, val: &Value) -> Result<Vec<[f64; 64]>, String> { // 64 = MAX_NEURONS
+        match val {
+            Value::List(rows) => {
+                let mut tensor = Vec::new();
+                for row in rows {
+                    if let Value::List(cols) = row {
+                        let mut arr = [0.0; 64];
+                        for (i, v) in cols.iter().enumerate().take(64) {
+                            if let Value::Num(n) = v {
+                                arr[i] = *n;
+                            }
+                        }
+                        tensor.push(arr);
+                    } else {
+                        return Err(String::from("Data must be 2D list"));
+                    }
+                }
+                Ok(tensor)
+            }
+            _ => Err(String::from("Data must be a List")),
         }
     }
 
@@ -1147,8 +1279,13 @@ impl Interpreter {
             } else {
                 Ok(Value::Unit)
             }
+        } else if let Some(Value::Module(name)) = self.variables.get(object) {
+             match (name.as_str(), field.as_str()) {
+                 ("Seal", "train") => Ok(Value::NativeFn(NativeFunction::SealTrain)),
+                 _ => Ok(Value::Unit),
+             }
         } else {
-            Ok(Value::Unit)
+             Ok(Value::Unit)
         }
     }
 }
@@ -1176,6 +1313,39 @@ mod tests {
         match interpreter.variables.get("nn") {
             Some(Value::Mlp(_)) => assert!(true),
             _ => assert!(false, "Expected MLP value"),
+        }
+    }
+
+    #[test]
+    fn test_seal_demo() {
+        let mut interpreter = Interpreter::new();
+        let script = r#"
+            import Ml
+            import Seal
+
+            let network = Ml.MLP(0.1)
+            network.add_layer(2, 4, "relu")
+            network.add_layer(4, 1, "sigmoid")
+
+            let data = [[0, 0], [0, 1], [1, 0], [1, 1]]
+            let targets = [[0], [1], [1], [0]]
+
+            let loss = Seal.train(network, data, targets)
+        "#;
+        
+        let mut parser = crate::parser::Parser::new(script);
+        let program = parser.parse().expect("Failed to parse seal demo");
+        
+        let result = interpreter.execute(&program);
+        assert!(result.is_ok(), "Execution failed: {:?}", result.err());
+        
+        // Check finding loss variable
+        match interpreter.variables.get("loss") {
+             Some(Value::Num(loss)) => {
+                 println!("Final loss: {}", loss);
+                 assert!(*loss >= 0.0);
+             }
+             _ => panic!("Expected loss to be a number"),
         }
     }
 }

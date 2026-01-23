@@ -199,7 +199,7 @@ impl ConvergenceDetector {
 
         // Drift contribution (0.3)
         if let Some(&last_drift) = self.drift_history.last() {
-            let drift_score = (-last_drift * 10.0).exp().min(1.0);
+            let drift_score = libm::exp(-last_drift * 10.0).min(1.0);
             score += 0.3 * drift_score;
         }
 

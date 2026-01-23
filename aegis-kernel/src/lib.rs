@@ -18,6 +18,7 @@ extern crate alloc;
 // ═══════════════════════════════════════════════════════════════════════════════
 
 pub mod allocator;
+pub mod boot;
 pub mod interrupts;
 pub mod loader;
 pub mod scheduler;

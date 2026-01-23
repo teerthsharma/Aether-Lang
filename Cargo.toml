@@ -34,7 +34,7 @@ repository = "https://github.com/teerthsharma/aegis"
 [workspace.dependencies]
 # Shared dependencies across workspace
 libm = "0.2"
-serde = { version = "1.0", default-features = false, features = ["derive"] }
+# serde = { version = "1.0", default-features = false, features = ["derive", "alloc"] }
 nalgebra = { version = "0.32", default-features = false, features = ["libm"] }
 
 # CLI-specific
