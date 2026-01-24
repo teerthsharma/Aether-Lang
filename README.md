@@ -127,6 +127,18 @@ cargo build -p aegis-kernel --target x86_64-unknown-none
 
 ---
 
+## 📂 Project Structure
+
+Verified workspace architecture:
+
+- **`aegis-cli`**: The command-line interface for managing projects and running scripts.
+- **`aegis-core`**: The foundational geometric algorithms, ML primitives, and topological logic.
+- **`aegis-kernel`**: The bare-metal `no_std` microkernel for the living architecture.
+- **`aegis-lang`**: The lexer, parser, and interpreter for the AEGIS language.
+- **`docs`**: Comprehensive documentation and research papers.
+
+---
+
 ## 📚 Technical Reference
 
 - [**Bio-Kernel Architecture**](docs/OS_DEVELOPMENT.md) - Deep dive into living OS design.

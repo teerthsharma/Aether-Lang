@@ -37,7 +37,7 @@ enum Commands {
 
     /// Run an AEGIS script
     Run {
-        /// Path to .aegis file
+        /// Path to .aegis or .ag file
         #[arg(value_name = "FILE")]
         file: PathBuf,
     },
@@ -51,13 +51,21 @@ enum Commands {
 }
 
 fn main() {
-    let cli = Cli::parse();
+    // Windows often has a small default stack (1MB). AEGIS involves deep recursion/large structs.
+    // Spawn a thread with 8MB stack to prevent overflow.
+    let builder = std::thread::Builder::new().stack_size(8 * 1024 * 1024);
 
-    match cli.command {
-        Some(Commands::Repl) | None => run_repl(),
-        Some(Commands::Run { file }) => run_file(&file),
-        Some(Commands::Check { file }) => check_file(&file),
-    }
+    let handler = builder.spawn(|| {
+        let cli = Cli::parse();
+
+        match cli.command {
+            Some(Commands::Repl) | None => run_repl(),
+            Some(Commands::Run { file }) => run_file(&file),
+            Some(Commands::Check { file }) => check_file(&file),
+        }
+    }).unwrap();
+
+    handler.join().unwrap();
 }
 
 /// Interactive REPL for AEGIS
@@ -149,6 +157,14 @@ fn run_file(path: &PathBuf) {
             std::process::exit(1);
         }
     };
+
+    // Extension check
+    if let Some(ext) = path.extension() {
+        let s = ext.to_string_lossy();
+        if s != "aegis" && s != "ag" {
+            println!("Warning: File extension '.{}' is not standard (.aegis or .ag)", s);
+        }
+    }
 
     let mut interpreter = Interpreter::new();
 

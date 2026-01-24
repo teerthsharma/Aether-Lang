@@ -31,14 +31,15 @@ profiling = []
 
 [dependencies]
 aegis-core = { path = "../aegis-core", default-features = false, features = ["no_std"] }
-# aegis-lang = { path = "../aegis-lang", default-features = false, features = ["no_std"] }
-bootloader = { workspace = true }
+aegis-lang = { path = "../aegis-lang", default-features = false, features = ["no_std"] }
+bootloader = { workspace = true, optional = true }
 x86_64 = { workspace = true }
 spin = { workspace = true }
 volatile = { workspace = true }
 heapless = { workspace = true }
 libm = { workspace = true }
 # serde = { workspace = true }
+getrandom = { version = "0.2", features = ["rdrand"] }
 multiboot2 = { version = "0.24.1", default-features = false }
 
 [lib]

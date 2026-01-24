@@ -26,7 +26,7 @@ pub mod serial;
 
 // Re-export core types
 pub use aegis_core::*;
-// pub use aegis_lang::*;
+pub use aegis_lang::*;
 
 /// Kernel state dimension
 pub const STATE_DIMENSION: usize = 4;

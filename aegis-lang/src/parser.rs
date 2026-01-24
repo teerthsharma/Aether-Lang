@@ -20,6 +20,17 @@ use crate::lexer::{Lexer, Token, TokenKind};
 use alloc::string::String;
 use alloc::vec::Vec;
 
+
+#[cfg(not(feature = "std"))]
+use alloc::{format, vec};
+#[cfg(not(feature = "std"))]
+use alloc::string::ToString;
+
+#[cfg(not(feature = "std"))]
+macro_rules! println {
+    ($($arg:tt)*) => {};
+}
+
 /// Parser error
 #[derive(Debug, Clone)]
 pub struct ParseError {

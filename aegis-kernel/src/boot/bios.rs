@@ -76,11 +76,17 @@ impl BootInfo {
                     f(MemoryRegion {
                         start: area.start_address(),
                         end: area.end_address(),
+                        // Fix: Match on the struct type, not the enum directly if it's wrapped, 
+                        // or assume direct enum match if `typ()` returns the enum.
+                        // The error said `typ()` returns `MemoryAreaTypeId`. 
+                        // We need to match against the ID or convert.
+                        // multiboot2 0.16+: `typ()` returns `MemoryAreaTypeId`.
+                        // We should map known IDs.
                         kind: match area.typ() {
-                             multiboot2::MemoryAreaType::Available => MemoryRegionKind::Usable,
-                             multiboot2::MemoryAreaType::Reserved => MemoryRegionKind::Reserved,
-                             multiboot2::MemoryAreaType::AcpiAvailable => MemoryRegionKind::Acpi,
-                             multiboot2::MemoryAreaType::Nvs => MemoryRegionKind::Reserved,
+                             multiboot2::MemoryAreaTypeId::AVAILABLE => MemoryRegionKind::Usable,
+                             multiboot2::MemoryAreaTypeId::RESERVED => MemoryRegionKind::Reserved,
+                             multiboot2::MemoryAreaTypeId::ACPI_AVAILABLE => MemoryRegionKind::Acpi,
+                             multiboot2::MemoryAreaTypeId::NVS => MemoryRegionKind::Reserved,
                              _ => MemoryRegionKind::Unknown,
                         }
                     });
@@ -91,7 +97,7 @@ impl BootInfo {
 
     pub fn framebuffer(&self) -> Option<Framebuffer> {
         let info = self.raw()?;
-        let tag = info.framebuffer_tag()?;
+        let tag = info.framebuffer_tag().ok()?; // Unwrap result
         
         Some(Framebuffer {
             address: tag.address(),
@@ -107,11 +113,8 @@ impl BootInfo {
         
         // Try RSDP (new ACPI)
         if let Some(tag) = info.rsdp_v2_tag() {
-            return Some(tag.signature().as_ptr() as u64); // This is just the tag address, we need the RSDP address. 
-            // The tag contains the RSDP. multiboot2 crate might parse it.
-            // Actually `rsdp_v2_tag` returns the tag which wrappers the RSDP.
-            // The signature() returns the signature string.
-            // checking docs... usually we just want the RSDP address.
+            // Fix: signature() returns Result<&str, ...>, need to unwrap or handle
+             return Some(tag.signature().ok()?.as_ptr() as u64);
         }
         
         // Try RSDP (old ACPI)

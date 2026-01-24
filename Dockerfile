@@ -17,24 +17,34 @@ RUN rustup install nightly-2024-01-15 && \
 
 WORKDIR /aegis
 
-# Copy manifests first for layer caching
+# Copy workspace manifests
 COPY Cargo.toml Cargo.lock* ./
 COPY rust-toolchain.toml ./
 
-# Create dummy src for dependency caching
-RUN mkdir -p src && \
-    echo '#![no_std]\n#![no_main]\nfn main() {}' > src/lib.rs
+# Copy crate manifests
+COPY aegis-core/Cargo.toml ./aegis-core/
+COPY aegis-lang/Cargo.toml ./aegis-lang/
+COPY aegis-cli/Cargo.toml ./aegis-cli/
+COPY aegis-kernel/Cargo.toml ./aegis-kernel/
 
-# Build dependencies only (cache layer)
-RUN cargo build --release 2>/dev/null || true
+# Create dummy sources for caching
+RUN mkdir -p aegis-core/src && echo "fn main() {}" > aegis-core/src/lib.rs
+RUN mkdir -p aegis-lang/src && echo "fn main() {}" > aegis-lang/src/lib.rs
+RUN mkdir -p aegis-cli/src && echo "fn main() {}" > aegis-cli/src/main.rs
+RUN mkdir -p aegis-kernel/src && echo "fn main() {}" > aegis-kernel/src/main.rs
 
-# Copy actual source
-COPY src ./src
+# Build dependencies
+RUN cargo build --release || true
+
+# Copy actual source (overwrite dummies)
+COPY aegis-core/src ./aegis-core/src
+COPY aegis-lang/src ./aegis-lang/src
+COPY aegis-cli/src ./aegis-cli/src
+COPY aegis-kernel/src ./aegis-kernel/src
 COPY examples ./examples
-COPY docs ./docs
 
-# Build the full project
-RUN cargo build --release --lib 2>/dev/null || echo "Bare-metal build skipped in Docker"
+# Build real binaries
+RUN cargo build --release --bin aegis
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # Runtime Stage - AEGIS CLI
@@ -50,23 +60,9 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 WORKDIR /aegis
 
-# Copy source for interpretation (not bare-metal binary)
-COPY --from=builder /aegis/src ./src
+# Copy binary from builder
+COPY --from=builder /aegis/target/release/aegis /usr/local/bin/aegis
 COPY --from=builder /aegis/examples ./examples
-COPY --from=builder /aegis/docs ./docs
-COPY --from=builder /aegis/Cargo.toml ./
 
-# Create AEGIS CLI directory
-RUN mkdir -p /usr/local/bin
-
-# Copy CLI script
-COPY docker/aegis-cli.sh /usr/local/bin/aegis
-RUN chmod +x /usr/local/bin/aegis
-
-# Set environment
-ENV AEGIS_HOME=/aegis
-ENV PATH="/usr/local/bin:${PATH}"
-
-# Default command
-ENTRYPOINT ["aegis"]
-CMD ["--help"]
+# Determine entrypoint
+CMD ["aegis"]
