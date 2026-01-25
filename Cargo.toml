@@ -4,6 +4,7 @@ members = [
     "aether-lang",
     "aether-kernel",
     "aether-cli",
+    "aegis-core",
 ]
 resolver = "2"
 

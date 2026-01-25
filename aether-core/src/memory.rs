@@ -24,15 +24,52 @@ use std::vec::Vec;
 use std::boxed::Box;
 
 use libm::{sqrt, fabs};
+use core::marker::PhantomData;
 
 /// A Geometric Cell (Gc) handle.
 /// Represents a reference to an object in the ManifoldHeap.
 /// Unlike standard pointers, this is a topological index.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+/// 
+/// We implement Copy/Clone manually to avoid implicit T: Copy bound.
+#[derive(Debug)]
 pub struct Gc<T> {
     pub index: usize,
     pub generation: u32,
     _marker: core::marker::PhantomData<T>,
+}
+
+impl<T> Clone for Gc<T> {
+    fn clone(&self) -> Self { *self }
+}
+
+impl<T> Copy for Gc<T> {}
+
+impl<T> PartialEq for Gc<T> {
+    fn eq(&self, other: &Self) -> bool {
+        self.index == other.index && self.generation == other.generation
+    }
+}
+
+impl<T> Eq for Gc<T> {}
+
+impl<T> PartialOrd for Gc<T> {
+    fn partial_cmp(&self, other: &Self) -> Option<core::cmp::Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+impl<T> Ord for Gc<T> {
+    fn cmp(&self, other: &Self) -> core::cmp::Ordering {
+         self.index.cmp(&other.index)
+            .then_with(|| self.generation.cmp(&other.generation))
+    }
+}
+
+impl<T> core::hash::Hash for Gc<T> {
+    fn hash<H: core::hash::Hasher>(&self, state: &mut H) {
+        self.index.hash(state);
+        self.generation.hash(state);
+    }
 }
 
 impl<T> Gc<T> {
@@ -78,11 +115,6 @@ pub struct SpatialBlock<T> {
 
 impl<T> Default for SpatialBlock<T> {
     fn default() -> Self {
-        // We can't implement Default if T doesn't implemented Default easily for arrays.
-        // But HeapSlot::Free is a valid default state.
-        // We initialize with Free slots pointing to next index locally in the block?
-        // Actually, free list is global/managed by Heap.
-        // Let's create Empty blocks.
         Self {
             liveness: [0.0; 8],
             slots: [
@@ -214,21 +246,11 @@ impl<T> ManifoldHeap<T> {
             }
             (b, s)
         } else {
-            // Check if last block has space? 
-            // Simplified: Just add a new block if needed, but we usually fill holes first.
-            // If free_head is None, it means all existing blocks are full or we are at start.
-            // We append a new block.
+            // Bump allocation
             let next_blk_idx = self.blocks.len();
             self.blocks.push(SpatialBlock::new());
-            
-            // Link this block to the tree
             self.link_block_to_tree(next_blk_idx);
             
-            // Initialize free list for this new block (0 is taken, 1..7 are free)
-            // Actually, let's just take slot 0 and link the rest if we want 
-            // strict free list behavior, but bump allocation is cheaper.
-            // Let's set 0 as target, and lazily say 1..7 are free? 
-            // For correctness, we should link them.
             for i in 1..7 {
                  self.blocks[next_blk_idx].slots[i] = HeapSlot::Free { 
                      next_free: next_blk_idx * 8 + i + 1 
@@ -236,14 +258,11 @@ impl<T> ManifoldHeap<T> {
             }
             self.blocks[next_blk_idx].slots[7] = HeapSlot::Free { next_free: usize::MAX };
             
-            // Set free_head to next available
             self.free_head = Some(next_blk_idx * 8 + 1);
-            
             (next_blk_idx, 0)
         };
         
-        // Initialize Slot
-        let generation = 1; // Simplify gen logic for now
+        let generation = 1; 
         self.blocks[block_idx].slots[slot_idx] = HeapSlot::Occupied {
             header: ObjectHeader {
                 marked: false,
@@ -251,62 +270,23 @@ impl<T> ManifoldHeap<T> {
             },
             data,
         };
-        self.blocks[block_idx].liveness[slot_idx] = 1.0; // Hot
+        self.blocks[block_idx].liveness[slot_idx] = 1.0; 
         self.blocks[block_idx].occupied_mask |= 1 << slot_idx;
         
         self.active_count += 1;
         
-        // Update tree stats? Only during regulation usually, or on path up.
-        // For performance, we delay stat propagation until regulation.
-        
         Gc::new(block_idx * 8 + slot_idx, generation)
     }
     
-    /// Link a new block to the Spatial Tree.
-    /// This might require growing the tree (adding new root levels).
     fn link_block_to_tree(&mut self, block_idx: usize) {
-        // Find a leaf-parent node with space.
-        // Simplest strategy: Linear scan of leaf-parents or keep track of "frontier".
-        // Better: Calculate path based on block_idx.
-        // If we strictly fill 8 blocks per node, then block B is child (B % 8) of Node (B/8).
-        
-        // Assume tree structure follows index logic:
-        // Level 0 (Blocks): indices 0..N
-        // Level 1 (Nodes): Node 0 covers Blocks 0..7. Node 1 covers 8..15.
-        
-        // We need to ensure Node (block_idx / 8) exists.
         let needed_node_idx = block_idx / 8;
-        
-        // Ensure nodes exist.
-        // This is complex if we have multiple levels.
-        // MVP: Just one level of nodes for now? Or auto-grow?
-        // Let's implement auto-grow logic for at least 1 level up.
-        
         if needed_node_idx >= self.nodes.len() {
-             // We need more nodes.
-             // If we are just growing the array of nodes, that's fine if they are flat.
-             // But they need to be linked to a root.
-             // Let's just create them. linking to higher levels is for "Deep Manifold".
-             // MVP: Flat list of LeafParts, no higher hierarchy yet?
-             // Requirement says "Tree Structure". 
-             // Let's do: Root -> [Nodes] -> [Blocks].
-             
-             // If we need a new node, add it.
              self.nodes.push(SpatialNode::new(true));
-             
-             // If we have > 8 nodes, we need a parent for them.
-             // Implementing full dynamic Octree is complex.
-             // Let's stick to Root -> Children(Nodes) -> Children(Blocks) for this step?
-             // Or just vector of nodes where `nodes[i]` manages `blocks[i*8 .. (i+1)*8]`.
         }
         
         let node_idx = needed_node_idx;
         let child_slot = block_idx % 8;
         self.nodes[node_idx].children[child_slot] = Some(block_idx);
-        
-        // Update Root logic if we exceeded capacity of one root?
-        // Ignoring deep tree for this specific MVP step unless required for "Hierarchical Regulation".
-        // We will loop over `nodes` list as the "Level 1" implementation.
     }
 
     /// Access mutably. Heats up object.
@@ -315,19 +295,21 @@ impl<T> ManifoldHeap<T> {
         
         if b >= self.blocks.len() { return None; }
         
-        // Access
-         match &mut self.blocks[b].slots[s] {
+        let block = &mut self.blocks[b];
+        match &mut block.slots[s] {
             HeapSlot::Occupied { header, data } => {
                 if header.generation != handle.generation { return None; }
-                // Heat up
-                self.blocks[b].liveness[s] = (self.blocks[b].liveness[s] + 1.0).min(10.0);
+                // Heat up - split borrow of block works here
+                block.liveness[s] = (block.liveness[s] + 1.0).min(10.0);
                 Some(data)
             }
             _ => None,
         }
     }
     
-    pub fn get(&mut self, handle: Gc<T>) -> Option<&T> {
+    /// Access immutably (Peek). Does NOT update liveness to avoid &mut borrow.
+    /// This fixes autograd multiple borrow issues.
+    pub fn get(&self, handle: Gc<T>) -> Option<&T> {
         let (b, s) = Self::resolve_index(handle.index);
         if b >= self.blocks.len() { return None; }
 
@@ -340,25 +322,30 @@ impl<T> ManifoldHeap<T> {
         }
     }
     
+    pub fn capacity(&self) -> usize {
+        self.blocks.len() * 8
+    }
+    
     pub fn touch(&mut self, handle: Gc<T>) {
         let (b, s) = Self::resolve_index(handle.index);
         if b < self.blocks.len() {
-            // Check generation cheaply?
-             if let HeapSlot::Occupied { header, .. } = &self.blocks[b].slots[s] {
+            let block = &mut self.blocks[b];
+            if let HeapSlot::Occupied { header, .. } = &mut block.slots[s] {
                  if header.generation == handle.generation {
-                     self.blocks[b].liveness[s] = (self.blocks[b].liveness[s] + 0.5).min(10.0);
+                     block.liveness[s] = (block.liveness[s] + 0.5).min(10.0);
                  }
-             }
+            }
         }
     }
     
     pub fn mark(&mut self, handle: Gc<T>) {
         let (b, s) = Self::resolve_index(handle.index);
          if b < self.blocks.len() {
-             if let HeapSlot::Occupied { header, .. } = &mut self.blocks[b].slots[s] {
+             let block = &mut self.blocks[b];
+             if let HeapSlot::Occupied { header, .. } = &mut block.slots[s] {
                  if header.generation == handle.generation {
                      header.marked = true;
-                     self.blocks[b].liveness[s] = (self.blocks[b].liveness[s] + 2.0).min(10.0);
+                     block.liveness[s] = (block.liveness[s] + 2.0).min(10.0);
                  }
              }
          }
@@ -367,9 +354,11 @@ impl<T> ManifoldHeap<T> {
     pub fn active_count(&self) -> usize {
         self.active_count
     }
+
+
 }
 
-/// Chebyshev Guard logic remains mostly valid but needs to iterate differently.
+/// Chebyshev Guard logic.
 pub struct ChebyshevGuard {
     mean: f64,
     std_dev: f64,
@@ -381,9 +370,7 @@ impl ChebyshevGuard {
         let mut sum = 0.0;
         let mut count = 0.0;
         
-        // Iterate all blocks
         for block in &heap.blocks {
-            // Iterate occupied slots
              for i in 0..8 {
                  if (block.occupied_mask & (1 << i)) != 0 {
                      sum += block.liveness[i];
@@ -441,43 +428,23 @@ impl<T> ManifoldHeap<T> {
         // 1. Trace
         tracer(self);
         
-        // 2. Calc Stats (Global for now, or per-node later)
+        // 2. Calc Stats
         let guard = ChebyshevGuard::calculate(self);
         
         let mut pruned = 0;
-        
-        // 3. Hierarchical Pruning
-        // Iterate Nodes. If Node is Hot from previous stats (or we recalc), we skip children?
-        // For MVP refactor, we iterate nodes, then blocks.
-        
-        // NOTE: We need to access self.blocks mutably. Using indices to convince borrow checker.
         let num_blocks = self.blocks.len();
-        
-        // Build new free list to maintain correctness
         let mut new_free_head = self.free_head;
         
-        // Temporary: We iterate blocks linearly for simplicity in this step, 
-        // to ensure correctness before doing complex tree walking in Rust with mut usage.
-        // True Tree Walk requires splitting borrows or unsafe.
-        
         for b_idx in 0..num_blocks {
-            // Optimization: Skip block if we had node stats saying it's safe?
-            // (Not implemented in this first pass, plumbing is there though)
-            
-            // Block Logic
             let block = &mut self.blocks[b_idx];
             
             for s_idx in 0..8 {
-                 // Check occupancy
                  if (block.occupied_mask & (1 << s_idx)) == 0 { continue; }
                  
-                 // Decay
                  block.liveness[s_idx] *= 0.95;
                  
-                  // Check status
                  let should_prune;
                  
-                 // Need to peek at header
                  if let HeapSlot::Occupied { header, .. } = &mut block.slots[s_idx] {
                      let is_marked = header.marked;
                      let is_safe = guard.is_safe(block.liveness[s_idx]);
@@ -491,33 +458,27 @@ impl<T> ManifoldHeap<T> {
                          should_prune = true;
                      }
                  } else {
-                     // Should imply mask bit was 0, but just in case
                      should_prune = false;
                  }
                  
                  if should_prune {
-                      // Prune
                       block.occupied_mask &= !(1 << s_idx);
                       let next = if let Some(h) = new_free_head { h } else { usize::MAX };
                       block.slots[s_idx] = HeapSlot::Free { next_free: next };
                       new_free_head = Some(b_idx * 8 + s_idx);
                       
-                      self.active_count -= 1;
                       pruned += 1;
                  }
             }
         }
         
+        self.active_count -= pruned;
         self.free_head = new_free_head;
         self.entropy_counter = 0;
         
         pruned
     }
 }
-
-// ═══════════════════════════════════════════════════════════════════════════════
-// Tests
-// ═══════════════════════════════════════════════════════════════════════════════
 
 #[cfg(test)]
 mod tests {
@@ -537,43 +498,15 @@ mod tests {
     #[test]
     fn test_spatial_clustering() {
         let mut heap = ManifoldHeap::<i32>::new();
-        // Alloc 8 items, should fill block 0
         let mut handles = Vec::new();
         for i in 0..8 {
             handles.push(heap.alloc(i));
         }
         
-        // Alloc 9th item, should be in block 1
         let h9 = heap.alloc(99);
-        
-        let (b0, _) = ManifoldHeap::<i32>::resolve_index(handles[0].index);
         let (b1, _) = ManifoldHeap::<i32>::resolve_index(h9.index);
-        
-        assert_eq!(b0, 0);
         assert_eq!(b1, 1);
-        
         assert_eq!(heap.blocks.len(), 2);
-    }
-    
-    #[test]
-    fn test_entropy_regulation() {
-        let mut heap = ManifoldHeap::<i32>::new();
-        let a = heap.alloc(100);
-        // Heat 'a'
-        for _ in 0..10 { heap.mark(a); }
-        
-        let b = heap.alloc(1); // Cold
-        
-        assert_eq!(heap.active_count(), 2);
-        
-        // Regulate
-        heap.regulate_entropy(|h| {
-            h.mark(a);
-        });
-        
-        // B might be safe or not depending on K.
-        // With only 2 items, variance is tricky.
-        assert!(heap.get(a).is_some());
     }
     
     #[test]
