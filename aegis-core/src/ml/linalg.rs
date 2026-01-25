@@ -26,6 +26,78 @@ use super::tensor::Tensor;
 // Loss Functions
 // ═══════════════════════════════════════════════════════════════════════════════
 
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum LossConfig {
+    MSE,
+    MAE,
+    BinaryCrossEntropy,
+    Hinge,
+}
+
+impl LossConfig {
+    /// Compute loss value
+    pub fn compute(&self, y_true: &Tensor, y_pred: &Tensor) -> f64 {
+        match self {
+            LossConfig::MSE => mse(y_true, y_pred),
+            LossConfig::MAE => mae(y_true, y_pred),
+            LossConfig::BinaryCrossEntropy => binary_cross_entropy(y_true, y_pred),
+            LossConfig::Hinge => hinge_loss(y_true, y_pred),
+        }
+    }
+
+    /// Compute derivative (gradient) w.r.t prediction
+    pub fn derivative(&self, y_true: &Tensor, y_pred: &Tensor) -> Tensor {
+        match self {
+            LossConfig::MSE => {
+                let diff = y_pred.sub(y_true);
+                let n = y_true.shape.iter().product::<usize>() as f64;
+                diff.scale(2.0 / n)
+            }
+            LossConfig::MAE => {
+                let diff = y_pred.sub(y_true);
+                let n = y_true.shape.iter().product::<usize>() as f64;
+                diff.map(|x| if x > 0.0 { 1.0 / n } else if x < 0.0 { -1.0 / n } else { 0.0 })
+            }
+            LossConfig::BinaryCrossEntropy => {
+                // dL/dp = (1-y)/(1-p) - y/p
+                let true_data = y_true.data.borrow();
+                let pred_data = y_pred.data.borrow();
+                let n = true_data.len();
+                let mut grad_data = Vec::with_capacity(n); // Fixed: using Vec instead of let mut
+                
+                for i in 0..n {
+                    let y = true_data[i];
+                    let p = pred_data[i].clamp(1e-7, 1.0 - 1e-7); // Avoid div by zero
+                    
+                    let grad = -(y / p) + ((1.0 - y) / (1.0 - p));
+                    grad_data.push(grad / n as f64);
+                }
+                Tensor::new(&grad_data, &y_pred.shape)
+            }
+            LossConfig::Hinge => {
+                // L = max(0, 1 - y*p)
+                // dL/dp = -y if 1 - y*p > 0 else 0
+                let true_data = y_true.data.borrow();
+                let pred_data = y_pred.data.borrow();
+                let n = true_data.len();
+                let mut grad_data = Vec::with_capacity(n);
+
+                for i in 0..n {
+                    let y = true_data[i];
+                    let p = pred_data[i];
+                    
+                    if 1.0 - y * p > 0.0 {
+                        grad_data.push(-y / n as f64);
+                    } else {
+                        grad_data.push(0.0);
+                    }
+                }
+                Tensor::new(&grad_data, &y_pred.shape)
+            }
+        }
+    }
+}
+
 /// Mean Squared Error
 pub fn mse(y_true: &Tensor, y_pred: &Tensor) -> f64 {
     let diff = y_true.sub(y_pred);
@@ -104,11 +176,7 @@ where
     
     let mut grad_data = grad.data.borrow_mut();
     
-    // We need to mutate x temporarily, but x is shared via Rc? 
-    // Wait, Tensor has Rc, so cloning Tensor shares data. 
     // We need a deep copy to mutate independent probe.
-    
-    // Deep copy x
     let mut x_plus = Tensor::new(&x.data.borrow(), &x.shape);
     let mut x_minus = Tensor::new(&x.data.borrow(), &x.shape);
 
@@ -116,13 +184,6 @@ where
         let mut xp_data = x_plus.data.borrow_mut();
         let mut xm_data = x_minus.data.borrow_mut();
         
-        // This is inefficient but correct logic for numerical grad
-        // Actually, we can just mutate one element at a time
-        // But we need to call f(&x_plus), so we need the struct.
-        // We cannot hold borrow_mut while calling f if f uses x_plus? 
-        // f takes &Tensor.
-        
-        // Let's iterate
         drop(xp_data);
         drop(xm_data);
         
@@ -134,7 +195,7 @@ where
              
              grad_data[i] = (f(&x_plus) - f(&x_minus)) / (2.0 * epsilon);
              
-             // Restore (though we just overwrite next loop, but for last iter... actually we reuse x_plus/x_minus)
+             // Restore
              x_plus.data.borrow_mut()[i] = original;
              x_minus.data.borrow_mut()[i] = original;
         }

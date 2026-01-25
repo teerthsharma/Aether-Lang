@@ -44,11 +44,12 @@ use crate::ast::*;
 use aegis_core::aether::{BlockMetadata, DriftDetector, HierarchicalBlockTree};
 use aegis_core::manifold::{ManifoldPoint, TimeDelayEmbedder};
 use aegis_core::ml::{MLP, KMeans, Activation, OptimizerConfig};
+use aegis_core::ml::linalg::LossConfig;
 use aegis_core::ml::convolution::Conv2D;
 use libm::{fabs, sqrt};
 
 #[cfg(feature = "std")]
-use reqwest::blocking::Client;
+// use reqwest::blocking::Client;
 #[cfg(feature = "std")]
 #[cfg(feature = "std")]
 use safetensors::SafeTensors;
@@ -57,11 +58,11 @@ use std::sync::Arc;
 #[cfg(not(feature = "std"))]
 use alloc::sync::Arc;
 
-#[cfg(feature = "std")]
+#[cfg(feature = "ml")]
 use candle_core::{Device, Tensor as CandleTensor};
-#[cfg(feature = "std")]
+#[cfg(feature = "ml")]
 use candle_transformers::models::quantized_llama::ModelWeights as LlamaWeights;
-#[cfg(feature = "std")]
+#[cfg(feature = "ml")]
 use tokenizers::Tokenizer;
 
 /// Embedding dimension
@@ -108,11 +109,11 @@ pub enum Value {
     /// Dynamic Tensor
     Tensor(Arc<Tensor>),
     /// Llama Model (Wrapped)
-    #[cfg(feature = "std")]
+    #[cfg(feature = "ml")]
     LlamaModel(Arc<LlamaContext>),
 }
 
-#[cfg(feature = "std")]
+#[cfg(feature = "ml")]
 #[derive(Debug)]
 pub struct LlamaContext {
     pub model: LlamaWeights,
@@ -1192,7 +1193,8 @@ impl Interpreter {
             }
             NativeFunction::MlpNew => {
                  let lr = get_f64(args).unwrap_or(0.01);
-                 Ok(Value::Mlp(Box::new(MLP::new(lr, OptimizerConfig::default()))))
+                 let config = OptimizerConfig::SGD { learning_rate: lr, momentum: 0.9 };
+                 Ok(Value::Mlp(Box::new(MLP::new(config, LossConfig::MSE))))
             }
             NativeFunction::KMeansNew => {
                  let k = get_f64(args).unwrap_or(2.0) as usize;
@@ -1201,8 +1203,8 @@ impl Interpreter {
             NativeFunction::Conv2DNew => {
                  Ok(Value::Conv2D(Box::new(Conv2D::new(1, 1, 3, 1, 1, Activation::ReLU))))
             }
-            NativeFunction::SealTrain => self.execute_seal(args),
-            NativeFunction::SealTrain => self.execute_seal_train(args),
+
+            NativeFunction::SealTrain => Err("Seal training via native fn not implemented yet".into()),
             // LLM Operations
             NativeFunction::MlLoadWeights => {
                 #[cfg(feature = "std")]
@@ -1354,7 +1356,7 @@ impl Interpreter {
                 Ok(Value::Tensor(Arc::new(Tensor::new(w.shape.clone(), new_data))))
             }
             NativeFunction::MlLoadLlama => {
-                #[cfg(feature = "std")]
+                #[cfg(feature = "ml")]
                 {
                    let repo_id = match args.get(0) { Some(CallArg::Positional(Expr::Str(s))) => s.clone(), _ => "TinyLlama/TinyLlama-1.1B-Chat-v1.0".to_string() };
                    
@@ -1383,11 +1385,11 @@ impl Interpreter {
                    
                    Ok(Value::LlamaModel(Arc::new(LlamaContext { model, tokenizer, name: repo_id })))
                 }
-                #[cfg(not(feature = "std"))]
-                Err("Requires std".into())
+                #[cfg(not(feature = "ml"))]
+                Err("Requires ml feature".into())
             }
             NativeFunction::MlGenerate => {
-                 #[cfg(feature = "std")]
+                 #[cfg(feature = "ml")]
                  {
                      let ctx = match self.get_arg_val(args, 0)? { Value::LlamaModel(c) => c, _ => return Err("Arg 0 must be LlamaModel".into()) };
                      let prompt = match args.get(1) { Some(CallArg::Positional(Expr::Str(s))) => s, _ => "" };
@@ -1416,8 +1418,8 @@ impl Interpreter {
                      println!(); 
                      Ok(Value::Str(output))
                  }
-                 #[cfg(not(feature = "std"))]
-                 Err("Requires std".into())
+                 #[cfg(not(feature = "ml"))]
+                 Err("Requires ml feature".into())
             }
         }
     }
@@ -1478,7 +1480,9 @@ impl Interpreter {
                  let n_samples = x.len();
                  let output_size = 1; // Infer from y?
 
-                 let result = mlp.fit(&x, &y, n_samples, output_size, 1000, 0.001);
+                 let x_tensors: Vec<aegis_core::ml::Tensor> = x.iter().map(|arr| aegis_core::ml::Tensor::new(&arr.to_vec(), &[64])).collect();
+                 let y_tensors: Vec<aegis_core::ml::Tensor> = y.iter().map(|arr| aegis_core::ml::Tensor::new(&arr.to_vec(), &[1])).collect();
+                 let result = mlp.fit(&x_tensors, &y_tensors, 1000);
                  
                  // Update the model variable if it was passed by reference-ish logic?
                  // Since we have ownership of the Box<MLP> here, we need to put it back?
@@ -1588,7 +1592,7 @@ impl Interpreter {
                         // args: in, out
                         let in_size = 2; // simplified
                         let out_size = 1;
-                        boxed_mlp.add_layer(in_size, out_size, Activation::ReLU);
+                        boxed_mlp.add_layer(in_size, out_size, Activation::ReLU, None);
                         self.variables.insert(object_name.clone(), Value::Mlp(boxed_mlp));
                         Ok(Value::Unit)
                      }

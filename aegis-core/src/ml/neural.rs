@@ -22,6 +22,7 @@ use libm::{exp, fabs, sqrt, pow};
 use std::f64;
 
 use super::tensor::Tensor;
+use super::linalg::LossConfig;
 
 // ═══════════════════════════════════════════════════════════════════════════════
 // Activation Functions
@@ -294,13 +295,15 @@ impl DenseLayer {
 pub struct MLP {
     pub layers: Vec<DenseLayer>,
     pub config: OptimizerConfig,
+    pub loss: LossConfig,
 }
 
 impl MLP {
-    pub fn new(config: OptimizerConfig) -> Self {
+    pub fn new(config: OptimizerConfig, loss: LossConfig) -> Self {
         Self {
             layers: Vec::new(),
             config,
+            loss,
         }
     }
 
@@ -330,13 +333,11 @@ impl MLP {
         // Forward
         let output = self.forward(input);
         
-        // MSE Loss
-        let diff = output.sub(target);
-        let loss = diff.mul(&diff).sum() / output.shape.iter().product::<usize>() as f64;
+        // Loss
+        let loss = self.loss.compute(target, &output);
         
-        // Initial gradient (MSE derivative: 2/n * (output - target))
-        let n = output.shape.iter().product::<usize>() as f64;
-        let grad = diff.scale(2.0 / n);
+        // Initial gradient
+        let grad = self.loss.derivative(target, &output);
         
         // Backward
         let mut current_grad = grad;
@@ -421,22 +422,22 @@ mod tests {
     #[test]
     fn test_mlp_xor() {
         let config = OptimizerConfig::SGD { learning_rate: 0.1, momentum: 0.9 };
-        let mut mlp = MLP::new(config);
+        let mut mlp = MLP::new(config, LossConfig::MSE);
         mlp.add_layer(2, 8, Activation::Tanh, Some(42));
         mlp.add_layer(8, 1, Activation::Sigmoid, Some(43));
         
         // XOR Data
         let x = vec![
-            Tensor::new(&[0.0, 0.0], &[2]),
-            Tensor::new(&[0.0, 1.0], &[2]),
-            Tensor::new(&[1.0, 0.0], &[2]),
-            Tensor::new(&[1.0, 1.0], &[2]),
+            Tensor::new(&[0.0, 0.0], &[2, 1]),
+            Tensor::new(&[0.0, 1.0], &[2, 1]),
+            Tensor::new(&[1.0, 0.0], &[2, 1]),
+            Tensor::new(&[1.0, 1.0], &[2, 1]),
         ];
         let y = vec![
-            Tensor::new(&[0.0], &[1]),
-            Tensor::new(&[1.0], &[1]),
-            Tensor::new(&[1.0], &[1]),
-            Tensor::new(&[0.0], &[1]),
+            Tensor::new(&[0.0], &[1, 1]),
+            Tensor::new(&[1.0], &[1, 1]),
+            Tensor::new(&[1.0], &[1, 1]),
+            Tensor::new(&[0.0], &[1, 1]),
         ];
         
         let result = mlp.fit(&x, &y, 500); 
@@ -450,16 +451,16 @@ mod tests {
     fn test_mlp_large_scale() {
         // Fix 3.1: Verify we can have > 64 neurons
         let config = OptimizerConfig::Adam { learning_rate: 0.01, beta1: 0.9, beta2: 0.999, epsilon: 1e-8 };
-        let mut mlp = MLP::new(config);
+        let mut mlp = MLP::new(config, LossConfig::BinaryCrossEntropy);
         
         // Input 100 -> Hidden 128 -> Output 10
         mlp.add_layer(100, 128, Activation::ReLU, Some(1));
         mlp.add_layer(128, 10, Activation::Softmax, Some(2));
         
-        let input = Tensor::new(&vec![0.5; 100], &[100]);
+        let input = Tensor::new(&vec![0.5; 100], &[100, 1]);
         let output = mlp.forward(&input);
         
-        assert_eq!(output.shape, vec![10]);
+        assert_eq!(output.shape, vec![10, 1]);
         assert!((output.sum() - 1.0).abs() < 1e-5); 
     }
 }

@@ -25,7 +25,8 @@ description = "AEGIS Language: Lexer, Parser, AST, and Interpreter"
 
 [features]
 default = ["std"]
-std = ["aegis-core/std", "alloc", "dep:reqwest", "dep:safetensors", "dep:wgpu", "dep:pollster", "dep:bytemuck", "dep:candle-core", "dep:candle-transformers", "dep:tokenizers", "dep:hf-hub"]
+std = ["aegis-core/std", "alloc", "dep:reqwest", "dep:safetensors", "dep:wgpu", "dep:pollster", "dep:bytemuck"]
+ml = ["dep:candle-core", "dep:candle-transformers", "dep:tokenizers", "dep:hf-hub"]
 alloc = []
 no_std = ["aegis-core/no_std", "alloc"]
 
