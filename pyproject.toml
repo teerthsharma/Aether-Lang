@@ -23,10 +23,10 @@ classifiers = [
 
 [tool.maturin]
 # Use the executable name 'aether'
-python-source = "python"
+python-source = "bindings/python"
 module-name = "aether_lang"
 
 
-manifest-path = "aether-lang/Cargo.toml"
+manifest-path = "crates/aether-lang/Cargo.toml"
 package = "aether-lang"
 features = ["python"]
