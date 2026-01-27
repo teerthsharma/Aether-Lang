@@ -1,89 +1,30 @@
-# ═══════════════════════════════════════════════════════════════════════════════
-# AETHER Project Gitignore
-# ═══════════════════════════════════════════════════════════════════════════════
-
 # Rust
-/target/
+/target
+/debug
+/release
 **/*.rs.bk
 Cargo.lock
-**/*.profraw
-**/*.profdata
 
-# Python
-__pycache__/
-*.py[cod]
-*$py.class
-*.so
-.Python
-build/
-develop-eggs/
-dist/
-downloads/
-eggs/
-.eggs/
-lib/
-lib64/
-parts/
-sdist/
-var/
-wheels/
-share/python-wheels/
-*.egg-info/
-.installed.cfg
-*.egg
-MANIFEST
-
-# Virtual Environment
-venv/
-.venv/
-env/
-.env/
-
-# IDE/Editor
-.idea/
-.vscode/
-*.swp
-*.swo
-*.sublime-project
-*.sublime-workspace
-
-# OS Generated Files
-.DS_Store
-.DS_Store?
-._*
-.Spotlight-V100
-.Trashes
-ehthumbs.db
-Thumbs.db
-
-# Logs & Diagnostics
-*.log
-*.txt
-*.tmp
+# Build artifacts
 build_err*.txt
 build_log*.txt
-check_*.log
-error.log
-test_*.log
+check_output*.txt
+test_output.txt
+*.log
+*.out
 
-# Build Artifacts
-*.bin
-*.img
-*.iso
-*.iso.bin
-*.iso.lock
+# Editors
+.vscode
+.idea
+*.swp
+*.swo
 
-# Agents / AI
-agents/
-.gemini/
-.antigravity/
+# OS
+.DS_Store
+Thumbs.db
 
-# Archives
-*.zip
-*.tar
-*.tar.gz
-*.rar
-
-# Docker
-.dockerignore
-
+# Python
+__pycache__
+*.pyc
+.venv
+venv

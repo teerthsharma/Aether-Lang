@@ -28,7 +28,7 @@ default = []
 
 [dependencies]
 aegis-core = { path = "../aegis-core" }
-aegis-lang = { path = "../aegis-lang" }
+aegis-lang = { path = "../aether-lang", package = "aether-lang" }
 clap = { workspace = true }
 rustyline = { workspace = true }
 

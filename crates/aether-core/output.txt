@@ -1,0 +1,209 @@
+﻿cargo : warning: unused 
+import: `alloc::vec`
+At line:1 char:1
++ cargo test --test 
+test_autograd 2>&1 | 
+Out-File -Encoding utf8 
+output ...
++ ~~~~~~~~~~~~~~~~~~~~~~~~
+~~~~~~~~~~~~
+    + CategoryInfo        
+      : NotSpecified: (w  
+  arning: unused import   
+ : `alloc::vec`:String    
+) [], RemoteException
+    + FullyQualifiedError 
+   Id : NativeCommandErr  
+  or
+ 
+  --> aegis-core\src\ml\li
+nalg.rs:13:5
+   |
+13 | use alloc::vec;
+   |     ^^^^^^^^^^
+   |
+   = note: 
+`#[warn(unused_imports)]` 
+(part of 
+`#[warn(unused)]`) on by 
+default
+
+warning: unused import: 
+`alloc::vec::Vec`
+  --> aegis-core\src\ml\li
+nalg.rs:15:5
+   |
+15 | use alloc::vec::Vec;
+   |     ^^^^^^^^^^^^^^^
+
+warning: unused import: 
+`exp`
+  --> aegis-core\src\ml\te
+nsor.rs:24:12
+   |
+24 | use libm::{exp, sq...
+   |            ^^^
+
+warning: unused import: 
+`alloc::vec`
+  --> aegis-core\src\ml\ne
+ural.rs:13:5
+   |
+13 | use alloc::vec;
+   |     ^^^^^^^^^^
+
+warning: unused import: 
+`alloc::boxed::Box`
+  --> aegis-core\src\ml\ne
+ural.rs:17:5
+   |
+17 | use 
+alloc::boxed::Box;
+   |     ^^^^^^^^^^^^^^^^^
+
+warning: variable does 
+not need to be mutable
+   --> aegis-core\src\ml\l
+inalg.rs:112:9
+    |
+112 | ...et mut x_plus = 
+...
+    |       ----^^^^^^
+    |       |
+    |       help: remove 
+this `mut`
+    |
+    = note: 
+`#[warn(unused_mut)]` 
+(part of 
+`#[warn(unused)]`) on by 
+default
+
+warning: variable does 
+not need to be mutable
+   --> aegis-core\src\ml\l
+inalg.rs:113:9
+    |
+113 | ...et mut x_minus = 
+...
+    |       ----^^^^^^^
+    |       |
+    |       help: remove 
+this `mut`
+
+warning: variable does 
+not need to be mutable
+   --> aegis-core\src\ml\l
+inalg.rs:116:13
+    |
+116 | ...et mut xp_data = 
+...
+    |       ----^^^^^^^
+    |       |
+    |       help: remove 
+this `mut`
+
+warning: variable does 
+not need to be mutable
+   --> aegis-core\src\ml\l
+inalg.rs:117:13
+    |
+117 | ...et mut xm_data = 
+...
+    |       ----^^^^^^^
+    |       |
+    |       help: remove 
+this `mut`
+
+warning: variable does 
+not need to be mutable
+   --> aegis-core\src\ml\t
+ensor.rs:137:13
+    |
+137 | ...et mut result = 
+...
+    |       ----^^^^^^
+    |       |
+    |       help: remove 
+this `mut`
+
+warning: variable does 
+not need to be mutable
+   --> aegis-core\src\ml\t
+ensor.rs:209:13
+    |
+209 | ...et mut result = 
+...
+    |       ----^^^^^^
+    |       |
+    |       help: remove 
+this `mut`
+
+warning: multiple 
+associated constants are 
+never used
+   --> 
+aegis-core\src\os.rs:95:11
+    |
+ 91 | impl PageTableEntry 
+{
+    | ------------------- 
+associated constants in 
+this implementation
+...
+ 95 |     const 
+USER_ACCESSIBLE: u...
+    |           
+^^^^^^^^^^^^^^^
+ 96 |     const 
+WRITE_THROUGH: u64...
+    |           
+^^^^^^^^^^^^^
+ 97 |     const NO_CACHE: 
+u64 = 1 ...
+    |           ^^^^^^^^
+ 98 |     const ACCESSED: 
+u64 = 1 ...
+    |           ^^^^^^^^
+ 99 |     const DIRTY: 
+u64 = 1 << 6;
+    |           ^^^^^
+100 |     const 
+HUGE_PAGE: u64 = 1...
+    |           ^^^^^^^^^
+101 |     const GLOBAL: 
+u64 = 1 << 8;
+    |           ^^^^^^
+102 |     const 
+NO_EXECUTE: u64 = ...
+    |           ^^^^^^^^^^
+    |
+    = note: 
+`#[warn(dead_code)]` 
+(part of 
+`#[warn(unused)]`) on by 
+default
+
+warning: `aegis-core` 
+(lib) generated 12 
+warnings (run `cargo fix 
+--lib -p aegis-core` to 
+apply 11 suggestions)
+    Finished `test` 
+profile [optimized + 
+debuginfo] target(s) in 
+0.08s
+     Running 
+tests\test_autograd.rs (C:
+\Users\teert\OneDrive\Desk
+top\New folder (11)\aegis\
+target\debug\deps\test_aut
+ograd-bba3fac316c9342f.exe
+)
+
+running 2 tests
+test test_autograd_simple ... ok
+test test_autograd_matmul ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+

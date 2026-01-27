@@ -11,6 +11,9 @@
 //! ═══════════════════════════════════════════════════════════════════════════════
 
 #[cfg(not(feature = "std"))]
+extern crate alloc;
+
+#[cfg(not(feature = "std"))]
 use alloc::vec::Vec;
 #[cfg(feature = "std")]
 use std::vec::Vec;
@@ -164,7 +167,10 @@ impl<'a> Context<'a> {
     /// Returns the gradients for all used variables as a Map (Vec indexed by Gc.index)
     pub fn backward(&mut self, target: Variable) -> Vec<Option<Tensor>> {
         let max_idx = self.heap.capacity();
-        let mut grads: Vec<Option<Tensor>> = vec![None; max_idx];
+        #[cfg(not(feature = "std"))]
+        let mut grads: Vec<Option<Tensor>> = alloc::vec![None; max_idx];
+        #[cfg(feature = "std")]
+        let mut grads: Vec<Option<Tensor>> = std::vec![None; max_idx];
         
         // Seed output gradient
         let target_tensor = self.heap.get(target.data).expect("Target lost");
@@ -189,11 +195,11 @@ impl<'a> Context<'a> {
                         let rhs_val = self.heap.get(*rhs).unwrap();
                         
                         // dL/dLhs = grad_out * rhs
-                        let d_lhs = grad.mul(rhs_val);
+                        let d_lhs: Tensor = grad.mul(rhs_val);
                         Self::accumulate_grad(&mut grads, lhs.index, &d_lhs);
                         
                         // dL/dRhs = grad_out * lhs
-                        let d_rhs = grad.mul(lhs_val);
+                        let d_rhs: Tensor = grad.mul(lhs_val);
                         Self::accumulate_grad(&mut grads, rhs.index, &d_rhs);
                     }
                 },
@@ -205,11 +211,11 @@ impl<'a> Context<'a> {
                         
                         // C = A @ B
                         // dA = dC @ B^T
-                        let d_lhs = grad.matmul(&rhs_val.transpose());
+                        let d_lhs: Tensor = grad.matmul(&rhs_val.transpose());
                         Self::accumulate_grad(&mut grads, lhs.index, &d_lhs);
                         
                         // dB = A^T @ dC
-                        let d_rhs = lhs_val.transpose().matmul(&grad);
+                        let d_rhs: Tensor = lhs_val.transpose().matmul(&grad);
                         Self::accumulate_grad(&mut grads, rhs.index, &d_rhs);
                      }
                 },
@@ -219,7 +225,7 @@ impl<'a> Context<'a> {
                         let input_val = self.heap.get(*input).unwrap();
                         // dL/dx = grad_out * (1 if x > 0 else 0)
                         let mask = input_val.map(|x| if x > 0.0 { 1.0 } else { 0.0 });
-                        let d_input = grad.mul(&mask);
+                        let d_input: Tensor = grad.mul(&mask);
                         Self::accumulate_grad(&mut grads, input.index, &d_input);
                     }
                 }

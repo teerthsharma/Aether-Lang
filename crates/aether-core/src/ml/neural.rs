@@ -17,7 +17,7 @@ use alloc::vec::Vec;
 use alloc::boxed::Box;
 
 #[cfg(not(feature = "std"))]
-use libm::{exp, fabs, sqrt, pow};
+use libm::{fabs}; // Adjust based on usage
 #[cfg(feature = "std")]
 use std::f64;
 

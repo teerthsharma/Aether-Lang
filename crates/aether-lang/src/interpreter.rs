@@ -43,6 +43,7 @@ use crate::ast::*;
 use aether_core::aether::{BlockMetadata, DriftDetector, HierarchicalBlockTree};
 use aether_core::manifold::{ManifoldPoint, TimeDelayEmbedder};
 use aether_core::ml::{MLP, KMeans, Activation, OptimizerConfig};
+use aether_core::ml::tensor::Tensor;
 use aether_core::ml::linalg::LossConfig;
 use aether_core::ml::convolution::Conv2D;
 use libm::{fabs, sqrt};
@@ -102,7 +103,7 @@ pub enum Value {
     /// Module Namespace
     Module(String),
     /// Dynamic Tensor
-    Tensor(Arc<Tensor>),
+    Tensor(Tensor),
     /// Llama Model (Wrapped)
     #[cfg(feature = "ml")]
     LlamaModel(Arc<LlamaContext>),
@@ -116,67 +117,7 @@ pub struct LlamaContext {
     pub name: String,
 }
 
-/// Simple Dynamic Tensor
-#[derive(Debug, Clone)]
-pub struct Tensor {
-    pub shape: Vec<usize>,
-    pub data: Vec<f32>,
-}
 
-impl Tensor {
-    pub fn new(shape: Vec<usize>, data: Vec<f32>) -> Self {
-        Self { shape, data }
-    }
-    
-    pub fn matmul(&self, other: &Tensor) -> Tensor {
-        if self.shape.len() != 2 || other.shape.len() != 2 { return Tensor::new(vec![], vec![]); }
-        let m = self.shape[0];
-        let k = self.shape[1];
-        let k2 = other.shape[0];
-        let n = other.shape[1];
-        if k != k2 { return Tensor::new(vec![], vec![]); }
-        let mut out = vec![0.0; m * n];
-        for i in 0..m {
-            for j in 0..n {
-                let mut sum = 0.0;
-                for l in 0..k { sum += self.data[i*k+l] * other.data[l*n+j]; }
-                out[i*n+j] = sum;
-            }
-        }
-        Tensor::new(vec![m, n], out)
-    }
-
-    pub fn add(&self, other: &Tensor) -> Tensor {
-       if self.shape != other.shape { return Tensor::new(vec![], vec![]); }
-       Tensor::new(self.shape.clone(), self.data.iter().zip(&other.data).map(|(a,b)| a+b).collect())
-    }
-    
-    pub fn relu(&self) -> Tensor {
-        Tensor::new(self.shape.clone(), self.data.iter().map(|x| if *x > 0.0 { *x } else { 0.0 }).collect())
-    }
-
-    pub fn softmax(&self) -> Tensor {
-        // Row-wise softmax for 2D, or global for 1D
-        let mut out = self.data.clone();
-        if self.shape.len() == 2 {
-            let rows = self.shape[0];
-            let cols = self.shape[1];
-            for i in 0..rows {
-                let row_start = i * cols;
-                let row_end = row_start + cols;
-                let max_val = self.data[row_start..row_end].iter().fold(f32::NEG_INFINITY, |a, &b| a.max(b));
-                let mut sum = 0.0;
-                for j in row_start..row_end {
-                    out[j] = libm::exp((out[j] - max_val) as f64) as f32;
-                    sum += out[j];
-                }
-                for j in row_start..row_end { out[j] /= sum; }
-            }
-        }
-        Tensor::new(self.shape.clone(), out)
-    }
-
-}
 
 /// Native function pointer type
 #[derive(Debug, Clone)]
@@ -197,6 +138,7 @@ pub enum NativeFunction {
     MlLoadWeights,
     MlMatMul,
     MlAdd,
+    MlForward,
     MlRelu,
     MlSoftmax,
     MlEmbed,
@@ -587,8 +529,11 @@ impl Interpreter {
             data.push(libm::sin(x));
         }
 
+        let mut variables = BTreeMap::new();
+        variables.insert(String::from("print"), Value::NativeFn(NativeFunction::Print));
+
         Self {
-            variables: BTreeMap::new(),
+            variables,
             manifolds: Vec::new(),
             blocks: Vec::new(),
             classes: Vec::new(),
@@ -999,7 +944,16 @@ impl Interpreter {
             NativeFunction::MathSqrt => Ok(Value::Num(libm::sqrt(get_f64(args)?))),
             NativeFunction::MathExp => Ok(Value::Num(libm::exp(get_f64(args)?))),
             NativeFunction::TopoBetti => Ok(Value::List(vec![Value::Num(1.0), Value::Num(0.0)])),
-            NativeFunction::Print => Ok(Value::Unit),
+            NativeFunction::Print => {
+                 for arg in args {
+                     if let CallArg::Positional(expr) = arg {
+                         let val = self.evaluate_expr(expr)?;
+                         #[cfg(feature = "std")]
+                         println!("{:?}", val);
+                     }
+                 }
+                 Ok(Value::Unit)
+            },
             NativeFunction::MlpNew => {
                 let lr = get_f64(args).unwrap_or(0.01);
                 let config = OptimizerConfig::SGD { learning_rate: lr, momentum: 0.9 };
@@ -1010,28 +964,89 @@ impl Interpreter {
                  Ok(Value::KMeans(Box::new(KMeans::new(k))))
             },
             NativeFunction::Conv2DNew => Ok(Value::Conv2D(Box::new(Conv2D::new(1, 1, 3, 1, 1, Activation::ReLU)))),
-            NativeFunction::SealTrain => Err("Seal training via native fn not implemented yet".into()),
-            _ => Ok(Value::Unit) // Simplified rest for brevity as they are mostly placeholder in previous dump
+            
+            // ML Ops
+            NativeFunction::MlMatMul => {
+                let a = self.get_tensor_arg(args, 0)?;
+                let b = self.get_tensor_arg(args, 1)?;
+                Ok(Value::Tensor(a.matmul(&b)))
+            },
+            NativeFunction::MlAdd => {
+                let a = self.get_tensor_arg(args, 0)?;
+                let b = self.get_tensor_arg(args, 1)?;
+                Ok(Value::Tensor(a.add(&b)))
+            },
+            NativeFunction::MlRelu => {
+                let a = self.get_tensor_arg(args, 0)?;
+                Ok(Value::Tensor(Activation::ReLU.apply(&a)))
+            },
+            NativeFunction::MlSoftmax => {
+                let a = self.get_tensor_arg(args, 0)?;
+                Ok(Value::Tensor(Activation::Softmax.apply(&a)))
+            },
+            NativeFunction::MlLoadWeights => {
+                // Acts as "Create Tensor from List"
+                 if let Some(CallArg::Positional(expr)) = args.first() {
+                     let val = self.evaluate_expr(expr)?;
+                     let t = self.value_to_tensor_core(&val)?;
+                     Ok(Value::Tensor(t))
+                 } else {
+                     Err("Missing argument".into())
+                 }
+            },
+            NativeFunction::MlForward => { // Map "forward"
+                 // Args: model, input
+                 // Actually this might be MethodCall on Mlp object
+                 Ok(Value::Unit)
+            },
+            _ => Ok(Value::Unit)
         }
     }
 
-    fn value_to_tensor(&self, val: &Value) -> Result<Vec<[f64; 64]>, String> { 
-        match val {
-            Value::List(rows) => {
-                let mut tensor = Vec::new();
-                for row in rows {
-                    if let Value::List(cols) = row {
-                        let mut arr = [0.0; 64];
-                        for (i, v) in cols.iter().enumerate().take(64) {
-                            if let Value::Num(n) = v { arr[i] = *n; }
-                        }
-                        tensor.push(arr);
-                    } else { return Err(String::from("Data must be 2D list")); }
-                }
-                Ok(tensor)
-            }
-            _ => Err(String::from("Data must be a List")),
+    fn get_tensor_arg(&mut self, args: &[CallArg], index: usize) -> Result<Tensor, String> {
+        if let Some(CallArg::Positional(expr)) = args.get(index) {
+             let val = self.evaluate_expr(expr)?;
+             self.value_to_tensor_core(&val)
+        } else {
+             Err(format!("Missing argument {}", index))
         }
+    }
+
+    fn value_to_tensor_core(&self, val: &Value) -> Result<Tensor, String> {
+         match val {
+            Value::Tensor(t) => Ok(t.clone()),
+            Value::List(rows) => {
+                 if rows.is_empty() { return Ok(Tensor::zeros(&[0])); }
+                 
+                 let mut data = Vec::new();
+                 
+                 // Check if 2D or 1D
+                 if let Value::List(_) = &rows[0] {
+                     // 2D
+                     let rows_cnt = rows.len();
+                     let mut cols_cnt = 0;
+                     for (i, row) in rows.iter().enumerate() {
+                         if let Value::List(cols) = row {
+                             if i == 0 { cols_cnt = cols.len(); }
+                             else if cols.len() != cols_cnt { return Err("Ragged tensor".into()); }
+                             for c in cols {
+                                 if let Value::Num(n) = c { data.push(*n); }
+                                 else { return Err("Tensor must contain numbers".into()); }
+                             }
+                         } else { return Err("Expected 2D list".into()); }
+                     }
+                     Ok(Tensor::new(&data, &[rows_cnt, cols_cnt]))
+                 } else {
+                     // 1D
+                      for c in rows {
+                         if let Value::Num(n) = c { data.push(*n); }
+                         else { return Err("Tensor must contain numbers".into()); }
+                     }
+                     Ok(Tensor::new(&data, &[rows.len()]))
+                 }
+            },
+            _ => Err("Expected Tensor or List".into())
+         }
     }
 
     fn evaluate_method_call(&mut self, object_name: &String, method: &String, args: &[CallArg]) -> Result<Value, String> {
@@ -1057,6 +1072,40 @@ impl Interpreter {
                 };
                 res
             }
+            Value::Mlp(mut mlp) => {
+                match method.as_str() {
+                    "add_layer" => {
+                         // input, output, activation key string
+                         // Default to Tanh if not string
+                         let input = self.get_arg_num(args, 0)? as usize;
+                         let output = self.get_arg_num(args, 1)? as usize;
+                         let act_str = self.get_arg_str(args, 2).unwrap_or("tanh".to_string());
+                         let act = match act_str.as_str() {
+                             "relu" => Activation::ReLU,
+                             "sigmoid" => Activation::Sigmoid,
+                             "softmax" => Activation::Softmax,
+                             _ => Activation::Tanh
+                         };
+                         mlp.add_layer(input, output, act, None);
+                         self.variables.insert(object_name.clone(), Value::Mlp(mlp)); // Update
+                         Ok(Value::Unit)
+                    },
+                    "train" => {
+                        // inputs (List/Tensor), targets (List/Tensor), epochs
+                        let input = self.get_tensor_arg(args, 0)?;
+                        let target = self.get_tensor_arg(args, 1)?;
+                        let epochs = self.get_arg_num(args, 2).unwrap_or(1.0) as usize;
+                        let res = mlp.fit(&[input], &[target], epochs); // fit expects slice of tensors
+                        Ok(Value::Num(res.final_loss))
+                    },
+                    "forward" | "predict" => {
+                        let input = self.get_tensor_arg(args, 0)?;
+                         let output = mlp.forward(&input);
+                         Ok(Value::Tensor(output))
+                    },
+                    _ => Err(format!("Method '{}' not found on MLP", method)),
+                }
+            }
             Value::Module(mod_name) => {
                  match (mod_name.as_str(), method.as_str()) {
                      ("Ml", "MLP") => self.execute_native_fn(NativeFunction::MlpNew, args),
@@ -1066,8 +1115,22 @@ impl Interpreter {
                      _ => Err(format!("Method '{}' not found in module '{}'", method, mod_name)),
                  }
             }
-            _ => Ok(Value::Unit), // Simplified
+            _ => Ok(Value::Unit), 
         }
+    }
+
+    fn get_arg_num(&mut self, args: &[CallArg], index: usize) -> Result<f64, String> {
+         if let Some(CallArg::Positional(expr)) = args.get(index) {
+             let val = self.evaluate_expr(expr)?;
+             if let Value::Num(n) = val { Ok(n) } else { Err("Expected number".into()) }
+         } else { Err("Missing arg".into()) }
+    }
+    
+    fn get_arg_str(&mut self, args: &[CallArg], index: usize) -> Result<String, String> {
+          if let Some(CallArg::Positional(expr)) = args.get(index) {
+             let val = self.evaluate_expr(expr)?;
+             if let Value::Str(s) = val { Ok(s) } else { Err("Expected string".into()) }
+         } else { Err("Missing arg".into()) }
     }
 
     fn evaluate_field_access(&self, object: &String, field: &String) -> Result<Value, String> {

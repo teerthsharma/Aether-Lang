@@ -35,6 +35,25 @@ pub struct Tensor {
 }
 
 impl Tensor {
+    /// Create a new tensor from a raw vector (consuming it) and shape
+    pub fn from_vec(data: Vec<f64>, shape: Vec<usize>) -> Self {
+        let total_size: usize = shape.iter().product();
+        assert_eq!(data.len(), total_size, "Data length must match shape product");
+
+        let mut strides = vec![0; shape.len()];
+        let mut stride = 1;
+        for i in (0..shape.len()).rev() {
+            strides[i] = stride;
+            stride *= shape[i];
+        }
+
+        Self {
+            data: Rc::new(RefCell::new(data)),
+            shape,
+            strides,
+        }
+    }
+
     /// Create a new tensor from a slice and shape
     pub fn new(data: &[f64], shape: &[usize]) -> Self {
         let total_size: usize = shape.iter().product();

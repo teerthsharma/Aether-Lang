@@ -1,10 +1,11 @@
 [workspace]
 members = [
-    "aether-core",
-    "aether-lang",
-    "aether-kernel",
-    "aether-cli",
-    "aegis-core",
+    "crates/aether-core",
+    "crates/aether-lang",
+    "crates/aether-kernel",
+    "crates/aether-cli",
+    "crates/aegis-core",
+    "crates/aegis-cli",
 ]
 resolver = "2"
 
