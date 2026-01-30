@@ -362,14 +362,13 @@ impl ChebyshevGuard {
              // Optimization: skip empty blocks early
              if block.occupied_mask == 0 { continue; }
 
-             for i in 0..8 {
-                 if (block.occupied_mask & (1 << i)) != 0 {
-                     let val = block.liveness[i];
-                     sum += val;
-                     sum_sq += val * val;
-                     count += 1.0;
-                 }
+             // Auto-vectorized loop: sum all values in the liveness array.
+             // This is safe because we ensure liveness is 0.0 for free slots.
+             for val in &block.liveness {
+                 sum += *val;
+                 sum_sq += val * val;
              }
+             count += block.occupied_mask.count_ones() as f64;
         }
         
        if count == 0.0 {
@@ -448,6 +447,8 @@ impl<T> ManifoldHeap<T> {
                       block.occupied_mask &= !(1 << s_idx);
                       let next = if let Some(h) = new_free_head { h } else { usize::MAX };
                       block.slots[s_idx] = HeapSlot::Free { next_free: next };
+                      // Maintain invariant: free slots have 0.0 liveness for vectorized stats
+                      block.liveness[s_idx] = 0.0;
                       new_free_head = Some(b_idx * 8 + s_idx);
                       
                       pruned += 1;
