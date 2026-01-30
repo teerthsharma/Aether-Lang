@@ -76,17 +76,11 @@ impl BootInfo {
                     f(MemoryRegion {
                         start: area.start_address(),
                         end: area.end_address(),
-                        // Fix: Match on the struct type, not the enum directly if it's wrapped, 
-                        // or assume direct enum match if `typ()` returns the enum.
-                        // The error said `typ()` returns `MemoryAreaTypeId`. 
-                        // We need to match against the ID or convert.
-                        // multiboot2 0.16+: `typ()` returns `MemoryAreaTypeId`.
-                        // We should map known IDs.
-                        kind: match area.typ() {
-                             multiboot2::MemoryAreaTypeId::AVAILABLE => MemoryRegionKind::Usable,
-                             multiboot2::MemoryAreaTypeId::RESERVED => MemoryRegionKind::Reserved,
-                             multiboot2::MemoryAreaTypeId::ACPI_AVAILABLE => MemoryRegionKind::Acpi,
-                             multiboot2::MemoryAreaTypeId::NVS => MemoryRegionKind::Reserved,
+                        kind: match multiboot2::MemoryAreaType::from(area.typ()) {
+                             multiboot2::MemoryAreaType::Available => MemoryRegionKind::Usable,
+                             multiboot2::MemoryAreaType::Reserved => MemoryRegionKind::Reserved,
+                             multiboot2::MemoryAreaType::AcpiAvailable => MemoryRegionKind::Acpi,
+                             multiboot2::MemoryAreaType::ReservedHibernate => MemoryRegionKind::Reserved,
                              _ => MemoryRegionKind::Unknown,
                         }
                     });
