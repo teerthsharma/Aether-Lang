@@ -58,17 +58,25 @@ impl<const D: usize> ManifoldPoint<D> {
 
     /// Euclidean distance to another point
     pub fn distance(&self, other: &Self) -> f64 {
+        sqrt(self.distance_squared(other))
+    }
+
+    /// Squared Euclidean distance (optimization for avoiding sqrt)
+    pub fn distance_squared(&self, other: &Self) -> f64 {
         let mut sum = 0.0;
         for i in 0..D {
             let d = self.coords[i] - other.coords[i];
             sum += d * d;
         }
-        sqrt(sum)
+        sum
     }
 
     /// Check if within epsilon-neighborhood (sparse attention criterion)
     pub fn is_neighbor(&self, other: &Self, epsilon: f64) -> bool {
-        self.distance(other) < epsilon
+        if epsilon < 0.0 {
+            return false;
+        }
+        self.distance_squared(other) < epsilon * epsilon
     }
 }
 
