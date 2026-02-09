@@ -56,19 +56,27 @@ impl<const D: usize> ManifoldPoint<D> {
         Self { coords }
     }
 
-    /// Euclidean distance to another point
-    pub fn distance(&self, other: &Self) -> f64 {
+    /// Squared Euclidean distance to another point
+    pub fn distance_squared(&self, other: &Self) -> f64 {
         let mut sum = 0.0;
         for i in 0..D {
             let d = self.coords[i] - other.coords[i];
             sum += d * d;
         }
-        sqrt(sum)
+        sum
+    }
+
+    /// Euclidean distance to another point
+    pub fn distance(&self, other: &Self) -> f64 {
+        sqrt(self.distance_squared(other))
     }
 
     /// Check if within epsilon-neighborhood (sparse attention criterion)
     pub fn is_neighbor(&self, other: &Self, epsilon: f64) -> bool {
-        self.distance(other) < epsilon
+        if epsilon < 0.0 {
+            return false;
+        }
+        self.distance_squared(other) < epsilon * epsilon
     }
 }
 
@@ -581,12 +589,23 @@ impl<const D: usize> TopologicalPipeline<D> {
 mod tests {
     use super::*;
 
+
     #[test]
     fn test_point_distance() {
         let p1 = ManifoldPoint::<3>::new([0.0, 0.0, 0.0]);
         let p2 = ManifoldPoint::<3>::new([3.0, 4.0, 0.0]);
 
         assert!((p1.distance(&p2) - 5.0).abs() < 1e-10);
+        assert!((p1.distance_squared(&p2) - 25.0).abs() < 1e-10);
+    }
+
+    #[test]
+    fn test_negative_epsilon() {
+        let p1 = ManifoldPoint::<3>::new([0.0, 0.0, 0.0]);
+        let p2 = ManifoldPoint::<3>::new([0.1, 0.0, 0.0]); // dist = 0.1, dist_sq = 0.01
+
+        assert!(p1.is_neighbor(&p2, 0.2)); // 0.01 < 0.04 -> true
+        assert!(!p1.is_neighbor(&p2, -0.2)); // negative epsilon -> false
     }
 
     #[test]
