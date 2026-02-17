@@ -251,9 +251,33 @@ pub fn verify_against_reference(
 // Sliding Window Analysis
 // ═══════════════════════════════════════════════════════════════════════════════
 
+/// Helper: Check if two bytes form a gap
+#[inline(always)]
+fn is_gap(a: u8, b: u8) -> bool {
+    (a as i16 - b as i16).abs() > CLUSTER_THRESHOLD
+}
+
+/// Helper: Check if 4 bytes form a loop
+#[inline(always)]
+fn is_loop(data: &[u8]) -> bool {
+    let tolerance = 5i16;
+    let a = data[0] as i16;
+    let d = data[3] as i16;
+
+    if (a - d).abs() <= tolerance {
+        let b = data[1] as i16;
+        let c = data[2] as i16;
+        if (a - b).abs() > tolerance || (a - c).abs() > tolerance {
+            return true;
+        }
+    }
+    false
+}
+
 /// Analyze binary with sliding window, fail-fast on any violation
 ///
 /// This is used by the ELF loader to check .text sections.
+/// Uses an incremental O(N) algorithm for performance (vs naive O(N*W)).
 ///
 /// # Arguments
 /// * `data` - Full binary data
@@ -262,6 +286,74 @@ pub fn verify_against_reference(
 /// # Returns
 /// `Ok(())` if all windows pass, `Err(offset)` at first failure
 pub fn verify_sliding_window(data: &[u8], window_size: usize) -> Result<(), usize> {
+    let size = if window_size == 0 {
+        WINDOW_SIZE
+    } else {
+        window_size
+    };
+
+    if data.len() < size {
+        return if is_shape_valid(data) { Ok(()) } else { Err(0) };
+    }
+
+    // Initial window calculation
+    let mut betti_0 = compute_betti_0(&data[0..size]);
+    let mut betti_1 = compute_betti_1(&data[0..size]);
+
+    // Check first window
+    let density = betti_0 as f64 / size as f64;
+    if density < DENSITY_MIN || density > DENSITY_MAX || betti_1 > MAX_BETTI_1 {
+        return Err(0);
+    }
+
+    // Sliding window
+    for i in 1..=data.len() - size {
+        // Update Betti-0 (Component count)
+        // Note: compute_betti_0 counts *clusters* of gaps (contiguous sequences where dist > threshold).
+        // A cluster contributes 1 to the count.
+        // We only decrement if we remove the *start* of a cluster that doesn't continue.
+        // If p_out is a gap and p_next is a gap, we just shortened the cluster, count remains same.
+        // If p_out is a gap and p_next is NOT, we removed the cluster entirely (or at least its start), so decrement.
+
+        // Remove left-most contribution
+        let p_out = is_gap(data[i - 1], data[i]);
+        let p_next = is_gap(data[i], data[i + 1]);
+        if p_out && !p_next {
+            betti_0 = betti_0.saturating_sub(1);
+        }
+
+        // Add right-most contribution
+        // Previous last pair (now second to last in new window)
+        let p_prev_end = is_gap(data[i + size - 3], data[i + size - 2]);
+        // New last pair
+        let p_new_end = is_gap(data[i + size - 2], data[i + size - 1]);
+        if p_new_end && !p_prev_end {
+            betti_0 += 1;
+        }
+
+        // Update Betti-1 (Loop count)
+        if size >= 4 {
+            if is_loop(&data[i - 1..i + 3]) {
+                betti_1 = betti_1.saturating_sub(1);
+            }
+            if is_loop(&data[i + size - 4..i + size]) {
+                betti_1 += 1;
+            }
+        }
+
+        // Check validity
+        let density = betti_0 as f64 / size as f64;
+        if density < DENSITY_MIN || density > DENSITY_MAX || betti_1 > MAX_BETTI_1 {
+            return Err(i);
+        }
+    }
+
+    Ok(())
+}
+
+/// Naive implementation for verification and testing
+#[cfg(test)]
+pub fn verify_sliding_window_naive(data: &[u8], window_size: usize) -> Result<(), usize> {
     let size = if window_size == 0 {
         WINDOW_SIZE
     } else {
@@ -334,6 +426,34 @@ mod tests {
         match result {
             VerifyResult::Pass => {}
             _ => {}
+        }
+    }
+
+    #[cfg(feature = "std")]
+    #[test]
+    fn test_verify_sliding_window_equivalence() {
+        use std::vec::Vec;
+
+        // Run on random data
+        for seed in 0..10 {
+            let len = 200;
+            let mut data = Vec::with_capacity(len);
+            for i in 0..len {
+                data.push(((i * 31 + seed * 17) % 256) as u8);
+            }
+
+            let res_naive = verify_sliding_window_naive(&data, 64);
+            let res_opt = verify_sliding_window(&data, 64);
+
+            assert_eq!(res_naive, res_opt, "Mismatch on random seed {}", seed);
+        }
+
+        // Test with different window sizes
+        let data: Vec<u8> = (0..100).map(|x| x as u8).collect();
+        for window_size in [2, 4, 10, 64] {
+            let res_naive = verify_sliding_window_naive(&data, window_size);
+            let res_opt = verify_sliding_window(&data, window_size);
+             assert_eq!(res_naive, res_opt, "Mismatch on window size {}", window_size);
         }
     }
 }
