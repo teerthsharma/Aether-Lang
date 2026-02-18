@@ -272,9 +272,89 @@ pub fn verify_sliding_window(data: &[u8], window_size: usize) -> Result<(), usiz
         return if is_shape_valid(data) { Ok(()) } else { Err(0) };
     }
 
-    for (offset, window) in data.windows(size).enumerate() {
-        if !is_shape_valid(window) {
-            return Err(offset);
+    // Optimization: Incremental update of Betti numbers
+    // O(N) instead of O(N * W)
+
+    // Initial calculation for first window
+    let mut shape = compute_shape(&data[0..size]);
+
+    // Check first window
+    if shape.density < DENSITY_MIN
+        || shape.density > DENSITY_MAX
+        || shape.betti_1 > MAX_BETTI_1
+    {
+        return Err(0);
+    }
+
+    // Helper closures
+    let is_gap = |a: u8, b: u8| -> bool {
+        (a as i16 - b as i16).abs() > CLUSTER_THRESHOLD
+    };
+
+    let is_loop = |a: u8, b: u8, c: u8, d: u8| -> bool {
+        let tolerance = 5i16;
+        let dist_ad = (a as i16 - d as i16).abs();
+        if dist_ad <= tolerance {
+            let dist_ab = (a as i16 - b as i16).abs();
+            let dist_ac = (a as i16 - c as i16).abs();
+            if dist_ab > tolerance || dist_ac > tolerance {
+                return true;
+            }
+        }
+        false
+    };
+
+    // Iterate incrementally
+    for i in 0..data.len() - size {
+        // Update Betti 0 (Gap Clusters)
+        if size == 2 {
+            // Simple replacement for size 2
+            if is_gap(data[i], data[i+1]) { shape.betti_0 -= 1; }
+            if is_gap(data[i+1], data[i+2]) { shape.betti_0 += 1; }
+        } else if size > 2 {
+            // Removal: Check if removing edge (i, i+1) removes a cluster start
+            // It is a start if is_gap(i, i+1) AND it wasn't preceded by a gap.
+            // But we are removing it.
+            // If is_gap(i, i+1):
+            //   If is_gap(i+1, i+2): Cluster continues, no count change (just shifted start).
+            //   If !is_gap(i+1, i+2): Cluster start lost. Count--.
+            if is_gap(data[i], data[i+1]) && !is_gap(data[i+1], data[i+2]) {
+                shape.betti_0 -= 1;
+            }
+
+            // Addition: Add edge at end (i+size-1, i+size)
+            // If gap, and previous was NOT gap, it's a new cluster start.
+            let end_idx = i + size;
+            if is_gap(data[end_idx-1], data[end_idx]) {
+                if !is_gap(data[end_idx-2], data[end_idx-1]) {
+                    shape.betti_0 += 1;
+                }
+            }
+        }
+
+        // Update Betti 1 (Loops)
+        if size >= 4 {
+            // Remove quad starting at i
+            if is_loop(data[i], data[i+1], data[i+2], data[i+3]) {
+                shape.betti_1 -= 1;
+            }
+            // Add quad ending at i + size
+            // Quad is (i+size-3, i+size-2, i+size-1, i+size)
+            let end = i + size;
+            if is_loop(data[end-3], data[end-2], data[end-1], data[end]) {
+                shape.betti_1 += 1;
+            }
+        }
+
+        // Update density
+        shape.density = if size > 0 { shape.betti_0 as f64 / size as f64 } else { 0.0 };
+
+        // Verify
+        if shape.density < DENSITY_MIN
+            || shape.density > DENSITY_MAX
+            || shape.betti_1 > MAX_BETTI_1
+        {
+            return Err(i + 1);
         }
     }
 
@@ -335,5 +415,71 @@ mod tests {
             VerifyResult::Pass => {}
             _ => {}
         }
+    }
+
+    #[test]
+    fn test_verify_sliding_window_equivalence() {
+        // Naive implementation for comparison
+        fn verify_sliding_window_naive(data: &[u8], window_size: usize) -> Result<(), usize> {
+            let size = if window_size == 0 { 64 } else { window_size };
+            if data.len() < size {
+                return if is_shape_valid(data) { Ok(()) } else { Err(0) };
+            }
+            for (offset, window) in data.windows(size).enumerate() {
+                if !is_shape_valid(window) {
+                    return Err(offset);
+                }
+            }
+            Ok(())
+        }
+
+        // Test with random data
+        // Use a deterministic pattern
+        let mut data = Vec::new();
+        // Pattern with mixed gaps/loops to trigger various cases
+        let pattern = [0, 10, 20, 30, 100, 110, 120, 130];
+        for i in 0..1000 {
+            data.push(pattern[i % pattern.len()]);
+        }
+
+        // Test standard window
+        assert_eq!(
+            verify_sliding_window(&data, 64),
+            verify_sliding_window_naive(&data, 64)
+        );
+
+        // Test small window
+        assert_eq!(
+            verify_sliding_window(&data, 4),
+            verify_sliding_window_naive(&data, 4)
+        );
+
+        // Test size 2 (edge case)
+        assert_eq!(
+            verify_sliding_window(&data, 2),
+            verify_sliding_window_naive(&data, 2)
+        );
+
+        // Test failing case (uniform data - low density)
+        let nop_sled = vec![0x90; 100];
+        assert_eq!(
+            verify_sliding_window(&nop_sled, 64),
+            verify_sliding_window_naive(&nop_sled, 64)
+        );
+
+        // Test consecutive gaps (Gap-Gap)
+        // 0, 100, 200, 50, 250...
+        // 0-100 (Gap), 100-200 (Gap), 200-50 (Gap), 50-250 (Gap)
+        // All gaps -> 1 cluster.
+        // Density 1.0 (fails density max 0.6).
+        // Check equivalence of failure/result.
+        let mut gaps = Vec::new();
+        for i in 0..100 {
+            gaps.push((i * 100 % 256) as u8);
+        }
+        assert_eq!(
+            verify_sliding_window(&gaps, 64),
+            verify_sliding_window_naive(&gaps, 64)
+        );
     }
 }
