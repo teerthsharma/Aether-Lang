@@ -68,7 +68,22 @@ impl<const D: usize> ManifoldPoint<D> {
 
     /// Check if within epsilon-neighborhood (sparse attention criterion)
     pub fn is_neighbor(&self, other: &Self, epsilon: f64) -> bool {
-        self.distance(other) < epsilon
+        if epsilon < 0.0 {
+            return false;
+        }
+
+        let mut sum = 0.0;
+        let epsilon_sq = epsilon * epsilon;
+
+        for i in 0..D {
+            let d = self.coords[i] - other.coords[i];
+            sum += d * d;
+            // Early exit if squared distance exceeds threshold
+            if sum >= epsilon_sq {
+                return false;
+            }
+        }
+        true
     }
 }
 
@@ -692,4 +707,5 @@ mod tests {
         // Sine wave in 2D/3D embedding is a loop (circle)
         assert!(b1_complex >= 1, "Sine wave should create a cycle (Betti-1 >= 1)");
     }
+
 }
