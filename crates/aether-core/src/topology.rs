@@ -137,22 +137,11 @@ pub fn compute_betti_1(data: &[u8]) -> u32 {
     }
 
     let mut loops = 0u32;
-    let tolerance = 5i16; // How close values must be to "close a loop"
 
     // Detect cycles: a -> b -> c -> ~a (return to start)
     for window in data.windows(4) {
-        let a = window[0] as i16;
-        let d = window[3] as i16;
-
-        // If we return to approximately the same value, it's a "loop"
-        if (a - d).abs() <= tolerance {
-            // Check that middle values are different (actual traversal)
-            let b = window[1] as i16;
-            let c = window[2] as i16;
-
-            if (a - b).abs() > tolerance || (a - c).abs() > tolerance {
-                loops += 1;
-            }
+        if is_loop(window) {
+            loops += 1;
         }
     }
 
@@ -272,13 +261,104 @@ pub fn verify_sliding_window(data: &[u8], window_size: usize) -> Result<(), usiz
         return if is_shape_valid(data) { Ok(()) } else { Err(0) };
     }
 
-    for (offset, window) in data.windows(size).enumerate() {
-        if !is_shape_valid(window) {
-            return Err(offset);
+    // Optimization: For standard window sizes, use incremental updates
+    // Fallback to naive for very small windows where overhead outweighs benefit
+    if size < 4 {
+        for (offset, window) in data.windows(size).enumerate() {
+            if !is_shape_valid(window) {
+                return Err(offset);
+            }
+        }
+        return Ok(());
+    }
+
+    // Initialize state with first window
+    let mut betti_0 = compute_betti_0(&data[0..size]);
+    let mut betti_1 = compute_betti_1(&data[0..size]);
+
+    // Check first window
+    let density = if size > 0 {
+        betti_0 as f64 / size as f64
+    } else {
+        0.0
+    };
+    if density < DENSITY_MIN || density > DENSITY_MAX || betti_1 > MAX_BETTI_1 {
+        return Err(0);
+    }
+
+    // Slide window
+    // We iterate i from 0 to data.len() - size - 1
+    // At step i, we transition from window starting at i to window starting at i+1
+    // data[i] leaves. data[i+size] enters.
+    for i in 0..(data.len() - size) {
+        let leaving_idx = i;
+        let entering_idx = i + size;
+
+        // Update betti_0
+        // Check gap at leaving_idx (between data[i] and data[i+1])
+        let gap_leaving =
+            (data[leaving_idx] as i16 - data[leaving_idx + 1] as i16).abs() > CLUSTER_THRESHOLD;
+        // Check gap after leaving_idx (between data[i+1] and data[i+2])
+        let gap_next = (data[leaving_idx + 1] as i16 - data[leaving_idx + 2] as i16).abs()
+            > CLUSTER_THRESHOLD;
+
+        if gap_leaving && !gap_next {
+            if betti_0 > 0 {
+                betti_0 -= 1;
+            }
+        }
+
+        // Check gap entering at end
+        // New gap is between data[entering_idx-1] and data[entering_idx]
+        let gap_entering =
+            (data[entering_idx - 1] as i16 - data[entering_idx] as i16).abs() > CLUSTER_THRESHOLD;
+        // Check gap before entering (between data[entering_idx-2] and data[entering_idx-1])
+        let gap_prev = (data[entering_idx - 2] as i16 - data[entering_idx - 1] as i16).abs()
+            > CLUSTER_THRESHOLD;
+
+        if gap_entering && !gap_prev {
+            betti_0 += 1;
+        }
+
+        // Update betti_1
+        // Loop at leaving_idx: uses data[i..i+4]
+        if is_loop(&data[leaving_idx..leaving_idx + 4]) {
+            if betti_1 > 0 {
+                betti_1 -= 1;
+            }
+        }
+
+        // Loop at entering: uses data[entering_idx-3..entering_idx+1]
+        if is_loop(&data[entering_idx - 3..entering_idx + 1]) {
+            betti_1 += 1;
+        }
+
+        // Verify
+        let density = betti_0 as f64 / size as f64;
+        if density < DENSITY_MIN || density > DENSITY_MAX || betti_1 > MAX_BETTI_1 {
+            return Err(i + 1);
         }
     }
 
     Ok(())
+}
+
+/// Helper to detect loops/cycles in a 4-byte window
+#[inline]
+fn is_loop(window: &[u8]) -> bool {
+    let tolerance = 5i16;
+    let a = window[0] as i16;
+    let d = window[3] as i16;
+
+    if (a - d).abs() <= tolerance {
+        let b = window[1] as i16;
+        let c = window[2] as i16;
+
+        if (a - b).abs() > tolerance || (a - c).abs() > tolerance {
+            return true;
+        }
+    }
+    false
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════

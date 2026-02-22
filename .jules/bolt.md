@@ -1,3 +1,3 @@
-## 2026-01-29 - Single Pass Variance Calculation in Manifold Heap
-**Learning:** The `ChebyshevGuard::calculate` function in `ManifoldHeap` was performing two passes over the memory blocks to calculate mean and variance separately. This is a common pattern when following the mathematical definition directly. However, in a performance-critical "metabolism" loop (GC), this doubles the memory access overhead.
-**Action:** Always check for opportunities to compute statistics (mean, variance) in a single pass using Welford's algorithm or accumulated sums, especially when iterating over large data structures.
+## 2024-05-22 - Topological Optimization Mismatch
+**Learning:** `compute_betti_0` in `aether-core` implements a "gap clustering" algorithm (counting contiguous sequences of large gaps) rather than standard Betti-0 (connected components). This distinction is crucial for optimization; standard Betti-0 update logic would be incorrect here.
+**Action:** Always verify the specific algorithm implementation rather than relying on mathematical names, especially when "approximation" or "heuristic" is mentioned.
