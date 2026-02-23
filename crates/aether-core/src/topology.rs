@@ -39,6 +39,9 @@ const DENSITY_MAX: f64 = 0.6;
 /// Maximum allowed Betti-1 (loop complexity) per window
 const MAX_BETTI_1: u32 = 10;
 
+/// Tolerance for detecting loops (how close values must be)
+const LOOP_TOLERANCE: i16 = 5;
+
 // ═══════════════════════════════════════════════════════════════════════════════
 // Topological Shape Signature
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -86,6 +89,35 @@ impl TopologicalShape {
 // Betti Number Computation
 // ═══════════════════════════════════════════════════════════════════════════════
 
+/// Helper: Check if two bytes form a gap (distance > threshold)
+#[inline(always)]
+fn is_gap(a: u8, b: u8) -> bool {
+    (a as i16 - b as i16).abs() > CLUSTER_THRESHOLD
+}
+
+/// Helper: Check if a 4-byte window forms a loop pattern
+#[inline(always)]
+fn is_loop_pattern(window: &[u8]) -> bool {
+    if window.len() < 4 {
+        return false;
+    }
+
+    let a = window[0] as i16;
+    let d = window[3] as i16;
+
+    // If we return to approximately the same value, it's a "loop"
+    if (a - d).abs() <= LOOP_TOLERANCE {
+        let b = window[1] as i16;
+        let c = window[2] as i16;
+
+        // Check that middle values are different (actual traversal)
+        if (a - b).abs() > LOOP_TOLERANCE || (a - c).abs() > LOOP_TOLERANCE {
+            return true;
+        }
+    }
+    false
+}
+
 /// Compute β₀ (connected components) via 1D clustering approximation
 ///
 /// This is a simplified Vietoris-Rips filtration for 1D point clouds.
@@ -106,9 +138,7 @@ pub fn compute_betti_0(data: &[u8]) -> u32 {
     let mut in_component = false;
 
     for window in data.windows(2) {
-        let dist = (window[0] as i16 - window[1] as i16).abs();
-
-        if dist > CLUSTER_THRESHOLD {
+        if is_gap(window[0], window[1]) {
             if !in_component {
                 components += 1;
                 in_component = true;
@@ -137,22 +167,11 @@ pub fn compute_betti_1(data: &[u8]) -> u32 {
     }
 
     let mut loops = 0u32;
-    let tolerance = 5i16; // How close values must be to "close a loop"
 
     // Detect cycles: a -> b -> c -> ~a (return to start)
     for window in data.windows(4) {
-        let a = window[0] as i16;
-        let d = window[3] as i16;
-
-        // If we return to approximately the same value, it's a "loop"
-        if (a - d).abs() <= tolerance {
-            // Check that middle values are different (actual traversal)
-            let b = window[1] as i16;
-            let c = window[2] as i16;
-
-            if (a - b).abs() > tolerance || (a - c).abs() > tolerance {
-                loops += 1;
-            }
+        if is_loop_pattern(window) {
+            loops += 1;
         }
     }
 
@@ -272,13 +291,80 @@ pub fn verify_sliding_window(data: &[u8], window_size: usize) -> Result<(), usiz
         return if is_shape_valid(data) { Ok(()) } else { Err(0) };
     }
 
-    for (offset, window) in data.windows(size).enumerate() {
-        if !is_shape_valid(window) {
-            return Err(offset);
-        }
-    }
+    // Optimization: For standard window sizes, use incremental updates (O(N) instead of O(N*W))
+    if size >= 4 {
+        // Initialize state with first window
+        let mut betti_0 = compute_betti_0(&data[0..size]);
+        let mut betti_1 = compute_betti_1(&data[0..size]);
 
-    Ok(())
+        // Check first window
+        let mut density = if size > 0 {
+            betti_0 as f64 / size as f64
+        } else {
+            0.0
+        };
+        if density < DENSITY_MIN || density > DENSITY_MAX || betti_1 > MAX_BETTI_1 {
+            return Err(0);
+        }
+
+        // Slide window
+        for i in 0..(data.len() - size) {
+            let leaving_idx = i;
+            let entering_idx = i + size;
+
+            // Update betti_0
+            // Check gap at leaving_idx (between leaving and leaving+1)
+            let gap_leaving = is_gap(data[leaving_idx], data[leaving_idx + 1]);
+            // Check gap after leaving_idx (between leaving+1 and leaving+2)
+            let gap_next = is_gap(data[leaving_idx + 1], data[leaving_idx + 2]);
+
+            if gap_leaving && !gap_next {
+                if betti_0 > 0 {
+                    betti_0 -= 1;
+                }
+            }
+
+            // Check gap entering at end (between entering-1 and entering)
+            let gap_entering = is_gap(data[entering_idx - 1], data[entering_idx]);
+            // Check gap before entering (between entering-2 and entering-1)
+            let gap_prev = is_gap(data[entering_idx - 2], data[entering_idx - 1]);
+
+            if gap_entering && !gap_prev {
+                betti_0 += 1;
+            }
+
+            // Update betti_1 (loops)
+            // Loop at leaving_idx
+            if is_loop_pattern(&data[leaving_idx..leaving_idx + 4]) {
+                if betti_1 > 0 {
+                    betti_1 -= 1;
+                }
+            }
+
+            // Loop at entering (uses last 4 bytes of new window)
+            // New window indices: i+1 .. i+1+size
+            // Last 4: entering_idx-3 .. entering_idx+1
+            if is_loop_pattern(&data[entering_idx - 3..entering_idx + 1]) {
+                betti_1 += 1;
+            }
+
+            // Verify
+            density = betti_0 as f64 / size as f64;
+            if density < DENSITY_MIN || density > DENSITY_MAX || betti_1 > MAX_BETTI_1 {
+                return Err(i + 1);
+            }
+        }
+
+        Ok(())
+    } else {
+        // Fallback for small windows
+        for (offset, window) in data.windows(size).enumerate() {
+            if !is_shape_valid(window) {
+                return Err(offset);
+            }
+        }
+        Ok(())
+    }
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -335,5 +421,38 @@ mod tests {
             VerifyResult::Pass => {}
             _ => {}
         }
+    }
+
+    #[test]
+    #[cfg(feature = "std")]
+    fn test_verify_sliding_window_equivalence() {
+        // Compare optimized implementation against naive one on random data
+        // This acts as a property-based test to ensure the optimization is correct
+        let mut data = std::vec::Vec::with_capacity(200);
+        // Pseudo-random generation
+        let mut state: u32 = 0xDEADBEEF;
+        for _ in 0..200 {
+            state = state.wrapping_mul(1664525).wrapping_add(1013904223);
+            data.push((state >> 24) as u8);
+        }
+
+        let window_size = 64;
+
+        // Run optimized
+        let result_opt = verify_sliding_window(&data, window_size);
+
+        // Run naive manually
+        let mut result_naive = Ok(());
+        for (offset, window) in data.windows(window_size).enumerate() {
+            if !is_shape_valid(window) {
+                result_naive = Err(offset);
+                break;
+            }
+        }
+
+        assert_eq!(
+            result_opt, result_naive,
+            "Optimized and naive implementations differ"
+        );
     }
 }
