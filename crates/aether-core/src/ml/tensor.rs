@@ -274,4 +274,14 @@ impl Tensor {
         
         Self::new(&result_data, &self.shape)
     }
+
+    /// In-place element-wise addition (a += b)
+    pub fn add_assign(&self, other: &Tensor) {
+        assert_eq!(self.shape, other.shape, "Shape mismatch for add_assign");
+        let mut data_a = self.data.borrow_mut();
+        let data_b = other.data.borrow();
+        for (a, &b) in data_a.iter_mut().zip(data_b.iter()) {
+            *a += b;
+        }
+    }
 }
