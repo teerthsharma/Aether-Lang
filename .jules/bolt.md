@@ -1,3 +1,7 @@
 ## 2026-01-29 - Single Pass Variance Calculation in Manifold Heap
 **Learning:** The `ChebyshevGuard::calculate` function in `ManifoldHeap` was performing two passes over the memory blocks to calculate mean and variance separately. This is a common pattern when following the mathematical definition directly. However, in a performance-critical "metabolism" loop (GC), this doubles the memory access overhead.
 **Action:** Always check for opportunities to compute statistics (mean, variance) in a single pass using Welford's algorithm or accumulated sums, especially when iterating over large data structures.
+
+## 2026-03-07 - Squared Distance Comparisons in Hot Spatial Scans
+**Learning:** In `aether-core::manifold`, `SparseAttentionGraph::add_point` performs hot O(N) spatial scans using `ManifoldPoint::is_neighbor`. The previous implementation called `self.distance() < epsilon`, which computes a full Euclidean distance including `libm::sqrt`. Computing `sqrt` is expensive and unnecessary for threshold comparisons.
+**Action:** Optimize geometric locality checks by replacing `libm::sqrt` calls with inline squared distance comparisons (`d^2 < r^2`). Incorporate an early-exit condition to terminate the loop as soon as the accumulated squared sum exceeds the squared threshold (`r^2`), achieving a significant speedup (e.g., ~6x) and ensure negative threshold values (`epsilon <= 0.0`) explicitly return `false`.
