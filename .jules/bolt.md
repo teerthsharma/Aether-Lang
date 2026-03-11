@@ -1,3 +1,7 @@
 ## 2026-01-29 - Single Pass Variance Calculation in Manifold Heap
 **Learning:** The `ChebyshevGuard::calculate` function in `ManifoldHeap` was performing two passes over the memory blocks to calculate mean and variance separately. This is a common pattern when following the mathematical definition directly. However, in a performance-critical "metabolism" loop (GC), this doubles the memory access overhead.
 **Action:** Always check for opportunities to compute statistics (mean, variance) in a single pass using Welford's algorithm or accumulated sums, especially when iterating over large data structures.
+
+## 2026-01-29 - Vectorized Outer Product for Neural Network Backpropagation
+**Learning:** In the hot path of neural network training (e.g. `DenseLayer::backward`), unnecessary object cloning (like `.clone()` on Tensors to extract `data` via `.borrow()`) and manual nested loops can introduce overhead via shape/stride metadata reallocation and poor vectorization.
+**Action:** Avoid `.clone()` just to get a reference; borrow `&Tensor` instead. For mathematical ops like outer products, use mapped iterators combined with `.extend()` to allow the compiler to better vectorize operations without boundary checks in manual nested loops.
