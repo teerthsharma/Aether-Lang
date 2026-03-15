@@ -52,9 +52,26 @@ impl CpuContext {
     /// Create a new, blank CPU context
     pub const fn empty() -> Self {
         Self {
-            r15: 0, r14: 0, r13: 0, r12: 0, r11: 0, r10: 0, r9: 0, r8: 0,
-            rbp: 0, rdi: 0, rsi: 0, rdx: 0, rcx: 0, rbx: 0, rax: 0,
-            rip: 0, cs: 0, rflags: 0, rsp: 0, ss: 0,
+            r15: 0,
+            r14: 0,
+            r13: 0,
+            r12: 0,
+            r11: 0,
+            r10: 0,
+            r9: 0,
+            r8: 0,
+            rbp: 0,
+            rdi: 0,
+            rsi: 0,
+            rdx: 0,
+            rcx: 0,
+            rbx: 0,
+            rax: 0,
+            rip: 0,
+            cs: 0,
+            rflags: 0,
+            rsp: 0,
+            ss: 0,
         }
     }
 }
@@ -120,11 +137,11 @@ impl PageTableEntry {
     pub fn addr(&self) -> u64 {
         self.entry & 0x000F_FFFF_FFFF_F000
     }
-    
+
     /// Set the physical address
     pub fn set_addr(&mut self, addr: u64) {
-         let flags = self.entry & !0x000F_FFFF_FFFF_F000;
-         self.entry = (addr & 0x000F_FFFF_FFFF_F000) | flags;
+        let flags = self.entry & !0x000F_FFFF_FFFF_F000;
+        self.entry = (addr & 0x000F_FFFF_FFFF_F000) | flags;
     }
 }
 
@@ -189,19 +206,19 @@ pub struct MemoryRegion {
 pub struct HardwareTopology {
     /// Number of physical CPU cores (Neural Clusters)
     pub cpu_cores: usize,
-    
+
     /// Number of NUMA nodes (Memory Locality Domains)
     pub numa_nodes: usize,
-    
+
     /// Total usable system memory in bytes
     pub total_memory: u64,
-    
+
     /// Physical address of the root configuration (RSDP for ACPI, DTB for ARM)
     pub config_root: PhysAddr,
-    
+
     /// List of memory regions (The "Territory")
     pub memory_map: [MemoryRegion; 32], // Fixed size for no_std bootstrap
-    
+
     /// Number of valid regions in the map
     pub memory_map_len: usize,
 }
@@ -228,7 +245,7 @@ impl HardwareTopology {
         if self.memory_map_len < 32 {
             self.memory_map[self.memory_map_len] = region;
             self.memory_map_len += 1;
-            
+
             if region.region_type == MemoryType::Usable {
                 self.total_memory += region.length;
             }
@@ -262,10 +279,10 @@ pub enum KernelMode {
 pub trait BiosInterface {
     /// Get the raw memory map from firmware
     fn memory_map(&self) -> &[MemoryRegion];
-    
+
     /// Get the framebuffer info (if graphics enabled)
     fn framebuffer(&self) -> Option<FrameBufferInfo>;
-    
+
     /// Get the ACPI/DTB root pointer
     fn config_root(&self) -> PhysAddr;
 }
@@ -278,4 +295,3 @@ pub struct FrameBufferInfo {
     pub stride: u32,
     pub bytes_per_pixel: u8,
 }
-
