@@ -68,7 +68,23 @@ impl<const D: usize> ManifoldPoint<D> {
 
     /// Check if within epsilon-neighborhood (sparse attention criterion)
     pub fn is_neighbor(&self, other: &Self, epsilon: f64) -> bool {
-        self.distance(other) < epsilon
+        // Optimization: avoid libm::sqrt overhead by comparing squared distances
+        // and using early exit for fast rejection in hot spatial scans.
+        if !(epsilon > 0.0) {
+            return false;
+        }
+        let eps_sq = epsilon * epsilon;
+        let mut sum = 0.0;
+        for i in 0..D {
+            let d = self.coords[i] - other.coords[i];
+            sum += d * d;
+            // Safely handle NaN values by checking sum against eps_sq.
+            // If sum is NaN, the check will be false, triggering the early exit.
+            if !(sum < eps_sq) {
+                return false;
+            }
+        }
+        true
     }
 }
 
@@ -246,7 +262,9 @@ impl<const D: usize> SparseAttentionGraph<D> {
                 visited[current] = true;
 
                 // Add unvisited neighbors
-                for (neighbor, is_visited) in visited.iter().enumerate().take(64.min(self.point_count)) {
+                for (neighbor, is_visited) in
+                    visited.iter().enumerate().take(64.min(self.point_count))
+                {
                     if !*is_visited && self.are_neighbors(current, neighbor) && stack_top < 64 {
                         stack[stack_top] = neighbor;
                         stack_top += 1;
@@ -290,7 +308,10 @@ impl<const D: usize> SparseAttentionGraph<D> {
     ///
     /// This approximates a "local convex hull" by traversing the sparse graph (BFS)
     /// for a limited depth, effectively partitioning the manifold geodesically.
-    pub fn geodesic_partition_centroid(&self, target: ManifoldPoint<D>) -> Option<ManifoldPoint<D>> {
+    pub fn geodesic_partition_centroid(
+        &self,
+        target: ManifoldPoint<D>,
+    ) -> Option<ManifoldPoint<D>> {
         if self.point_count == 0 {
             return None;
         }
@@ -298,11 +319,11 @@ impl<const D: usize> SparseAttentionGraph<D> {
         // 1. Find the graph node closest to the target point (entry point)
         // Since `target` might be the one just added, it's likely the last one.
         // But let's be robust and check the last few points.
-        let start_node_idx = self.point_count - 1; 
+        let start_node_idx = self.point_count - 1;
 
         // 2. BFS to find the local cluster (Geodesic Neighborhood)
         // We limit depth to capture "local" structure, not the whole component
-        let max_depth = 3; 
+        let max_depth = 3;
         let mut visited = [false; MAX_POINTS];
         let mut queue = [0usize; 64];
         let mut queue_start = 0;
@@ -333,15 +354,16 @@ impl<const D: usize> SparseAttentionGraph<D> {
             // Expand neighbors if depth limit not reached
             if current_depth < max_depth {
                 // Adjacency bitmask iteration
-                let adjacency = self.adjacency[u]; 
-                // Note: Adjacency is symmetric but stored sparsely? 
-                // In our `add_point`, we set bits for i < 64. 
+                let adjacency = self.adjacency[u];
+                // Note: Adjacency is symmetric but stored sparsely?
+                // In our `add_point`, we set bits for i < 64.
                 // Let's assume simpler iteration for this limited embedded interaction.
-                // We iterate all points to check `are_neighbors` because internal representation 
+                // We iterate all points to check `are_neighbors` because internal representation
                 // in original code was slightly simplified (only stored back-edges in `adjacency`?).
                 // Let's rely on `are_neighbors` which is robust in the provided code.
-                
-                for v in 0..self.point_count.min(64) { // Limit to 64 for speed/bitmask strictness
+
+                for v in 0..self.point_count.min(64) {
+                    // Limit to 64 for speed/bitmask strictness
                     if !visited[v] && self.are_neighbors(u, v) {
                         visited[v] = true;
                         if queue_end < 64 {
@@ -352,7 +374,7 @@ impl<const D: usize> SparseAttentionGraph<D> {
                     }
                 }
             }
-            
+
             if nodes_at_current_depth == 0 {
                 current_depth += 1;
                 nodes_at_current_depth = nodes_at_next_depth;
@@ -542,7 +564,7 @@ impl<const D: usize> TopologicalPipeline<D> {
     fn map_to_tpu_id(&self, point: &ManifoldPoint<D>, projection: f64) -> u64 {
         // Synthetic Spatial Hashing (Morton-like)
         let mut hash = 0u64;
-        
+
         // Hash the input coordinates
         for i in 0..D {
             let bits = point.coords[i].to_bits();
@@ -629,17 +651,17 @@ mod tests {
     #[test]
     fn test_gatekeeper_sparsity() {
         let mut pipeline = TopologicalPipeline::<3>::new(1, 0.5);
-        
+
         // Push zero value - should be dropped by Sparsity Filter
         assert!(pipeline.push(0.0).is_none());
         assert!(pipeline.push(1e-10).is_none());
-        
+
         // Push significant value - should be processed
         // Need to fill buffer first (tau=1, D=3 -> needs 3 points)
         pipeline.push(1.0);
         pipeline.push(2.0);
         pipeline.push(3.0);
-        
+
         // Now it should return consistent output
         let result = pipeline.push(4.0);
         assert!(result.is_some());
@@ -648,28 +670,31 @@ mod tests {
     #[test]
     fn test_gatekeeper_tpu_injection() {
         let mut pipeline = TopologicalPipeline::<3>::new(1, 0.5);
-        
+
         // Fill buffer
         pipeline.push(1.0);
         pipeline.push(2.0);
         pipeline.push(3.0);
-        
+
         if let Some((_, _, tpu_id_1)) = pipeline.push(4.0) {
-             // Push same sequence again (reset logic simulated)
-             let mut pipeline2 = TopologicalPipeline::<3>::new(1, 0.5);
-             pipeline2.push(1.0);
-             pipeline2.push(2.0);
-             pipeline2.push(3.0);
-             let (_, _, tpu_id_2) = pipeline2.push(4.0).unwrap();
-             
-             assert_eq!(tpu_id_1, tpu_id_2, "TPU ID generation must be deterministic");
+            // Push same sequence again (reset logic simulated)
+            let mut pipeline2 = TopologicalPipeline::<3>::new(1, 0.5);
+            pipeline2.push(1.0);
+            pipeline2.push(2.0);
+            pipeline2.push(3.0);
+            let (_, _, tpu_id_2) = pipeline2.push(4.0).unwrap();
+
+            assert_eq!(
+                tpu_id_1, tpu_id_2,
+                "TPU ID generation must be deterministic"
+            );
         }
     }
 
     #[test]
     fn test_gatekeeper_branching() {
         let mut pipeline = TopologicalPipeline::<3>::new(1, 2.0); // large epsilon to force connection
-        
+
         // 1. Simple shape (Line) -> Betti-1 = 0
         for i in 0..10 {
             pipeline.push(i as f64);
@@ -677,7 +702,7 @@ mod tests {
         let (b0, b1, _) = pipeline.push(10.0).unwrap();
         assert_eq!(b0, 1);
         assert_eq!(b1, 0); // Linear structure has no holes
-        
+
         // 2. Complex Shape (Cycle) -> Betti-1 > 0
         pipeline.reset();
         // Create a triangle loop: (0,0,0) -> (1,0,0) -> (0.5,1,0) -> (0,0,0) around time delay
@@ -685,11 +710,14 @@ mod tests {
         // A simple sine wave often creates loops in delay embedding
         for i in 0..50 {
             let val = libm::sin(i as f64 * 0.5);
-            pipeline.push(val); 
+            pipeline.push(val);
         }
-        
+
         let (_, b1_complex, _) = pipeline.push(0.1).unwrap();
         // Sine wave in 2D/3D embedding is a loop (circle)
-        assert!(b1_complex >= 1, "Sine wave should create a cycle (Betti-1 >= 1)");
+        assert!(
+            b1_complex >= 1,
+            "Sine wave should create a cycle (Betti-1 >= 1)"
+        );
     }
 }

@@ -1,7 +1,7 @@
-use pyo3::prelude::*;
-use crate::Interpreter;
-use crate::parser::Parser;
 use crate::interpreter::Value;
+use crate::parser::Parser;
+use crate::Interpreter;
+use pyo3::prelude::*;
 
 /// The Aether Interpreter exposed to Python.
 #[pyclass(unsendable)]
@@ -23,7 +23,12 @@ impl AetherInterpreter {
         let mut parser = Parser::new(&source);
         let program = match parser.parse() {
             Ok(p) => p,
-            Err(e) => return Err(pyo3::exceptions::PyValueError::new_err(format!("Parse error at {}:{}: {}", e.line, e.column, e.message))),
+            Err(e) => {
+                return Err(pyo3::exceptions::PyValueError::new_err(format!(
+                    "Parse error at {}:{}: {}",
+                    e.line, e.column, e.message
+                )))
+            }
         };
 
         match self.inner.execute(&program) {
@@ -31,7 +36,7 @@ impl AetherInterpreter {
             Err(e) => Err(pyo3::exceptions::PyRuntimeError::new_err(e)),
         }
     }
-    
+
     /// Reset the interpreter state.
     fn reset(&mut self) {
         self.inner = Interpreter::new();
@@ -42,15 +47,20 @@ impl AetherInterpreter {
 #[pymodule]
 fn aether_lang(_py: Python, m: &PyModule) -> PyResult<()> {
     m.add_class::<AetherInterpreter>()?;
-    
+
     /// Convenience function to run a script once
     #[pyfn(m)]
     fn run(source: String) -> PyResult<String> {
         let mut interpreter = Interpreter::new();
-         let mut parser = Parser::new(&source);
+        let mut parser = Parser::new(&source);
         let program = match parser.parse() {
             Ok(p) => p,
-            Err(e) => return Err(pyo3::exceptions::PyValueError::new_err(format!("Parse error at {}:{}: {}", e.line, e.column, e.message))),
+            Err(e) => {
+                return Err(pyo3::exceptions::PyValueError::new_err(format!(
+                    "Parse error at {}:{}: {}",
+                    e.line, e.column, e.message
+                )))
+            }
         };
 
         match interpreter.execute(&program) {
