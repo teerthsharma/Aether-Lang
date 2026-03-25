@@ -29,8 +29,6 @@
 #[macro_use]
 extern crate alloc;
 
-
-
 // ═══════════════════════════════════════════════════════════════════════════════
 // Module Declarations
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -40,8 +38,8 @@ pub mod ast;
 pub mod interpreter;
 pub mod lexer;
 pub mod parser;
-pub mod webgl_export;
 pub mod vm;
+pub mod webgl_export;
 
 #[cfg(feature = "python")]
 pub mod python;

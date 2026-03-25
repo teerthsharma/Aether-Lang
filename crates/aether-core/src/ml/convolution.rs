@@ -8,8 +8,8 @@
 
 #![allow(dead_code)]
 
-use libm::sqrt;
 use crate::ml::neural::Activation;
+use libm::sqrt;
 
 /// Maximum kernel size (e.g., 3x3, 5x5)
 const MAX_KERNEL_SIZE: usize = 5;
@@ -39,7 +39,7 @@ pub struct Conv2D {
     pub padding: usize,
     /// Activation
     pub activation: Activation,
-    
+
     // Cache for backprop
     pub last_input: [[[[f64; MAX_IMG_DIM]; MAX_IMG_DIM]; MAX_CHANNELS_IN]; 1], // Batch size 1 for now
     pub last_output_dim: (usize, usize),
@@ -60,8 +60,9 @@ impl Conv2D {
 
         // Kaiming/He initialization
         let scale = sqrt(2.0 / (in_c * k_size * k_size) as f64);
-        
-        let mut weights = [[[[0.0; MAX_KERNEL_SIZE]; MAX_KERNEL_SIZE]; MAX_CHANNELS_IN]; MAX_CHANNELS_OUT];
+
+        let mut weights =
+            [[[[0.0; MAX_KERNEL_SIZE]; MAX_KERNEL_SIZE]; MAX_CHANNELS_IN]; MAX_CHANNELS_OUT];
         let mut rng = 42u64;
 
         for channel_out in weights.iter_mut().take(out_c) {
@@ -93,11 +94,15 @@ impl Conv2D {
     /// Forward pass
     /// input: [channels][height][width]
     pub fn forward(
-        &mut self, 
+        &mut self,
         input: &[[[f64; MAX_IMG_DIM]; MAX_IMG_DIM]; MAX_CHANNELS_IN],
         input_h: usize,
-        input_w: usize
-    ) -> ([[[f64; MAX_IMG_DIM]; MAX_IMG_DIM]; MAX_CHANNELS_OUT], usize, usize) {
+        input_w: usize,
+    ) -> (
+        [[[f64; MAX_IMG_DIM]; MAX_IMG_DIM]; MAX_CHANNELS_OUT],
+        usize,
+        usize,
+    ) {
         // Cache input
         self.last_input[0] = *input;
 
@@ -111,7 +116,7 @@ impl Conv2D {
             for (y, row_out) in channel_out.iter_mut().enumerate().take(output_h) {
                 for (x, val_out) in row_out.iter_mut().enumerate().take(output_w) {
                     let mut sum = self.biases[o];
-                    
+
                     // Convolve
                     let in_y_origin = (y * self.stride) as isize - self.padding as isize;
                     let in_x_origin = (x * self.stride) as isize - self.padding as isize;
@@ -122,10 +127,13 @@ impl Conv2D {
                                 let in_y = in_y_origin + ky as isize;
                                 let in_x = in_x_origin + kx as isize;
 
-                                if in_y >= 0 && in_y < input_h as isize && 
-                                   in_x >= 0 && in_x < input_w as isize {
-                                    sum += input_channel[in_y as usize][in_x as usize] * 
-                                           self.weights[o][c][ky][kx];
+                                if in_y >= 0
+                                    && in_y < input_h as isize
+                                    && in_x >= 0
+                                    && in_x < input_w as isize
+                                {
+                                    sum += input_channel[in_y as usize][in_x as usize]
+                                        * self.weights[o][c][ky][kx];
                                 }
                             }
                         }
@@ -149,7 +157,7 @@ mod tests {
     fn test_conv2d_initialization() {
         let conv = Conv2D::new(1, 1, 3, 1, 1, Activation::ReLU);
         assert_eq!(conv.weights.len(), MAX_CHANNELS_OUT); // Array size fixed
-        // Check params
+                                                          // Check params
         assert_eq!(conv.kernel_size, 3);
         assert_eq!(conv.stride, 1);
         assert_eq!(conv.padding, 1);
@@ -159,11 +167,11 @@ mod tests {
     fn test_conv2d_forward_shape() {
         let mut conv = Conv2D::new(1, 1, 3, 1, 1, Activation::ReLU);
         let input = [[[0.5; MAX_IMG_DIM]; MAX_IMG_DIM]; MAX_CHANNELS_IN];
-        
+
         // 10x10 input
         // Output size: (10 + 2*1 - 3) / 1 + 1 = 10
         let (_, h, w) = conv.forward(&input, 10, 10);
-        
+
         assert_eq!(h, 10);
         assert_eq!(w, 10);
     }
