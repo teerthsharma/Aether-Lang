@@ -19,7 +19,7 @@
 #![allow(dead_code)]
 
 use libm::sqrt;
-use crate::ml::clustering::{KMeans, KMeansResult}; // Reuse existing clustering logic if needed
+ // Reuse existing clustering logic if needed
 
 /// Maximum dimension for the manifold points
 const MAX_DIM: usize = 3; 
@@ -110,6 +110,12 @@ impl GossipNode {
 /// Simulates the Ring-Pass ICL network
 pub struct GossipRing {
     pub nodes: heapless::Vec<GossipNode, 16>, // Max 16 cores for simulation
+}
+
+impl Default for GossipRing {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl GossipRing {

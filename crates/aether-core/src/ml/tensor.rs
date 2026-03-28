@@ -21,7 +21,7 @@ use std::vec::Vec;
 use std::vec;
 
 use core::cell::RefCell;
-use libm::{exp, sqrt};
+use libm::sqrt;
 
 /// AEGIS Tensor: N-dimensional array
 #[derive(Debug, Clone, PartialEq)]
@@ -134,7 +134,7 @@ impl Tensor {
         let mut new_data = Vec::with_capacity(total_size);
         let data = self.data.borrow();
         
-        new_data.extend_from_slice(&*data);
+        new_data.extend_from_slice(&data);
         
         Self {
             data: Rc::new(RefCell::new(new_data)),
@@ -153,7 +153,7 @@ impl Tensor {
         let k = self.shape[1];
         let n = other.shape[1];
 
-        let mut result = Tensor::zeros(&[m, n]);
+        let result = Tensor::zeros(&[m, n]);
         let data_a = self.data.borrow();
         let data_b = other.data.borrow();
         let mut data_c = result.data.borrow_mut();
@@ -225,7 +225,7 @@ impl Tensor {
         let rows = self.shape[0];
         let cols = self.shape[1];
         
-        let mut result = Tensor::zeros(&[cols, rows]);
+        let result = Tensor::zeros(&[cols, rows]);
         let data = self.data.borrow();
         let mut res_data = result.data.borrow_mut();
 

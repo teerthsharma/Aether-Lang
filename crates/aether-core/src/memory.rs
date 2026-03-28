@@ -20,10 +20,8 @@ use alloc::vec::Vec;
 use alloc::boxed::Box;
 #[cfg(feature = "std")]
 use std::vec::Vec;
-#[cfg(feature = "std")]
-use std::boxed::Box;
 
-use libm::{sqrt, fabs};
+use libm::sqrt;
 use core::marker::PhantomData;
 
 /// A Geometric Cell (Gc) handle.
@@ -192,6 +190,12 @@ pub struct ManifoldHeap<T> {
     entropy_counter: usize,
     
     pub config: Config,
+}
+
+impl<T> Default for ManifoldHeap<T> {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl<T> ManifoldHeap<T> {
@@ -435,11 +439,7 @@ impl<T> ManifoldHeap<T> {
                      if is_marked {
                          block.liveness[s_idx] += 0.1;
                          should_prune = false;
-                     } else if is_safe {
-                         should_prune = false;
-                     } else {
-                         should_prune = true;
-                     }
+                     } else { should_prune = !is_safe; }
                  } else {
                      should_prune = false;
                  }
