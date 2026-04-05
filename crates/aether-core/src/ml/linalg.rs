@@ -14,9 +14,8 @@ use alloc::vec;
 #[cfg(feature = "alloc")]
 use alloc::vec::Vec;
 
-
 #[cfg(not(feature = "std"))]
-use libm::{log, exp}; // Keep only what's not redefined locally or needed
+use libm::{exp, log}; // Keep only what's not redefined locally or needed
 #[cfg(feature = "std")]
 use std::f64;
 
@@ -56,7 +55,15 @@ impl LossConfig {
             LossConfig::MAE => {
                 let diff = y_pred.sub(y_true);
                 let n = y_true.shape.iter().product::<usize>() as f64;
-                diff.map(|x| if x > 0.0 { 1.0 / n } else if x < 0.0 { -1.0 / n } else { 0.0 })
+                diff.map(|x| {
+                    if x > 0.0 {
+                        1.0 / n
+                    } else if x < 0.0 {
+                        -1.0 / n
+                    } else {
+                        0.0
+                    }
+                })
             }
             LossConfig::BinaryCrossEntropy => {
                 // dL/dp = (1-y)/(1-p) - y/p
@@ -64,11 +71,11 @@ impl LossConfig {
                 let pred_data = y_pred.data.borrow();
                 let n = true_data.len();
                 let mut grad_data = Vec::with_capacity(n); // Fixed: using Vec instead of let mut
-                
+
                 for i in 0..n {
                     let y = true_data[i];
                     let p = pred_data[i].clamp(1e-7, 1.0 - 1e-7); // Avoid div by zero
-                    
+
                     let grad = -(y / p) + ((1.0 - y) / (1.0 - p));
                     grad_data.push(grad / n as f64);
                 }
@@ -85,7 +92,7 @@ impl LossConfig {
                 for i in 0..n {
                     let y = true_data[i];
                     let p = pred_data[i];
-                    
+
                     if 1.0 - y * p > 0.0 {
                         grad_data.push(-y / n as f64);
                     } else {
@@ -99,18 +106,30 @@ impl LossConfig {
 }
 
 /// Mean Squared Error
+// Optimized: replaced high-level tensor operations with single-pass iteration over borrowed arrays to avoid intermediate heap allocations.
 pub fn mse(y_true: &Tensor, y_pred: &Tensor) -> f64 {
-    let diff = y_true.sub(y_pred);
-    diff.mul(&diff).sum() / y_true.shape.iter().product::<usize>() as f64
-}
-
-/// Mean Absolute Error
-pub fn mae(y_true: &Tensor, y_pred: &Tensor) -> f64 {
+    assert_eq!(y_true.shape, y_pred.shape, "Shape mismatch in mse");
     let mut sum = 0.0;
     let true_data = y_true.data.borrow();
     let pred_data = y_pred.data.borrow();
-    let n = true_data.len().min(pred_data.len());
-    
+    let n = true_data.len();
+
+    for i in 0..n {
+        let diff = true_data[i] - pred_data[i];
+        sum += diff * diff;
+    }
+    sum / y_true.shape.iter().product::<usize>() as f64
+}
+
+/// Mean Absolute Error
+// Optimized: replaced high-level tensor operations with single-pass iteration over borrowed arrays to avoid intermediate heap allocations.
+pub fn mae(y_true: &Tensor, y_pred: &Tensor) -> f64 {
+    assert_eq!(y_true.shape, y_pred.shape, "Shape mismatch in mae");
+    let mut sum = 0.0;
+    let true_data = y_true.data.borrow();
+    let pred_data = y_pred.data.borrow();
+    let n = true_data.len();
+
     for i in 0..n {
         sum += fabs(true_data[i] - pred_data[i]);
     }
@@ -123,35 +142,42 @@ pub fn rmse(y_true: &Tensor, y_pred: &Tensor) -> f64 {
 }
 
 /// Binary Cross-Entropy
+// Optimized: replaced high-level tensor operations with single-pass iteration over borrowed arrays to avoid intermediate heap allocations.
 pub fn binary_cross_entropy(y_true: &Tensor, y_pred: &Tensor) -> f64 {
+    assert_eq!(
+        y_true.shape, y_pred.shape,
+        "Shape mismatch in binary_cross_entropy"
+    );
     let mut sum = 0.0;
     let true_data = y_true.data.borrow();
     let pred_data = y_pred.data.borrow();
-    let n = true_data.len().min(pred_data.len());
-    
+    let n = true_data.len();
+
     for i in 0..n {
         let p = pred_data[i].clamp(1e-7, 1.0 - 1e-7);
         let y = true_data[i];
-        
+
         #[cfg(not(feature = "std"))]
         {
-             sum -= y * log(p) + (1.0 - y) * log(1.0 - p);
+            sum -= y * log(p) + (1.0 - y) * log(1.0 - p);
         }
         #[cfg(feature = "std")]
         {
-             sum -= y * p.ln() + (1.0 - y) * (1.0 - p).ln();
+            sum -= y * p.ln() + (1.0 - y) * (1.0 - p).ln();
         }
     }
     sum / n as f64
 }
 
 /// Hinge Loss (for SVM)
+// Optimized: replaced high-level tensor operations with single-pass iteration over borrowed arrays to avoid intermediate heap allocations.
 pub fn hinge_loss(y_true: &Tensor, y_pred: &Tensor) -> f64 {
+    assert_eq!(y_true.shape, y_pred.shape, "Shape mismatch in hinge_loss");
     let mut sum = 0.0;
     let true_data = y_true.data.borrow();
     let pred_data = y_pred.data.borrow();
-    let n = true_data.len().min(pred_data.len());
-    
+    let n = true_data.len();
+
     for i in 0..n {
         let margin = 1.0 - true_data[i] * pred_data[i];
         if margin > 0.0 {
@@ -173,9 +199,9 @@ where
     // Clone structure
     let grad = Tensor::zeros(&x.shape);
     let n = x.shape.iter().product();
-    
+
     let mut grad_data = grad.data.borrow_mut();
-    
+
     // We need a deep copy to mutate independent probe.
     let mut x_plus = Tensor::new(&x.data.borrow(), &x.shape);
     let mut x_minus = Tensor::new(&x.data.borrow(), &x.shape);
@@ -183,21 +209,21 @@ where
     {
         let mut xp_data = x_plus.data.borrow_mut();
         let mut xm_data = x_minus.data.borrow_mut();
-        
+
         drop(xp_data);
         drop(xm_data);
-        
+
         for i in 0..n {
-             let original = x.data.borrow()[i];
-             
-             x_plus.data.borrow_mut()[i] = original + epsilon;
-             x_minus.data.borrow_mut()[i] = original - epsilon;
-             
-             grad_data[i] = (f(&x_plus) - f(&x_minus)) / (2.0 * epsilon);
-             
-             // Restore
-             x_plus.data.borrow_mut()[i] = original;
-             x_minus.data.borrow_mut()[i] = original;
+            let original = x.data.borrow()[i];
+
+            x_plus.data.borrow_mut()[i] = original + epsilon;
+            x_minus.data.borrow_mut()[i] = original - epsilon;
+
+            grad_data[i] = (f(&x_plus) - f(&x_minus)) / (2.0 * epsilon);
+
+            // Restore
+            x_plus.data.borrow_mut()[i] = original;
+            x_minus.data.borrow_mut()[i] = original;
         }
     }
 
@@ -210,30 +236,41 @@ where
 // ═══════════════════════════════════════════════════════════════════════════════
 
 /// Euclidean distance
+// Optimized: replaced high-level tensor operations with single-pass iteration over borrowed arrays to avoid intermediate heap allocations.
 pub fn euclidean_distance(a: &Tensor, b: &Tensor) -> f64 {
-    let diff = a.sub(b);
-    sqrt(diff.mul(&diff).sum())
+    assert_eq!(a.shape, b.shape, "Shape mismatch in euclidean_distance");
+    let mut sum = 0.0;
+    let data_a = a.data.borrow();
+    let data_b = b.data.borrow();
+    for i in 0..data_a.len() {
+        let diff = data_a[i] - data_b[i];
+        sum += diff * diff;
+    }
+    sqrt(sum)
 }
 
 /// Manhattan distance (L1)
+// Optimized: replaced high-level tensor operations with single-pass iteration over borrowed arrays to avoid intermediate heap allocations.
 pub fn manhattan_distance(a: &Tensor, b: &Tensor) -> f64 {
+    assert_eq!(a.shape, b.shape, "Shape mismatch in manhattan_distance");
     let mut sum = 0.0;
-    // Tensor doesn't have L1 norm built-in, do manual
-    let diff_data = a.sub(b).data;
-    let data = diff_data.borrow();
-    for &val in data.iter() {
-        sum += fabs(val);
+    let data_a = a.data.borrow();
+    let data_b = b.data.borrow();
+    for i in 0..data_a.len() {
+        sum += fabs(data_a[i] - data_b[i]);
     }
     sum
 }
 
 /// Chebyshev distance (L∞)
+// Optimized: replaced high-level tensor operations with single-pass iteration over borrowed arrays to avoid intermediate heap allocations.
 pub fn chebyshev_distance(a: &Tensor, b: &Tensor) -> f64 {
-    let diff = a.sub(b);
-    let data = diff.data.borrow();
+    assert_eq!(a.shape, b.shape, "Shape mismatch in chebyshev_distance");
     let mut max = 0.0;
-    for &val in data.iter() {
-        let abs_val = fabs(val);
+    let data_a = a.data.borrow();
+    let data_b = b.data.borrow();
+    for i in 0..data_a.len() {
+        let abs_val = fabs(data_a[i] - data_b[i]);
         if abs_val > max {
             max = abs_val;
         }
@@ -242,9 +279,16 @@ pub fn chebyshev_distance(a: &Tensor, b: &Tensor) -> f64 {
 }
 
 /// RBF kernel value
+// Optimized: replaced high-level tensor operations with single-pass iteration over borrowed arrays to avoid intermediate heap allocations.
 pub fn rbf_kernel(a: &Tensor, b: &Tensor, gamma: f64) -> f64 {
-    let dist = a.sub(b);
-    let dist_sq = dist.mul(&dist).sum();
+    assert_eq!(a.shape, b.shape, "Shape mismatch in rbf_kernel");
+    let mut dist_sq = 0.0;
+    let data_a = a.data.borrow();
+    let data_b = b.data.borrow();
+    for i in 0..data_a.len() {
+        let diff = data_a[i] - data_b[i];
+        dist_sq += diff * diff;
+    }
     exp(-gamma * dist_sq)
 }
 
