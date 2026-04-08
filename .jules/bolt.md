@@ -1,3 +1,7 @@
-## 2026-01-29 - Single Pass Variance Calculation in Manifold Heap
-**Learning:** The `ChebyshevGuard::calculate` function in `ManifoldHeap` was performing two passes over the memory blocks to calculate mean and variance separately. This is a common pattern when following the mathematical definition directly. However, in a performance-critical "metabolism" loop (GC), this doubles the memory access overhead.
-**Action:** Always check for opportunities to compute statistics (mean, variance) in a single pass using Welford's algorithm or accumulated sums, especially when iterating over large data structures.
+## 2024-04-02 - [Distance Optimization in ManifoldPoint]
+**Learning:** Checking for neighborhood in `ManifoldPoint::is_neighbor` using squared distances avoids the high cost of calculating the true euclidean distance (with `sqrt`) inside the critical hot loop (used by `SparseAttentionGraph::add_point`). This speeds up topological projection substantially. The check needs to early exit correctly based on negative epsilon, or dynamically if sum surpasses eps_sq to be robust for all inputs.
+**Action:** Replace `self.distance(other) < epsilon` with a loop evaluating `d^2` and accumulating the sum. Avoid using `sqrt` for direct comparison against distances since distance itself is fundamentally a magnitude.
+
+## 2024-04-02 - [Distance Optimization in ManifoldPoint]
+**Learning:** Checking for neighborhood in `ManifoldPoint::is_neighbor` using squared distances avoids the high cost of calculating the true euclidean distance (with `sqrt`) inside the critical hot loop (used by `SparseAttentionGraph::add_point`). This speeds up topological projection substantially. The check needs to early exit correctly based on negative epsilon, or dynamically if sum surpasses eps_sq to be robust for all inputs.
+**Action:** Replace `self.distance(other) < epsilon` with a loop evaluating `d^2` and accumulating the sum. Avoid using `sqrt` for direct comparison against distances since distance itself is fundamentally a magnitude.
