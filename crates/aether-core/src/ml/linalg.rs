@@ -99,9 +99,20 @@ impl LossConfig {
 }
 
 /// Mean Squared Error
+/// ⚡ Bolt Optimization: Uses single pass direct array iteration
+/// avoiding intermediate Tensor heap allocations for O(1) memory overhead.
 pub fn mse(y_true: &Tensor, y_pred: &Tensor) -> f64 {
-    let diff = y_true.sub(y_pred);
-    diff.mul(&diff).sum() / y_true.shape.iter().product::<usize>() as f64
+    assert_eq!(y_true.shape, y_pred.shape, "Shape mismatch in MSE");
+    let mut sum = 0.0;
+    let true_data = y_true.data.borrow();
+    let pred_data = y_pred.data.borrow();
+    let n = true_data.len();
+
+    for i in 0..n {
+        let err = true_data[i] - pred_data[i];
+        sum += err * err;
+    }
+    sum / n as f64
 }
 
 /// Mean Absolute Error
@@ -210,30 +221,47 @@ where
 // ═══════════════════════════════════════════════════════════════════════════════
 
 /// Euclidean distance
+/// ⚡ Bolt Optimization: Avoids intermediate sub/mul Tensor allocations, single pass over borrowed data.
 pub fn euclidean_distance(a: &Tensor, b: &Tensor) -> f64 {
-    let diff = a.sub(b);
-    sqrt(diff.mul(&diff).sum())
+    assert_eq!(a.shape, b.shape, "Shape mismatch in euclidean_distance");
+    let mut sum = 0.0;
+    let a_data = a.data.borrow();
+    let b_data = b.data.borrow();
+    let n = a_data.len();
+
+    for i in 0..n {
+        let diff = a_data[i] - b_data[i];
+        sum += diff * diff;
+    }
+    sqrt(sum)
 }
 
 /// Manhattan distance (L1)
+/// ⚡ Bolt Optimization: Replaces Tensor subtraction with single pass L1 manual computation, O(1) memory overhead.
 pub fn manhattan_distance(a: &Tensor, b: &Tensor) -> f64 {
+    assert_eq!(a.shape, b.shape, "Shape mismatch in manhattan_distance");
     let mut sum = 0.0;
-    // Tensor doesn't have L1 norm built-in, do manual
-    let diff_data = a.sub(b).data;
-    let data = diff_data.borrow();
-    for &val in data.iter() {
-        sum += fabs(val);
+    let a_data = a.data.borrow();
+    let b_data = b.data.borrow();
+    let n = a_data.len();
+
+    for i in 0..n {
+        sum += fabs(a_data[i] - b_data[i]);
     }
     sum
 }
 
 /// Chebyshev distance (L∞)
+/// ⚡ Bolt Optimization: Uses direct borrowed array access to bypass Tensor dynamic metadata allocations for finding max diff.
 pub fn chebyshev_distance(a: &Tensor, b: &Tensor) -> f64 {
-    let diff = a.sub(b);
-    let data = diff.data.borrow();
+    assert_eq!(a.shape, b.shape, "Shape mismatch in chebyshev_distance");
+    let a_data = a.data.borrow();
+    let b_data = b.data.borrow();
+    let n = a_data.len();
     let mut max = 0.0;
-    for &val in data.iter() {
-        let abs_val = fabs(val);
+
+    for i in 0..n {
+        let abs_val = fabs(a_data[i] - b_data[i]);
         if abs_val > max {
             max = abs_val;
         }
