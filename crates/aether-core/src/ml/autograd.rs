@@ -180,16 +180,18 @@ impl<'a> Context<'a> {
         for op in self.tape.ops.iter().rev() {
             match op {
                 Op::Add { out, lhs, rhs } => {
-                     // Solves borrow checker by cloning Option first
-                     let grad_out = grads[out.index].clone();
+                     // Solves borrow checker without cloning metadata
+                     let grad_out = grads[out.index].take();
                      if let Some(grad) = grad_out {
                          // dL/d(lhs) += dL/dout * 1
                          Self::accumulate_grad(&mut grads, lhs.index, &grad);
                          Self::accumulate_grad(&mut grads, rhs.index, &grad);
+
+                         grads[out.index] = Some(grad);
                      }
                 },
                 Op::Mul { out, lhs, rhs } => {
-                    let grad_out = grads[out.index].clone();
+                    let grad_out = grads[out.index].take();
                     if let Some(grad) = grad_out {
                         let lhs_val = self.heap.get(*lhs).unwrap();
                         let rhs_val = self.heap.get(*rhs).unwrap();
@@ -201,10 +203,12 @@ impl<'a> Context<'a> {
                         // dL/dRhs = grad_out * lhs
                         let d_rhs: Tensor = grad.mul(lhs_val);
                         Self::accumulate_grad(&mut grads, rhs.index, &d_rhs);
+
+                        grads[out.index] = Some(grad);
                     }
                 },
                 Op::MatMul { out, lhs, rhs } => {
-                     let grad_out = grads[out.index].clone();
+                     let grad_out = grads[out.index].take();
                      if let Some(grad) = grad_out {
                         let lhs_val = self.heap.get(*lhs).unwrap();
                         let rhs_val = self.heap.get(*rhs).unwrap();
@@ -217,16 +221,20 @@ impl<'a> Context<'a> {
                         // dB = A^T @ dC
                         let d_rhs: Tensor = lhs_val.transpose().matmul(&grad);
                         Self::accumulate_grad(&mut grads, rhs.index, &d_rhs);
+
+                        grads[out.index] = Some(grad);
                      }
                 },
                 Op::ReLU { out, input } => {
-                    let grad_out = grads[out.index].clone();
+                    let grad_out = grads[out.index].take();
                     if let Some(grad) = grad_out {
                         let input_val = self.heap.get(*input).unwrap();
                         // dL/dx = grad_out * (1 if x > 0 else 0)
                         let mask = input_val.map(|x| if x > 0.0 { 1.0 } else { 0.0 });
                         let d_input: Tensor = grad.mul(&mask);
                         Self::accumulate_grad(&mut grads, input.index, &d_input);
+
+                        grads[out.index] = Some(grad);
                     }
                 }
             }
