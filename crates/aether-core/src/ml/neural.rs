@@ -10,11 +10,7 @@
 #![allow(dead_code)]
 
 #[cfg(feature = "alloc")]
-use alloc::vec;
-#[cfg(feature = "alloc")]
 use alloc::vec::Vec;
-#[cfg(feature = "alloc")]
-use alloc::boxed::Box;
 
 #[cfg(not(feature = "std"))]
 use libm::{fabs}; // Adjust based on usage
