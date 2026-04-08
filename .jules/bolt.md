@@ -1,3 +1,7 @@
 ## 2026-01-29 - Single Pass Variance Calculation in Manifold Heap
 **Learning:** The `ChebyshevGuard::calculate` function in `ManifoldHeap` was performing two passes over the memory blocks to calculate mean and variance separately. This is a common pattern when following the mathematical definition directly. However, in a performance-critical "metabolism" loop (GC), this doubles the memory access overhead.
 **Action:** Always check for opportunities to compute statistics (mean, variance) in a single pass using Welford's algorithm or accumulated sums, especially when iterating over large data structures.
+
+## 2026-04-02 - Avoiding Intermediate Allocations in Scalar Reductions
+**Learning:** High-level tensor operations like `a.sub(b)` or `.mul()` inside scalar reduction functions (e.g., `mse`, `euclidean_distance`, `mae`) trigger costly intermediate `Tensor` heap allocations. These allocations dominate the runtime of tight loops and are unnecessary since the output is a scalar. Additionally, using `.min()` for length truncation instead of shape assertions can mask shape mismatch bugs.
+**Action:** For scalar reduction functions, do not use `Tensor` methods that return new tensors. Instead, explicitly assert shape equality (`assert_eq!(a.shape, b.shape)`) to ensure correctness, and perform a single-pass iteration directly over the underlying borrowed data (`a.data.borrow()`) to accumulate the result.
