@@ -1,3 +1,7 @@
 ## 2026-01-29 - Single Pass Variance Calculation in Manifold Heap
 **Learning:** The `ChebyshevGuard::calculate` function in `ManifoldHeap` was performing two passes over the memory blocks to calculate mean and variance separately. This is a common pattern when following the mathematical definition directly. However, in a performance-critical "metabolism" loop (GC), this doubles the memory access overhead.
 **Action:** Always check for opportunities to compute statistics (mean, variance) in a single pass using Welford's algorithm or accumulated sums, especially when iterating over large data structures.
+
+## 2026-03-22 - Autograd Backward Pass Vector Allocation Overhead
+**Learning:** In the `aether-core` machine learning autograd backward pass, a common pattern was cloning `Option<Tensor>` out of the `grads` vector to bypass the borrow checker before mutating other elements in the vector. While the `Tensor` data is shared via `Rc`, its metadata (`shape` and `strides`) is `Vec<usize>` and gets re-allocated on the heap with every `clone()`. In a tight backward iteration loop over the autograd tape, this leads to excessive heap allocations.
+**Action:** Instead of `clone()`, use `Option::take()` to move the `Tensor` out of the gradient map without memory allocation, use it for accumulating input gradients, and then restore it back into the map with `grads[idx] = Some(grad);`. This avoids significant structural heap overhead for tensor metadata during backpropagation.
