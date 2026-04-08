@@ -97,6 +97,27 @@ impl TopologicalShape {
 ///
 /// # Returns
 /// β₀: Number of connected components
+#[inline(always)]
+fn is_gap(a: u8, b: u8) -> bool {
+    (a as i16 - b as i16).abs() > CLUSTER_THRESHOLD
+}
+
+#[inline(always)]
+fn is_loop_pattern(w: &[u8]) -> bool {
+    let tolerance = 5i16; // How close values must be to "close a loop"
+    let a = w[0] as i16;
+    let b = w[1] as i16;
+    let c = w[2] as i16;
+    let d = w[3] as i16;
+
+    if (a - d).abs() <= tolerance {
+        if (a - b).abs() > tolerance || (a - c).abs() > tolerance {
+            return true;
+        }
+    }
+    false
+}
+
 pub fn compute_betti_0(data: &[u8]) -> u32 {
     if data.len() < 2 {
         return if data.is_empty() { 0 } else { 1 };
@@ -106,9 +127,7 @@ pub fn compute_betti_0(data: &[u8]) -> u32 {
     let mut in_component = false;
 
     for window in data.windows(2) {
-        let dist = (window[0] as i16 - window[1] as i16).abs();
-
-        if dist > CLUSTER_THRESHOLD {
+        if is_gap(window[0], window[1]) {
             if !in_component {
                 components += 1;
                 in_component = true;
@@ -137,22 +156,11 @@ pub fn compute_betti_1(data: &[u8]) -> u32 {
     }
 
     let mut loops = 0u32;
-    let tolerance = 5i16; // How close values must be to "close a loop"
 
     // Detect cycles: a -> b -> c -> ~a (return to start)
     for window in data.windows(4) {
-        let a = window[0] as i16;
-        let d = window[3] as i16;
-
-        // If we return to approximately the same value, it's a "loop"
-        if (a - d).abs() <= tolerance {
-            // Check that middle values are different (actual traversal)
-            let b = window[1] as i16;
-            let c = window[2] as i16;
-
-            if (a - b).abs() > tolerance || (a - c).abs() > tolerance {
-                loops += 1;
-            }
+        if is_loop_pattern(window) {
+            loops += 1;
         }
     }
 
@@ -272,8 +280,68 @@ pub fn verify_sliding_window(data: &[u8], window_size: usize) -> Result<(), usiz
         return if is_shape_valid(data) { Ok(()) } else { Err(0) };
     }
 
-    for (offset, window) in data.windows(size).enumerate() {
-        if !is_shape_valid(window) {
+    // Fallback for very small windows where incremental logic is complex
+    if size < 4 {
+        for (offset, window) in data.windows(size).enumerate() {
+            if !is_shape_valid(window) {
+                return Err(offset);
+            }
+        }
+        return Ok(());
+    }
+
+    let mut current_betti_0 = compute_betti_0(&data[..size]);
+    let mut current_betti_1 = compute_betti_1(&data[..size]);
+
+    // Check first window
+    let mut shape = TopologicalShape::new(current_betti_0, current_betti_1, size);
+    if shape.density < DENSITY_MIN || shape.density > DENSITY_MAX || shape.betti_1 > MAX_BETTI_1 {
+        return Err(0);
+    }
+
+    for offset in 1..=(data.len() - size) {
+        // Update betti_0 incrementally
+        // Old edge leaving
+        // Note: the original loop checks `is_gap(w[0], w[1])`. If we remove the first element,
+        // we remove the gap starting at `offset - 1`. If it was the start of a component, we decrement.
+        // But the original compute_betti_0 treats CONSECUTIVE gaps as one component.
+        // It does: `if is_gap { if !in_comp { comp++; in_comp=true; } } else { in_comp=false; }`
+        // So a gap counts as +1 if the PREVIOUS edge was NOT a gap.
+
+        // This makes exact incremental Betti 0 tricky because of the clustering (consecutive gaps).
+        // Let's implement the specific transition logic:
+
+        let old_leaving_gap = is_gap(data[offset - 1], data[offset]);
+        let old_next_gap = is_gap(data[offset], data[offset + 1]);
+        if old_leaving_gap && !old_next_gap {
+            // It was a component ending right at the boundary
+            current_betti_0 -= 1;
+        }
+
+        // New edge entering
+        let new_entering_prev_gap = is_gap(data[offset + size - 3], data[offset + size - 2]);
+        let new_entering_gap = is_gap(data[offset + size - 2], data[offset + size - 1]);
+        if new_entering_gap && !new_entering_prev_gap {
+            current_betti_0 += 1;
+        }
+
+        // Update betti_1 incrementally
+        let leaving_loop = is_loop_pattern(&data[offset - 1..offset + 3]);
+        if leaving_loop {
+            current_betti_1 -= 1;
+        }
+
+        let entering_loop = is_loop_pattern(&data[offset + size - 4..offset + size]);
+        if entering_loop {
+            current_betti_1 += 1;
+        }
+
+        shape.betti_0 = current_betti_0;
+        shape.betti_1 = current_betti_1;
+        shape.density = current_betti_0 as f64 / size as f64;
+
+        if shape.density < DENSITY_MIN || shape.density > DENSITY_MAX || shape.betti_1 > MAX_BETTI_1
+        {
             return Err(offset);
         }
     }
@@ -335,5 +403,46 @@ mod tests {
             VerifyResult::Pass => {}
             _ => {}
         }
+    }
+
+    #[test]
+    fn test_verify_sliding_window_equivalence() {
+        // Generate pseudo-random data with gaps and loops
+        let mut data = [0u8; 128];
+        for i in 0..128 {
+            data[i] = (i * 7 % 256) as u8;
+        }
+        // Force some specific loop patterns and gaps
+        data[10] = 10;
+        data[11] = 50;
+        data[12] = 100;
+        data[13] = 10;
+        data[50] = 5;
+        data[51] = 60;
+        data[52] = 120;
+        data[53] = 5;
+        data[60] = 200;
+        data[61] = 10;
+        data[62] = 200; // huge gaps
+
+        let window_size = 16;
+
+        // Let's implement the naive logic to compare
+        let naive_verify = |data: &[u8], size: usize| -> Result<(), usize> {
+            for (offset, window) in data.windows(size).enumerate() {
+                if !is_shape_valid(window) {
+                    return Err(offset);
+                }
+            }
+            Ok(())
+        };
+
+        let expected = naive_verify(&data, window_size);
+        let actual = verify_sliding_window(&data, window_size);
+
+        assert_eq!(
+            expected, actual,
+            "Incremental approach differs from naive approach!"
+        );
     }
 }
