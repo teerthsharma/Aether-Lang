@@ -204,8 +204,8 @@ impl DenseLayer {
         // z = W * x + b
         // weights: [out, in], input: [in] -> [out]
         
-        let wx = self.weights.matmul(input);
-        let z = wx.add(&self.biases);
+        let z = self.weights.matmul(input);
+        z.add_assign(&self.biases);
         
         self.last_z = Some(z.clone());
         self.activation.apply(&z)
