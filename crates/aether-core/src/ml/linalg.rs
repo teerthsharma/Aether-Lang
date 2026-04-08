@@ -100,16 +100,27 @@ impl LossConfig {
 
 /// Mean Squared Error
 pub fn mse(y_true: &Tensor, y_pred: &Tensor) -> f64 {
-    let diff = y_true.sub(y_pred);
-    diff.mul(&diff).sum() / y_true.shape.iter().product::<usize>() as f64
+    assert_eq!(y_true.shape, y_pred.shape, "Shape mismatch for mse");
+    let mut sum = 0.0;
+    let true_data = y_true.data.borrow();
+    let pred_data = y_pred.data.borrow();
+    let n = true_data.len();
+
+    for i in 0..n {
+        let diff = true_data[i] - pred_data[i];
+        sum += diff * diff;
+    }
+
+    sum / n as f64
 }
 
 /// Mean Absolute Error
 pub fn mae(y_true: &Tensor, y_pred: &Tensor) -> f64 {
+    assert_eq!(y_true.shape, y_pred.shape, "Shape mismatch for mae");
     let mut sum = 0.0;
     let true_data = y_true.data.borrow();
     let pred_data = y_pred.data.borrow();
-    let n = true_data.len().min(pred_data.len());
+    let n = true_data.len();
     
     for i in 0..n {
         sum += fabs(true_data[i] - pred_data[i]);
@@ -124,10 +135,11 @@ pub fn rmse(y_true: &Tensor, y_pred: &Tensor) -> f64 {
 
 /// Binary Cross-Entropy
 pub fn binary_cross_entropy(y_true: &Tensor, y_pred: &Tensor) -> f64 {
+    assert_eq!(y_true.shape, y_pred.shape, "Shape mismatch for binary_cross_entropy");
     let mut sum = 0.0;
     let true_data = y_true.data.borrow();
     let pred_data = y_pred.data.borrow();
-    let n = true_data.len().min(pred_data.len());
+    let n = true_data.len();
     
     for i in 0..n {
         let p = pred_data[i].clamp(1e-7, 1.0 - 1e-7);
@@ -147,10 +159,11 @@ pub fn binary_cross_entropy(y_true: &Tensor, y_pred: &Tensor) -> f64 {
 
 /// Hinge Loss (for SVM)
 pub fn hinge_loss(y_true: &Tensor, y_pred: &Tensor) -> f64 {
+    assert_eq!(y_true.shape, y_pred.shape, "Shape mismatch for hinge_loss");
     let mut sum = 0.0;
     let true_data = y_true.data.borrow();
     let pred_data = y_pred.data.borrow();
-    let n = true_data.len().min(pred_data.len());
+    let n = true_data.len();
     
     for i in 0..n {
         let margin = 1.0 - true_data[i] * pred_data[i];
@@ -211,29 +224,44 @@ where
 
 /// Euclidean distance
 pub fn euclidean_distance(a: &Tensor, b: &Tensor) -> f64 {
-    let diff = a.sub(b);
-    sqrt(diff.mul(&diff).sum())
+    assert_eq!(a.shape, b.shape, "Shape mismatch for euclidean_distance");
+    let mut sum = 0.0;
+    let data_a = a.data.borrow();
+    let data_b = b.data.borrow();
+    let n = data_a.len();
+
+    for i in 0..n {
+        let diff = data_a[i] - data_b[i];
+        sum += diff * diff;
+    }
+
+    sqrt(sum)
 }
 
 /// Manhattan distance (L1)
 pub fn manhattan_distance(a: &Tensor, b: &Tensor) -> f64 {
+    assert_eq!(a.shape, b.shape, "Shape mismatch for manhattan_distance");
     let mut sum = 0.0;
-    // Tensor doesn't have L1 norm built-in, do manual
-    let diff_data = a.sub(b).data;
-    let data = diff_data.borrow();
-    for &val in data.iter() {
-        sum += fabs(val);
+    let data_a = a.data.borrow();
+    let data_b = b.data.borrow();
+    let n = data_a.len();
+
+    for i in 0..n {
+        sum += fabs(data_a[i] - data_b[i]);
     }
     sum
 }
 
 /// Chebyshev distance (L∞)
 pub fn chebyshev_distance(a: &Tensor, b: &Tensor) -> f64 {
-    let diff = a.sub(b);
-    let data = diff.data.borrow();
+    assert_eq!(a.shape, b.shape, "Shape mismatch for chebyshev_distance");
     let mut max = 0.0;
-    for &val in data.iter() {
-        let abs_val = fabs(val);
+    let data_a = a.data.borrow();
+    let data_b = b.data.borrow();
+    let n = data_a.len();
+
+    for i in 0..n {
+        let abs_val = fabs(data_a[i] - data_b[i]);
         if abs_val > max {
             max = abs_val;
         }
@@ -243,9 +271,18 @@ pub fn chebyshev_distance(a: &Tensor, b: &Tensor) -> f64 {
 
 /// RBF kernel value
 pub fn rbf_kernel(a: &Tensor, b: &Tensor, gamma: f64) -> f64 {
-    let dist = a.sub(b);
-    let dist_sq = dist.mul(&dist).sum();
-    exp(-gamma * dist_sq)
+    assert_eq!(a.shape, b.shape, "Shape mismatch for rbf_kernel");
+    let mut sum = 0.0;
+    let data_a = a.data.borrow();
+    let data_b = b.data.borrow();
+    let n = data_a.len();
+
+    for i in 0..n {
+        let diff = data_a[i] - data_b[i];
+        sum += diff * diff;
+    }
+
+    exp(-gamma * sum)
 }
 
 fn fabs(x: f64) -> f64 {
