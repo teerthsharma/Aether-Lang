@@ -68,7 +68,25 @@ impl<const D: usize> ManifoldPoint<D> {
 
     /// Check if within epsilon-neighborhood (sparse attention criterion)
     pub fn is_neighbor(&self, other: &Self, epsilon: f64) -> bool {
-        self.distance(other) < epsilon
+        if epsilon <= 0.0 {
+            return false;
+        }
+
+        let epsilon_sq = epsilon * epsilon;
+        let mut sum = 0.0;
+
+        // Inline squared distance loop with early exit (avoids libm::sqrt overhead)
+        for i in 0..D {
+            let d = self.coords[i] - other.coords[i];
+            sum += d * d;
+
+            // Early exit if we exceed threshold, also correctly propagates false for NaN values
+            if !(sum < epsilon_sq) {
+                return false;
+            }
+        }
+
+        true
     }
 }
 
