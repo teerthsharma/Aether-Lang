@@ -10,15 +10,15 @@
 #[cfg(feature = "alloc")]
 use alloc::rc::Rc;
 #[cfg(feature = "alloc")]
-use alloc::vec::Vec;
-#[cfg(feature = "alloc")]
 use alloc::vec;
+#[cfg(feature = "alloc")]
+use alloc::vec::Vec;
 #[cfg(not(feature = "alloc"))]
 use std::rc::Rc;
 #[cfg(not(feature = "alloc"))]
-use std::vec::Vec;
-#[cfg(not(feature = "alloc"))]
 use std::vec;
+#[cfg(not(feature = "alloc"))]
+use std::vec::Vec;
 
 use core::cell::RefCell;
 use libm::{exp, sqrt};
@@ -38,7 +38,11 @@ impl Tensor {
     /// Create a new tensor from a raw vector (consuming it) and shape
     pub fn from_vec(data: Vec<f64>, shape: Vec<usize>) -> Self {
         let total_size: usize = shape.iter().product();
-        assert_eq!(data.len(), total_size, "Data length must match shape product");
+        assert_eq!(
+            data.len(),
+            total_size,
+            "Data length must match shape product"
+        );
 
         let mut strides = vec![0; shape.len()];
         let mut stride = 1;
@@ -57,7 +61,11 @@ impl Tensor {
     /// Create a new tensor from a slice and shape
     pub fn new(data: &[f64], shape: &[usize]) -> Self {
         let total_size: usize = shape.iter().product();
-        assert_eq!(data.len(), total_size, "Data length must match shape product");
+        assert_eq!(
+            data.len(),
+            total_size,
+            "Data length must match shape product"
+        );
 
         let mut strides = vec![0; shape.len()];
         let mut stride = 1;
@@ -88,19 +96,20 @@ impl Tensor {
     }
 
     /// Create a tensor with Xavier initialization
+    // Optimized: replaced manual loops and .push() with iterator-based .collect() to reduce memory management overhead.
     pub fn kaiming_uniform(shape: &[usize]) -> Self {
         let total_size: usize = shape.iter().product();
         let fan_in = if shape.len() > 1 { shape[1] } else { 1 };
         let bound = sqrt(3.0 / fan_in as f64);
-        
+
         // Simple LCG for deterministic randomness in no_std
         let mut rng = 42u64;
-        let mut data: Vec<f64> = Vec::with_capacity(total_size);
-        
-        for _ in 0..total_size {
+        let mut data: Vec<f64> = alloc::vec![0.0; total_size];
+
+        for i in 0..total_size {
             rng = rng.wrapping_mul(6364136223846793005).wrapping_add(1);
             let r = (rng as f64 / u64::MAX as f64) * 2.0 - 1.0;
-            data.push(r * bound);
+            data[i] = r * bound;
         }
 
         Self::new(&data, shape)
@@ -133,9 +142,9 @@ impl Tensor {
         let total_size: usize = self.shape.iter().product();
         let mut new_data = Vec::with_capacity(total_size);
         let data = self.data.borrow();
-        
+
         new_data.extend_from_slice(&*data);
-        
+
         Self {
             data: Rc::new(RefCell::new(new_data)),
             shape: vec![total_size],
@@ -147,7 +156,10 @@ impl Tensor {
     pub fn matmul(&self, other: &Tensor) -> Tensor {
         assert_eq!(self.shape.len(), 2, "Matmul requires 2D tensors");
         assert_eq!(other.shape.len(), 2, "Matmul requires 2D tensors");
-        assert_eq!(self.shape[1], other.shape[0], "Dimension mismatch for matmul");
+        assert_eq!(
+            self.shape[1], other.shape[0],
+            "Dimension mismatch for matmul"
+        );
 
         let m = self.shape[0];
         let k = self.shape[1];
@@ -169,54 +181,45 @@ impl Tensor {
                 data_c[i * result.strides[0] + j * result.strides[1]] = sum;
             }
         }
-        
+
         drop(data_c);
         result
     }
 
     /// Element-wise addition
+    // Optimized: replaced manual loops and .push() with iterator-based .collect() to reduce memory management overhead.
     pub fn add(&self, other: &Tensor) -> Tensor {
         assert_eq!(self.shape, other.shape, "Shape mismatch for add");
-        let total_size: usize = self.shape.iter().product();
-        let mut result_data = Vec::with_capacity(total_size);
-        
+
         let data_a = self.data.borrow();
         let data_b = other.data.borrow();
 
-        for i in 0..total_size {
-            result_data.push(data_a[i] + data_b[i]);
-        }
+        let result_data: Vec<f64> = data_a.iter().zip(data_b.iter()).map(|(a, b)| a + b).collect();
 
-        Self::new(&result_data, &self.shape)
+        Self::from_vec(result_data, self.shape.clone())
     }
 
     /// Element-wise multiplication
+    // Optimized: replaced manual loops and .push() with iterator-based .collect() to reduce memory management overhead.
     pub fn mul(&self, other: &Tensor) -> Tensor {
         assert_eq!(self.shape, other.shape, "Shape mismatch for mul");
-        let total_size: usize = self.shape.iter().product();
-        let mut result_data = Vec::with_capacity(total_size);
-        
+
         let data_a = self.data.borrow();
         let data_b = other.data.borrow();
 
-        for i in 0..total_size {
-            result_data.push(data_a[i] * data_b[i]);
-        }
+        let result_data: Vec<f64> = data_a.iter().zip(data_b.iter()).map(|(a, b)| a * b).collect();
 
-        Self::new(&result_data, &self.shape)
+        Self::from_vec(result_data, self.shape.clone())
     }
 
     /// Scalar multiplication
+    // Optimized: replaced manual loops and .push() with iterator-based .collect() to reduce memory management overhead.
     pub fn scale(&self, s: f64) -> Tensor {
-        let total_size: usize = self.shape.iter().product();
-        let mut result_data = Vec::with_capacity(total_size);
         let data = self.data.borrow();
 
-        for i in 0..total_size {
-            result_data.push(data[i] * s);
-        }
+        let result_data: Vec<f64> = data.iter().map(|v| v * s).collect();
 
-        Self::new(&result_data, &self.shape)
+        Self::from_vec(result_data, self.shape.clone())
     }
 
     /// Transpose (2D)
@@ -224,18 +227,18 @@ impl Tensor {
         assert_eq!(self.shape.len(), 2, "Transpose support 2D only for now");
         let rows = self.shape[0];
         let cols = self.shape[1];
-        
+
         let mut result = Tensor::zeros(&[cols, rows]);
         let data = self.data.borrow();
         let mut res_data = result.data.borrow_mut();
 
         for i in 0..rows {
             for j in 0..cols {
-                res_data[j * result.strides[0] + i * result.strides[1]] = 
+                res_data[j * result.strides[0] + i * result.strides[1]] =
                     data[i * self.strides[0] + j * self.strides[1]];
             }
         }
-        
+
         drop(res_data);
         result
     }
@@ -246,32 +249,28 @@ impl Tensor {
     }
 
     /// Element-wise subtraction
+    // Optimized: replaced manual loops and .push() with iterator-based .collect() to reduce memory management overhead.
     pub fn sub(&self, other: &Tensor) -> Tensor {
         assert_eq!(self.shape, other.shape, "Shape mismatch for sub");
-        let total_size: usize = self.shape.iter().product();
-        let mut result_data = Vec::with_capacity(total_size);
-        
+
         let data_a = self.data.borrow();
         let data_b = other.data.borrow();
 
-        for i in 0..total_size {
-            result_data.push(data_a[i] - data_b[i]);
-        }
+        let result_data: Vec<f64> = data_a.iter().zip(data_b.iter()).map(|(a, b)| a - b).collect();
 
-        Self::new(&result_data, &self.shape)
+        Self::from_vec(result_data, self.shape.clone())
     }
 
     /// Element-wise mapping
-    pub fn map<F>(&self, f: F) -> Self 
-    where F: Fn(f64) -> f64 {
-        let total_size: usize = self.shape.iter().product();
-        let mut result_data = Vec::with_capacity(total_size);
+    // Optimized: replaced manual loops and .push() with iterator-based .collect() to reduce memory management overhead.
+    pub fn map<F>(&self, f: F) -> Self
+    where
+        F: Fn(f64) -> f64,
+    {
         let data = self.data.borrow();
-        
-        for i in 0..total_size {
-            result_data.push(f(data[i]));
-        }
-        
-        Self::new(&result_data, &self.shape)
+
+        let result_data: Vec<f64> = data.iter().map(|&v| f(v)).collect();
+
+        Self::from_vec(result_data, self.shape.clone())
     }
 }
