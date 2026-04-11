@@ -1,3 +1,6 @@
 ## 2026-01-29 - Single Pass Variance Calculation in Manifold Heap
 **Learning:** The `ChebyshevGuard::calculate` function in `ManifoldHeap` was performing two passes over the memory blocks to calculate mean and variance separately. This is a common pattern when following the mathematical definition directly. However, in a performance-critical "metabolism" loop (GC), this doubles the memory access overhead.
 **Action:** Always check for opportunities to compute statistics (mean, variance) in a single pass using Welford's algorithm or accumulated sums, especially when iterating over large data structures.
+## 2026-04-11 - Tensor Heap Allocation Bottleneck in ML Linear Algebra
+**Learning:** Scalar reduction operations (like `mse`, `euclidean_distance`, `rbf_kernel`) in `aether-core::ml::linalg` were originally written using high-level `Tensor` operations (e.g., `a.sub(b)` and `diff.mul(&diff)`). Because the `Tensor` struct dynamically heap-allocates its shape and stride metadata vectors, intermediate operations triggered massive numbers of unnecessary allocations on the hot path.
+**Action:** Avoid high-level chained tensor operations when computing scalar values. Instead, verify shapes using `assert_eq!(a.shape, b.shape)` and compute the result using a single pass directly over the underlying borrowed data arrays (`a.data.borrow()`).
