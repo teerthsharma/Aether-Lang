@@ -18,11 +18,11 @@
 
 #![allow(dead_code)]
 
-use libm::sqrt;
-use crate::ml::clustering::{KMeans, KMeansResult}; // Reuse existing clustering logic if needed
+use crate::ml::clustering::{KMeans, KMeansResult};
+use libm::sqrt; // Reuse existing clustering logic if needed
 
 /// Maximum dimension for the manifold points
-const MAX_DIM: usize = 3; 
+const MAX_DIM: usize = 3;
 
 // ═══════════════════════════════════════════════════════════════════════════════
 // Core Structures
@@ -33,7 +33,7 @@ const MAX_DIM: usize = 3;
 pub struct GossipNode {
     /// Unique ID of the core
     pub id: usize,
-    
+
     /// Local data shard (simulated)
     local_data: heapless::Vec<[f64; MAX_DIM], 256>,
 
@@ -85,20 +85,21 @@ impl GossipNode {
         }
 
         // Initially, global estimate is just the local centroid
-        if self.weight <= 1.0 { 
-             self.global_estimate = self.local_centroid;
+        if self.weight <= 1.0 {
+            self.global_estimate = self.local_centroid;
         }
     }
 
     /// Receive a gossip message (neighbor's estimate) and update local state
     /// Uses exponential moving average or weighted average for consensus.
-    /// 
+    ///
     /// Formula: NewEstimate = (OldEstimate * Weight + NeighborEstimate) / (Weight + 1)
     pub fn update_consensus(&mut self, neighbor_estimate: [f64; MAX_DIM]) {
         let alpha = 0.5; // Mixing rate. 0.5 means equal weight to self and neighbor (fast mixing)
 
         for i in 0..MAX_DIM {
-            self.global_estimate[i] = (self.global_estimate[i] * (1.0 - alpha)) + (neighbor_estimate[i] * alpha);
+            self.global_estimate[i] =
+                (self.global_estimate[i] * (1.0 - alpha)) + (neighbor_estimate[i] * alpha);
         }
     }
 }
@@ -217,10 +218,10 @@ mod tests {
         ring.add_node(n1);
 
         // Expected global average: [5, 5, 0]
-        
+
         // Run gossip
         let iters = ring.converge(0.1, 100);
-        
+
         println!("Converged in {} iterations", iters);
 
         // Verify
