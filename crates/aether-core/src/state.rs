@@ -135,7 +135,10 @@ impl<const D: usize> Sub for SystemState<D> {
 
     fn sub(self, other: Self) -> [f64; D] {
         let mut result = [0.0; D];
-        for (r, (a, b)) in result.iter_mut().zip(self.vector.iter().zip(other.vector.iter())) {
+        for (r, (a, b)) in result
+            .iter_mut()
+            .zip(self.vector.iter().zip(other.vector.iter()))
+        {
             *r = a - b;
         }
         result
