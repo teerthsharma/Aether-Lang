@@ -25,11 +25,11 @@ extern crate alloc;
 pub mod aether;
 pub mod governor;
 pub mod manifold;
-pub mod ml;
-pub mod state;
-pub mod os;
-pub mod topology;
 pub mod memory;
+pub mod ml;
+pub mod os;
+pub mod state;
+pub mod topology;
 
 // Re-export key types for convenience
 pub use aether::{BlockMetadata, DriftDetector, HierarchicalBlockTree};
