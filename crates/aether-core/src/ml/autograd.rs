@@ -4,7 +4,7 @@
 //!
 //! "History is not a tree, it is a tape."
 //!
-//! A Wengert List (Tape-based) implementation of reverse-mode automatic 
+//! A Wengert List (Tape-based) implementation of reverse-mode automatic
 //! differentiation. It records operations on `Gc<Tensor>` handles, allowing
 //! the graph to be stored efficiently in the Manifold Heap.
 //!
@@ -26,14 +26,26 @@ use crate::ml::tensor::Tensor;
 #[derive(Debug, Clone, Copy)]
 pub enum Op {
     /// out = lhs + rhs
-    Add { out: Gc<Tensor>, lhs: Gc<Tensor>, rhs: Gc<Tensor> },
-    
+    Add {
+        out: Gc<Tensor>,
+        lhs: Gc<Tensor>,
+        rhs: Gc<Tensor>,
+    },
+
     /// out = lhs * rhs (element-wise)
-    Mul { out: Gc<Tensor>, lhs: Gc<Tensor>, rhs: Gc<Tensor> },
-    
+    Mul {
+        out: Gc<Tensor>,
+        lhs: Gc<Tensor>,
+        rhs: Gc<Tensor>,
+    },
+
     /// out = lhs @ rhs (matrix multiplication)
-    MatMul { out: Gc<Tensor>, lhs: Gc<Tensor>, rhs: Gc<Tensor> },
-    
+    MatMul {
+        out: Gc<Tensor>,
+        lhs: Gc<Tensor>,
+        rhs: Gc<Tensor>,
+    },
+
     /// out = max(0, input)
     ReLU { out: Gc<Tensor>, input: Gc<Tensor> },
 }
@@ -107,13 +119,13 @@ impl<'a> Context<'a> {
         let b = self.heap.get(rhs.data).expect("Stale handle RHS");
         let result = a.add(b);
         let out = self.heap.alloc(result);
-        
-        self.tape.push(Op::Add { 
-            out, 
-            lhs: lhs.data, 
-            rhs: rhs.data 
+
+        self.tape.push(Op::Add {
+            out,
+            lhs: lhs.data,
+            rhs: rhs.data,
         });
-        
+
         Variable::new(out)
     }
 
@@ -123,13 +135,13 @@ impl<'a> Context<'a> {
         let b = self.heap.get(rhs.data).expect("Stale handle RHS");
         let result = a.mul(b);
         let out = self.heap.alloc(result);
-        
-        self.tape.push(Op::Mul { 
-            out, 
-            lhs: lhs.data, 
-            rhs: rhs.data 
+
+        self.tape.push(Op::Mul {
+            out,
+            lhs: lhs.data,
+            rhs: rhs.data,
         });
-        
+
         Variable::new(out)
     }
 
@@ -139,13 +151,13 @@ impl<'a> Context<'a> {
         let b = self.heap.get(rhs.data).expect("Stale handle RHS");
         let result = a.matmul(b);
         let out = self.heap.alloc(result);
-        
-        self.tape.push(Op::MatMul { 
-            out, 
-            lhs: lhs.data, 
-            rhs: rhs.data 
+
+        self.tape.push(Op::MatMul {
+            out,
+            lhs: lhs.data,
+            rhs: rhs.data,
         });
-        
+
         Variable::new(out)
     }
 
@@ -154,12 +166,12 @@ impl<'a> Context<'a> {
         let val = self.heap.get(input.data).expect("Stale handle");
         let result = val.map(|x| if x > 0.0 { x } else { 0.0 });
         let out = self.heap.alloc(result);
-        
-        self.tape.push(Op::ReLU { 
-            out, 
-            input: input.data 
+
+        self.tape.push(Op::ReLU {
+            out,
+            input: input.data,
         });
-        
+
         Variable::new(out)
     }
 
@@ -171,7 +183,7 @@ impl<'a> Context<'a> {
         let mut grads: Vec<Option<Tensor>> = alloc::vec![None; max_idx];
         #[cfg(feature = "std")]
         let mut grads: Vec<Option<Tensor>> = std::vec![None; max_idx];
-        
+
         // Seed output gradient
         let target_tensor = self.heap.get(target.data).expect("Target lost");
         grads[target.data.index] = Some(Tensor::ones(&target_tensor.shape));
@@ -180,66 +192,68 @@ impl<'a> Context<'a> {
         for op in self.tape.ops.iter().rev() {
             match op {
                 Op::Add { out, lhs, rhs } => {
-                     // Solves borrow checker by cloning Option first
-                     let grad_out = grads[out.index].clone();
-                     if let Some(grad) = grad_out {
-                         // dL/d(lhs) += dL/dout * 1
-                         Self::accumulate_grad(&mut grads, lhs.index, &grad);
-                         Self::accumulate_grad(&mut grads, rhs.index, &grad);
-                     }
-                },
+                    let grad_out = grads[out.index].take();
+                    if let Some(grad) = grad_out {
+                        Self::accumulate_grad(&mut grads, lhs.index, &grad);
+                        Self::accumulate_grad(&mut grads, rhs.index, &grad);
+                        grads[out.index] = Some(grad);
+                    }
+                }
                 Op::Mul { out, lhs, rhs } => {
-                    let grad_out = grads[out.index].clone();
+                    let grad_out = grads[out.index].take();
                     if let Some(grad) = grad_out {
                         let lhs_val = self.heap.get(*lhs).unwrap();
                         let rhs_val = self.heap.get(*rhs).unwrap();
-                        
+
                         // dL/dLhs = grad_out * rhs
                         let d_lhs: Tensor = grad.mul(rhs_val);
                         Self::accumulate_grad(&mut grads, lhs.index, &d_lhs);
-                        
+
                         // dL/dRhs = grad_out * lhs
                         let d_rhs: Tensor = grad.mul(lhs_val);
                         Self::accumulate_grad(&mut grads, rhs.index, &d_rhs);
+                        grads[out.index] = Some(grad);
                     }
-                },
+                }
                 Op::MatMul { out, lhs, rhs } => {
-                     let grad_out = grads[out.index].clone();
-                     if let Some(grad) = grad_out {
+                    let grad_out = grads[out.index].take();
+                    if let Some(grad) = grad_out {
                         let lhs_val = self.heap.get(*lhs).unwrap();
                         let rhs_val = self.heap.get(*rhs).unwrap();
-                        
+
                         // C = A @ B
                         // dA = dC @ B^T
                         let d_lhs: Tensor = grad.matmul(&rhs_val.transpose());
                         Self::accumulate_grad(&mut grads, lhs.index, &d_lhs);
-                        
+
                         // dB = A^T @ dC
                         let d_rhs: Tensor = lhs_val.transpose().matmul(&grad);
                         Self::accumulate_grad(&mut grads, rhs.index, &d_rhs);
-                     }
-                },
+                        grads[out.index] = Some(grad);
+                    }
+                }
                 Op::ReLU { out, input } => {
-                    let grad_out = grads[out.index].clone();
+                    let grad_out = grads[out.index].take();
                     if let Some(grad) = grad_out {
                         let input_val = self.heap.get(*input).unwrap();
                         // dL/dx = grad_out * (1 if x > 0 else 0)
                         let mask = input_val.map(|x| if x > 0.0 { 1.0 } else { 0.0 });
                         let d_input: Tensor = grad.mul(&mask);
                         Self::accumulate_grad(&mut grads, input.index, &d_input);
+                        grads[out.index] = Some(grad);
                     }
                 }
             }
         }
-        
+
         grads
     }
-    
+
     fn accumulate_grad(grads: &mut Vec<Option<Tensor>>, idx: usize, grad: &Tensor) {
         if idx >= grads.len() {
             grads.resize(idx + 1 + 256, None);
         }
-        
+
         match &mut grads[idx] {
             Some(existing) => {
                 let new = existing.add(grad);
@@ -302,39 +316,39 @@ mod tests {
 
         // Input: [1.0, 1.0] (1x2)
         let x = ctx.var(Tensor::new(&[1.0, 1.0], &[1, 2]));
-        
+
         // W1: Identity [[1, 0], [0, 1]] (2x2)
         let w1 = ctx.var(Tensor::new(&[1.0, 0.0, 0.0, 1.0], &[2, 2]));
-        
+
         // W2: [[1], [-2]] (2x1)
         let w2 = ctx.var(Tensor::new(&[1.0, -2.0], &[2, 1]));
 
         // Forward
         // z1 = x @ W1 = [1, 1]
         let z1 = ctx.matmul(x, w1);
-        
+
         // h1 = relu(z1) = [1, 1]
         let h1 = ctx.relu(z1);
-        
+
         // y = h1 @ W2 = 1*1 + 1*-2 = -1 (1x1)
         let y = ctx.matmul(h1, w2);
-        
+
         // Loss = (y - target)^2, target=0
         // Loss = y * y
         let loss = ctx.mul(y, y);
-        
+
         // Backward
         // dLoss/dy = 2y = -2
         let grads = ctx.backward(loss);
-        
+
         // Checks
         let dy = grads[y.data.index].as_ref().unwrap();
         // Manually: dL/dy = 2*(-1) = -2
-        assert!((dy.get(&[0,0]) - (-2.0)).abs() < 1e-6);
-        
+        assert!((dy.get(&[0, 0]) - (-2.0)).abs() < 1e-6);
+
         let dw2 = grads[w2.data.index].as_ref().unwrap();
         // dL/dW2 = h1.T @ dy = [[1], [1]] @ [-2] = [[-2], [-2]]
-        assert!((dw2.get(&[0,0]) - (-2.0)).abs() < 1e-6);
-        assert!((dw2.get(&[1,0]) - (-2.0)).abs() < 1e-6);
+        assert!((dw2.get(&[0, 0]) - (-2.0)).abs() < 1e-6);
+        assert!((dw2.get(&[1, 0]) - (-2.0)).abs() < 1e-6);
     }
 }
