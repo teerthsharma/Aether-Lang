@@ -1,3 +1,4 @@
-## 2026-01-29 - Single Pass Variance Calculation in Manifold Heap
-**Learning:** The `ChebyshevGuard::calculate` function in `ManifoldHeap` was performing two passes over the memory blocks to calculate mean and variance separately. This is a common pattern when following the mathematical definition directly. However, in a performance-critical "metabolism" loop (GC), this doubles the memory access overhead.
-**Action:** Always check for opportunities to compute statistics (mean, variance) in a single pass using Welford's algorithm or accumulated sums, especially when iterating over large data structures.
+
+## 2026-01-29 - Avoiding `sqrt` in Spatial Scans
+**Learning:** In `SparseAttentionGraph::add_point`, the `is_neighbor` function is called heavily during point addition, turning into a hot O(N) spatial scan path. Using `libm::sqrt` for distance calculation incurs significant overhead.
+**Action:** Replace direct distance comparisons involving `sqrt` with squared distance calculations (`d^2 < r^2`) combined with early exit loops (`!(sum < eps_sq)`). Always carefully handle edge cases like non-positive epsilon and NaN safely using `!` operators.
