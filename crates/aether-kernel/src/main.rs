@@ -43,22 +43,28 @@ fn kernel_main(boot_info_addr: u64) -> ! {
     // PHASE 1: BIO-SCAN (Hardware Discovery)
     // ═══════════════════════════════════════════════════════════════════════════
     serial_println!("[BIO-SCAN] Scanning organism topology...");
-    
+
     // Construct BootInfo from the passed address (Multiboot2)
     // Safety: We assume the bootloader passed a valid address in rdi/first arg.
     let boot_info = unsafe { aether_kernel::boot::bios::BootInfo::new(boot_info_addr) };
-    
+
     // Perform Bio-Scan
     let topology = aether_kernel::boot::topology::HardwareTopology::bio_scan(&boot_info);
-    
+
     serial_println!("[BIO-SCAN] Neural Clusters (Cores): {}", topology.cpu_cores);
-    serial_println!("[BIO-SCAN] Synaptic Space  (RAM)  : {} MB", topology.total_memory / 1024 / 1024);
-    serial_println!("[BIO-SCAN] Sensory Organs  (I/O)  : {:?}", topology.io_capabilities);
+    serial_println!(
+        "[BIO-SCAN] Synaptic Space  (RAM)  : {} MB",
+        topology.total_memory / 1024 / 1024
+    );
+    serial_println!(
+        "[BIO-SCAN] Sensory Organs  (I/O)  : {:?}",
+        topology.io_capabilities
+    );
 
     // ═══════════════════════════════════════════════════════════════════════════
     // PHASE 2: ADAPTIVE INITIALIZATION
     // ═══════════════════════════════════════════════════════════════════════════
-    
+
     // Initialize heap allocator
     allocator::init_heap();
     serial_println!("[INIT] Heap allocator initialized");
@@ -73,14 +79,14 @@ fn kernel_main(boot_info_addr: u64) -> ! {
 
     serial_println!("[INIT] Sparse scheduler initialized");
     serial_println!("[INIT] ε₀ = {:.4}", scheduler.governor().epsilon());
-    
+
     // Adaptive Logic based on Topology
     if topology.total_memory > 32 * 1024 * 1024 * 1024 {
-         serial_println!("[ADAPT] High Memory detected > 32GB: Enabling Deep Manifold History");
-         // Enable deep history (placeholder)
+        serial_println!("[ADAPT] High Memory detected > 32GB: Enabling Deep Manifold History");
+        // Enable deep history (placeholder)
     } else if topology.total_memory < 1 * 1024 * 1024 * 1024 {
-         serial_println!("[ADAPT] Low Memory detected < 1GB: Switching to Sparse Mode");
-         // Enable sparse mode (placeholder)
+        serial_println!("[ADAPT] Low Memory detected < 1GB: Switching to Sparse Mode");
+        // Enable sparse mode (placeholder)
     }
 
     serial_println!("");
