@@ -1,87 +1,103 @@
-# AETHER Declarative IR Specification
+# Aether Lang: Practical Guide
 
-> Version 0.1.0
+Aether Lang (the `aether-lang` crate) is an early-stage language + runtime in the AEGIS ecosystem. This guide is intentionally **down to earth** and describes what the current parser/interpreter actually supports today.
 
-## 1. Overview
+## Running Aether
 
-AETHER is a declarative intermediate representation for event-driven sparse execution, where declarations specify terminal states in 3D geometric manifolds.
-
-## 2. Syntax
-
-### 2.1 Metadata and Annotations
-
-```aegis
-// Information annotation
+```bash
+aether repl
+aether run path/to/file.aether
+aether check path/to/file.aether
 ```
 
-### 2.2 Manifold Declaration
+Notes:
+- `.aether` and `.ae` are the preferred extensions. Other extensions will run but print a warning.
+- `--mode titan` is available but experimental.
 
-```aegis
-manifold <name> = embed(<source>, dim=<int>, tau=<int>)
+## Program basics
+
+### Comments
+
+```aether
+// Single-line comment
 ```
 
-**Parameters:**
-- `source`: Input data source (e.g., `data`, file path)
-- `dim`: Embedding dimension (1-16, default: 3)
-- `tau`: Time delay for Takens embedding (default: 1)
+### Statements and blocks
 
-**Example:**
-```aegis
+- Statements are separated by newlines.
+- Blocks use braces `{ ... }`.
+
+### Literals
+
+- Numbers: `1`, `3.14`
+- Strings: `"hello"`
+- Booleans: `true`, `false`
+
+### Variables
+
+```aether
+let x = 10
+let name = "Aether"
+```
+
+Type hints are parsed but not enforced:
+
+```aether
+int count = 3
+point C = some_expr
+```
+
+### Arithmetic
+
+Only numeric `+`, `-`, `*`, `/` are supported today.
+
+### Lists
+
+```aether
+let values = [1, 2, 3]
+values.push(4)
+let count = values.len()
+let last = values.pop()
+```
+
+Nested lists are supported (used for tensors in the ML helpers).
+
+## Geometry primitives
+
+### Manifolds
+
+```aether
 manifold M = embed(data, dim=3, tau=5)
 ```
 
-### 2.3 Block Declaration
+Current behavior:
+- The runtime uses **built-in sample data** (a small sine wave), not your `data` input yet.
+- The embedding dimension is fixed at **3**; `dim` is accepted but ignored.
+- `tau` is parsed and used.
 
-```aegis
-block <name> = <manifold>.cluster(<start>:<end>)
-block <name> = <manifold>[<start>:<end>]
-```
+### Blocks
 
-**Example:**
-```aegis
+```aether
 block B = M.cluster(0:64)
-block B2 = M[64:128]
+block C = M[64:128]
 ```
 
-### 2.4 Variable Assignment
+Blocks are created and stored, but **block properties** (e.g., `B.center`) are not yet exposed in the interpreter.
 
-```aegis
-<type_hint> <name> = <expression>
-<name> = <expression>
-```
+### Render
 
-**Example:**
-```aegis
-centroid C = B.center
-radius R = B.spread
-x = 42
-```
-
-### 2.5 Regression Statement
-
-```aegis
-regress {
-    model: <string>,
-    degree: <int>,         // optional
-    target: <expression>,  // optional
-    escalate: <bool>,
-    until: <convergence>
+```aether
+render M {
+    color: by_density,
+    trajectory: true
 }
 ```
 
-**Model Types:**
-- `"linear"` - Linear regression
-- `"polynomial"` - Polynomial regression
-- `"rbf"` - Radial Basis Function
-- `"gp"` - Gaussian Process
-- `"geodesic"` - Manifold geodesic regression
+The `render` statement is parsed but is currently a **no-op** in the runtime.
 
-**Convergence Conditions:**
-- `convergence(<epsilon>)` - Error threshold
-- `betti_stable(<epochs>)` - Betti number stability
+## Regression
 
-**Example:**
-```aegis
+```aether
 regress {
     model: "polynomial",
     degree: 3,
@@ -90,140 +106,93 @@ regress {
 }
 ```
 
-### 2.6 Render Statement
+Current behavior:
+- Uses the **first** manifold in the program.
+- `escalate` only changes the number of training epochs.
+- `model`, `degree`, `target`, and `until` are parsed but **not applied** in the interpreter yet.
 
-```aegis
-render <manifold> {
-    color: <mode>,
-    highlight: <block>,
-    trajectory: <bool>,
-    axis: <int>
+## Control flow
+
+```aether
+if flag {
+    print("on")
+} else {
+    print("off")
+}
+
+while running {
+    print("tick")
 }
 ```
 
-**Color Modes:**
-- `by_density` - Color by point density
-- `by_cluster` - Color by cluster assignment
-- `gradient` - Gradient along axis
+Notes:
+- Conditions must evaluate to **booleans**. Comparison operators (`<`, `>`, `==`) are tokenized but **not parsed** yet.
+- `seal { ... }` runs the block a fixed **1000 iterations** (no condition support yet).
+- `for`, `fn`, `return`, `break`, and `continue` are parsed but do not have runtime behavior yet.
 
-**Example:**
-```aegis
-render M {
-    color: by_density,
-    highlight: B,
-    trajectory: on
-}
+## Modules and built-ins
+
+### `print`
+
+```aether
+print("hello")
 ```
 
-## 3. Data Types
+### `math` module
 
-| Type | Description | Example |
-|------|-------------|---------|
-| `int` | Integer | `42`, `-7` |
-| `float` | Floating point | `3.14159` |
-| `bool` | Boolean | `true`, `false` |
-| `string` | Text | `"polynomial"` |
-| `manifold` | 3D embedded space | `M` |
-| `block` | Geometric region | `B` |
-| `point` | D-dimensional point | `C` |
-
-## 4. Built-in Functions
-
-### embed(source, dim, tau)
-Embed 1D time-series into D-dimensional manifold using Takens' theorem.
-
-### convergence(epsilon)
-Convergence condition based on error threshold.
-
-### betti_stable(epochs)
-Convergence when Betti numbers stable for N epochs.
-
-## 5. Properties
-
-### Block Properties
-
-| Property | Type | Description |
-|----------|------|-------------|
-| `.center` | point | Centroid of block |
-| `.spread` | float | Radius (max deviation) |
-| `.variance` | float | Variance of points |
-| `.count` | int | Number of points |
-
-### Manifold Properties
-
-| Property | Type | Description |
-|----------|------|-------------|
-| `.center` | point | Global centroid |
-| `.betti` | (int, int) | Betti numbers (β₀, β₁) |
-| `.dim` | int | Embedding dimension |
-
-## 6. Grammar (EBNF)
-
-```ebnf
-program     = { statement } ;
-statement   = manifold_decl | block_decl | var_decl | regress_stmt | render_stmt ;
-
-manifold_decl = "manifold" IDENT "=" expr ;
-block_decl   = "block" IDENT "=" expr ;
-var_decl     = [ IDENT ] IDENT "=" expr ;
-regress_stmt = "regress" config_block ;
-render_stmt  = "render" IDENT [ config_block ] ;
-
-config_block = "{" { config_pair } "}" ;
-config_pair  = IDENT ":" expr [ "," ] ;
-
-expr         = primary { "." IDENT [ call_args ] } ;
-primary      = NUMBER | STRING | BOOL | IDENT | call_expr | index_expr ;
-call_expr    = IDENT call_args ;
-call_args    = "(" [ arg { "," arg } ] ")" ;
-arg          = expr | IDENT "=" expr ;
-index_expr   = IDENT "[" NUMBER ":" NUMBER "]" ;
-
-IDENT        = letter { letter | digit | "_" } ;
-NUMBER       = digit { digit } [ "." digit { digit } ] ;
-STRING       = '"' { char } '"' ;
-BOOL         = "true" | "false" ;
+```aether
+import math
+from math import sin
 ```
 
-## 7. Examples
+Available: `pi`, `sin`, `cos`, `sqrt`, `exp`.
 
-### Hello World
+### `topology` module
 
-```aegis
-// Create manifold
-manifold M = embed(data, dim=3)
-
-// Render it
-render M {
-    color: gradient
-}
+```aether
+import topology
 ```
 
-### Escalating Regression
+Exposes `Betti`, which currently returns placeholder values.
 
-```aegis
-manifold M = embed(sensor_data, dim=3, tau=7)
+### `Ml` module
 
-regress {
-    model: "polynomial",
-    escalate: true,
-    until: convergence(1e-8)
-}
+```aether
+import Ml
+let net = Ml.MLP(0.01)
+net.add_layer(2, 4, "relu")
+let loss = net.train([[0, 0], [1, 1]], [[0], [1]], 10)
 ```
 
-### Cluster Analysis
+Available today:
+- Constructors: `MLP`, `KMeans`, `Conv2D`
+- Helpers: `load_weights`, `matmul`, `add`, `relu`, `softmax`
 
-```aegis
-manifold M = embed(data, dim=3, tau=5)
+Notes:
+- `MLP.add_layer`, `MLP.train`, and `MLP.predict/forward` are wired.
+- `KMeans` and `Conv2D` are constructible but have no methods wired yet.
+- Several other ML helper names exist but are currently stubs.
 
-block A = M[0:50]
-block B = M[50:100]
+### `Seal` module
 
-centroid_a = A.center
-centroid_b = B.center
-
-render M {
-    color: by_cluster,
-    trajectory: on
-}
+```aether
+import Seal
+let result = Seal.train(net, data, targets)
 ```
+
+`Seal.train` is parsed but **currently returns unit**.
+
+## Summary of current limitations
+
+- No comparison or logical operators in expressions.
+- No unary operators.
+- `render` does not render yet.
+- `embed` ignores input data and uses a built-in sample series.
+- `until`/topological convergence is parsed but not applied.
+- Class methods are parsed but not executed (fields are stored).
+
+## Next references
+
+- [Syntax Reference](SYNTAX.md)
+- [Getting Started](GETTING_STARTED.md)
+- [Examples](EXAMPLES.md)
