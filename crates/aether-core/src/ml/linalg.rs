@@ -100,16 +100,29 @@ impl LossConfig {
 
 /// Mean Squared Error
 pub fn mse(y_true: &Tensor, y_pred: &Tensor) -> f64 {
-    let diff = y_true.sub(y_pred);
-    diff.mul(&diff).sum() / y_true.shape.iter().product::<usize>() as f64
+    assert_eq!(y_true.shape, y_pred.shape, "Shape mismatch in mse");
+    let mut sum = 0.0;
+    // Bolt Optimization: Replace high-level Tensor operations (sub/mul/sum) with
+    // single-pass manual iteration over underlying data to avoid costly intermediate heap allocations.
+    let true_data = y_true.data.borrow();
+    let pred_data = y_pred.data.borrow();
+    let n = true_data.len();
+    for i in 0..n {
+        let diff = true_data[i] - pred_data[i];
+        sum += diff * diff;
+    }
+    sum / n as f64
 }
 
 /// Mean Absolute Error
 pub fn mae(y_true: &Tensor, y_pred: &Tensor) -> f64 {
+    assert_eq!(y_true.shape, y_pred.shape, "Shape mismatch in mae");
     let mut sum = 0.0;
+    // Bolt Optimization: Replace high-level Tensor operations (sub/mul/sum) with
+    // single-pass manual iteration over underlying data to avoid costly intermediate heap allocations.
     let true_data = y_true.data.borrow();
     let pred_data = y_pred.data.borrow();
-    let n = true_data.len().min(pred_data.len());
+    let n = true_data.len();
     
     for i in 0..n {
         sum += fabs(true_data[i] - pred_data[i]);
@@ -124,10 +137,13 @@ pub fn rmse(y_true: &Tensor, y_pred: &Tensor) -> f64 {
 
 /// Binary Cross-Entropy
 pub fn binary_cross_entropy(y_true: &Tensor, y_pred: &Tensor) -> f64 {
+    assert_eq!(y_true.shape, y_pred.shape, "Shape mismatch in binary_cross_entropy");
     let mut sum = 0.0;
+    // Bolt Optimization: Replace high-level Tensor operations (sub/mul/sum) with
+    // single-pass manual iteration over underlying data to avoid costly intermediate heap allocations.
     let true_data = y_true.data.borrow();
     let pred_data = y_pred.data.borrow();
-    let n = true_data.len().min(pred_data.len());
+    let n = true_data.len();
     
     for i in 0..n {
         let p = pred_data[i].clamp(1e-7, 1.0 - 1e-7);
@@ -147,10 +163,13 @@ pub fn binary_cross_entropy(y_true: &Tensor, y_pred: &Tensor) -> f64 {
 
 /// Hinge Loss (for SVM)
 pub fn hinge_loss(y_true: &Tensor, y_pred: &Tensor) -> f64 {
+    assert_eq!(y_true.shape, y_pred.shape, "Shape mismatch in hinge_loss");
     let mut sum = 0.0;
+    // Bolt Optimization: Replace high-level Tensor operations (sub/mul/sum) with
+    // single-pass manual iteration over underlying data to avoid costly intermediate heap allocations.
     let true_data = y_true.data.borrow();
     let pred_data = y_pred.data.borrow();
-    let n = true_data.len().min(pred_data.len());
+    let n = true_data.len();
     
     for i in 0..n {
         let margin = 1.0 - true_data[i] * pred_data[i];
@@ -211,29 +230,43 @@ where
 
 /// Euclidean distance
 pub fn euclidean_distance(a: &Tensor, b: &Tensor) -> f64 {
-    let diff = a.sub(b);
-    sqrt(diff.mul(&diff).sum())
+    assert_eq!(a.shape, b.shape, "Shape mismatch in euclidean_distance");
+    let mut sum = 0.0;
+    // Bolt Optimization: Replace high-level Tensor operations (sub/mul/sum) with
+    // single-pass manual iteration over underlying data to avoid costly intermediate heap allocations.
+    let a_data = a.data.borrow();
+    let b_data = b.data.borrow();
+    for i in 0..a_data.len() {
+        let diff = a_data[i] - b_data[i];
+        sum += diff * diff;
+    }
+    sqrt(sum)
 }
 
 /// Manhattan distance (L1)
 pub fn manhattan_distance(a: &Tensor, b: &Tensor) -> f64 {
+    assert_eq!(a.shape, b.shape, "Shape mismatch in manhattan_distance");
     let mut sum = 0.0;
-    // Tensor doesn't have L1 norm built-in, do manual
-    let diff_data = a.sub(b).data;
-    let data = diff_data.borrow();
-    for &val in data.iter() {
-        sum += fabs(val);
+    // Bolt Optimization: Replace high-level Tensor operations (sub/mul/sum) with
+    // single-pass manual iteration over underlying data to avoid costly intermediate heap allocations.
+    let a_data = a.data.borrow();
+    let b_data = b.data.borrow();
+    for i in 0..a_data.len() {
+        sum += fabs(a_data[i] - b_data[i]);
     }
     sum
 }
 
 /// Chebyshev distance (L∞)
 pub fn chebyshev_distance(a: &Tensor, b: &Tensor) -> f64 {
-    let diff = a.sub(b);
-    let data = diff.data.borrow();
+    assert_eq!(a.shape, b.shape, "Shape mismatch in chebyshev_distance");
     let mut max = 0.0;
-    for &val in data.iter() {
-        let abs_val = fabs(val);
+    // Bolt Optimization: Replace high-level Tensor operations (sub/mul/sum) with
+    // single-pass manual iteration over underlying data to avoid costly intermediate heap allocations.
+    let a_data = a.data.borrow();
+    let b_data = b.data.borrow();
+    for i in 0..a_data.len() {
+        let abs_val = fabs(a_data[i] - b_data[i]);
         if abs_val > max {
             max = abs_val;
         }
@@ -243,8 +276,16 @@ pub fn chebyshev_distance(a: &Tensor, b: &Tensor) -> f64 {
 
 /// RBF kernel value
 pub fn rbf_kernel(a: &Tensor, b: &Tensor, gamma: f64) -> f64 {
-    let dist = a.sub(b);
-    let dist_sq = dist.mul(&dist).sum();
+    assert_eq!(a.shape, b.shape, "Shape mismatch in rbf_kernel");
+    let mut dist_sq = 0.0;
+    // Bolt Optimization: Replace high-level Tensor operations (sub/mul/sum) with
+    // single-pass manual iteration over underlying data to avoid costly intermediate heap allocations.
+    let a_data = a.data.borrow();
+    let b_data = b.data.borrow();
+    for i in 0..a_data.len() {
+        let diff = a_data[i] - b_data[i];
+        dist_sq += diff * diff;
+    }
     exp(-gamma * dist_sq)
 }
 
