@@ -15,7 +15,11 @@ use alloc::vec;
 use alloc::vec::Vec;
 
 #[cfg(not(feature = "std"))]
+<<<<<<< HEAD
+use libm::{exp, log}; // Keep only what's not redefined locally or needed
+=======
 use libm::log; // exp is redefined locally
+>>>>>>> 5c3b036 (Perf: single pass scalar reductions)
 #[cfg(feature = "std")]
 use std::f64;
 
@@ -200,6 +204,15 @@ where
     let x_minus = Tensor::new(&x.data.borrow(), &x.shape);
 
     {
+<<<<<<< HEAD
+        let mut xp_data = x_plus.data.borrow_mut();
+        let mut xm_data = x_minus.data.borrow_mut();
+
+        drop(xp_data);
+        drop(xm_data);
+
+=======
+>>>>>>> 5c3b036 (Perf: single pass scalar reductions)
         for i in 0..n {
             let original = x.data.borrow()[i];
 
@@ -228,6 +241,10 @@ pub fn euclidean_distance(a: &Tensor, b: &Tensor) -> f64 {
     let mut sum = 0.0;
     let a_data = a.data.borrow();
     let b_data = b.data.borrow();
+<<<<<<< HEAD
+
+=======
+>>>>>>> 5c3b036 (Perf: single pass scalar reductions)
     for i in 0..a_data.len() {
         let diff = a_data[i] - b_data[i];
         sum += diff * diff;
@@ -241,6 +258,10 @@ pub fn manhattan_distance(a: &Tensor, b: &Tensor) -> f64 {
     let mut sum = 0.0;
     let a_data = a.data.borrow();
     let b_data = b.data.borrow();
+<<<<<<< HEAD
+
+=======
+>>>>>>> 5c3b036 (Perf: single pass scalar reductions)
     for i in 0..a_data.len() {
         sum += fabs(a_data[i] - b_data[i]);
     }
@@ -250,9 +271,16 @@ pub fn manhattan_distance(a: &Tensor, b: &Tensor) -> f64 {
 /// Chebyshev distance (L∞)
 pub fn chebyshev_distance(a: &Tensor, b: &Tensor) -> f64 {
     assert_eq!(a.shape, b.shape);
+<<<<<<< HEAD
+    let mut max = 0.0;
+    let a_data = a.data.borrow();
+    let b_data = b.data.borrow();
+
+=======
     let a_data = a.data.borrow();
     let b_data = b.data.borrow();
     let mut max = 0.0;
+>>>>>>> 5c3b036 (Perf: single pass scalar reductions)
     for i in 0..a_data.len() {
         let abs_val = fabs(a_data[i] - b_data[i]);
         if abs_val > max {
@@ -268,6 +296,10 @@ pub fn rbf_kernel(a: &Tensor, b: &Tensor, gamma: f64) -> f64 {
     let mut sum = 0.0;
     let a_data = a.data.borrow();
     let b_data = b.data.borrow();
+<<<<<<< HEAD
+
+=======
+>>>>>>> 5c3b036 (Perf: single pass scalar reductions)
     for i in 0..a_data.len() {
         let diff = a_data[i] - b_data[i];
         sum += diff * diff;
