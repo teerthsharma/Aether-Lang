@@ -1,6 +1,6 @@
 # Aether Lang (AEGIS)
 
-Aether Lang is the language + runtime for the AEGIS ecosystem: a 3D manifold-based ML language that embeds data into geometry and detects **topological convergence** instead of relying on arbitrary loss thresholds.
+Aether Lang is the language + runtime for the AEGIS ecosystem. AEGIS embeds data into 3D manifolds and detects **topological convergence** instead of relying on arbitrary loss thresholds.
 
 ## Highlights
 
