@@ -48,22 +48,22 @@ impl LossConfig {
     pub fn derivative(&self, y_true: &Tensor, y_pred: &Tensor) -> Tensor {
         match self {
             LossConfig::MSE => {
+                let diff = y_pred.sub(y_true);
                 let n = y_true.shape.iter().product::<usize>() as f64;
-
-                let y_true_data = y_true.data.borrow();
-                let y_pred_data = y_pred.data.borrow();
-                let diff_data: Vec<f64> = y_pred_data.iter().zip(y_true_data.iter()).map(|(p, t)| (p - t) * (2.0 / n)).collect();
-                Tensor::from_vec(diff_data, y_pred.shape.clone())
+                diff.scale(2.0 / n)
             }
             LossConfig::MAE => {
+                let diff = y_pred.sub(y_true);
                 let n = y_true.shape.iter().product::<usize>() as f64;
-                let y_true_data = y_true.data.borrow();
-                let y_pred_data = y_pred.data.borrow();
-                let diff_data: Vec<f64> = y_pred_data.iter().zip(y_true_data.iter()).map(|(p, t)| {
-                    let x = p - t;
-                    if x > 0.0 { 1.0 / n } else if x < 0.0 { -1.0 / n } else { 0.0 }
-                }).collect();
-                Tensor::from_vec(diff_data, y_pred.shape.clone())
+                diff.map(|x| {
+                    if x > 0.0 {
+                        1.0 / n
+                    } else if x < 0.0 {
+                        -1.0 / n
+                    } else {
+                        0.0
+                    }
+                })
             }
             LossConfig::BinaryCrossEntropy => {
                 // dL/dp = (1-y)/(1-p) - y/p

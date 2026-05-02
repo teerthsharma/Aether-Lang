@@ -104,15 +104,13 @@ impl Tensor {
 
         // Simple LCG for deterministic randomness in no_std
         let mut rng = 42u64;
-        let mut data: Vec<f64> = alloc::vec![0.0; total_size];
-
-        for i in 0..total_size {
+        let data: Vec<f64> = (0..total_size).map(|_| {
             rng = rng.wrapping_mul(6364136223846793005).wrapping_add(1);
             let r = (rng as f64 / u64::MAX as f64) * 2.0 - 1.0;
-            data[i] = r * bound;
-        }
+            r * bound
+        }).collect();
 
-        Self::new(&data, shape)
+        Self::from_vec(data, shape.to_vec())
     }
 
     /// Get value at index (handles strides)

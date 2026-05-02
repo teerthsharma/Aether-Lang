@@ -1,0 +1,40 @@
+--- crates/aether-core/src/ml/neural.rs
++++ crates/aether-core/src/ml/neural.rs
+@@ -155,14 +155,13 @@
+         let scale = sqrt(2.0 / (input_size + output_size) as f64);
+
+         let mut rng = seed.unwrap_or(42);
+-        let mut w_data = Vec::with_capacity(input_size * output_size);
+-        for _ in 0..(input_size * output_size) {
++        let w_data: Vec<f64> = (0..(input_size * output_size)).map(|_| {
+             rng = rng.wrapping_mul(6364136223846793005).wrapping_add(1);
+             let r = (rng as f64 / u64::MAX as f64) * 2.0 - 1.0;
+-            w_data.push(r * scale);
+-        }
++            r * scale
++        }).collect();
+
+-        let weights = Tensor::new(&w_data, &[output_size, input_size]);
++        let weights = Tensor::from_vec(w_data, vec![output_size, input_size]);
+         let biases = Tensor::zeros(&[output_size, 1]);
+
+         Self {
+@@ -227,14 +226,11 @@
+         // dW = delta * input^T
+         // delta: [out], input: [in]
+
+-        let mut dw_data = Vec::with_capacity(self.output_size * self.input_size);
+         let delta_data = delta.data.borrow();
+         let input_data = last_input.data.borrow();
+
+-        for i in 0..self.output_size {
+-            for j in 0..self.input_size {
+-                dw_data.push(delta_data[i] * input_data[j]);
+-            }
+-        }
+-        let grad_w = Tensor::new(&dw_data, &self.weights.shape);
++        let dw_data: Vec<f64> = (0..self.output_size).flat_map(|i| {
++            (0..self.input_size).map(move |j| delta_data[i] * input_data[j])
++        }).collect();
++        let grad_w = Tensor::from_vec(dw_data, self.weights.shape.clone());
+         let grad_b = delta.clone();

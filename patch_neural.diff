@@ -1,0 +1,11 @@
+--- crates/aether-core/src/ml/neural.rs
++++ crates/aether-core/src/ml/neural.rs
+@@ -158,11 +158,8 @@
+         let mut w_data = Vec::with_capacity(output_size * input_size);
+         for _ in 0..(output_size * input_size) {
+             rng = rng.wrapping_mul(6364136223846793005).wrapping_add(1);
+             let r = (rng as f64 / u64::MAX as f64) * 2.0 - 1.0;
+             w_data.push(r * scale);
+         }
+
+         Self {
