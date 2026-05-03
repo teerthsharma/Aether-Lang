@@ -1,87 +1,170 @@
-# Aether Lang (AEGIS)
+# λ Aether-Lang
 
-Aether Lang is the language + runtime for the AEGIS ecosystem. AEGIS embeds data into 3D manifolds and detects **topological convergence** instead of relying on arbitrary loss thresholds.
+A Rust-based language runtime for topological machine learning — embeddings live on
+3D manifolds, training converges via topological invariants (Betti numbers,
+persistent homology), not loss thresholds.
 
-## Highlights
+---
 
-- **3D manifold embeddings** using Takens-style time-delay reconstruction.
-- **Blocks and geometric primitives** for clustering, centroids, and spread analysis.
-- **Escalating regression** with topological convergence checks.
-- **Interactive REPL** and script runner (`aether` CLI).
-- **Rust-first, no_std-friendly core** with kernel experimentation support.
+## What It Actually Is
+
+```
+Aether-Lang = interpreter/VM (Rust) + manifold ML runtime (Rust) + microkernel (Rust)
+```
+
+| Crate | Role |
+|-------|------|
+| `aether-lang` | Lexer → parser → AST → interpreter → VM |
+| `aether-core` | Manifold embeddings, TDA, geometric primitives |
+| `aether-kernel` | Bare-metal x86_64 microkernel (no_std) |
+| `aether-cli` | `aether` REPL and script runner |
+
+---
+
+## The Verified Kernel (Lean 4)
+
+The AETHER Verified Kernel is a **separate, formally verified** project:
+
+> [apoth3osis.io/paper-proof-code/aether-verified-kernel](https://www.apoth3osis.io/paper-proof-code/aether-verified-kernel)
+
+- **23 theorems** — machine-checked by the Lean 4 kernel
+- **0 sorry / 0 admit** — every step proven
+- **818 lines** of proof code across 4 modules
+- Compiles to **verified C** + **safe Rust** artifacts via Curry-Howard
+- **6 hostile adversarial audits**, final 2 consecutive CLEAN
+- Covers: sparse-event attention, Lyapunov PD governors, Chebyshev GC guards,
+  Betti approximation bounds
+
+---
 
 ## Quickstart
 
-### Docker (recommended)
+```bash
+# Build CLI
+cargo build -p aether-cli --release
+./target/release/aether repl
 
+# Run a script
+./target/release/aether run examples/hello.aether
+```
+
+**Docker (recommended):**
 ```bash
 docker pull teerthsharma/aether
 docker run -it teerthsharma/aether repl
 ```
 
-Run a script from your local folder:
+---
 
-```bash
-docker run -v $(pwd):/scripts teerthsharma/aether run /scripts/hello.aether
+## Language Sample
+
+```aether
+// manifold_learn.aether — topological training
+manifold M = embed(dataset, dim=3, tau=5)
+block B = M.cluster(range=0:64)
+centroid C = B.center
+
+// Train until topology stabilizes (Betti₁ convergence), not loss threshold
+train M until topological_convergence(betti_threshold=0.95)
 ```
 
-### Build from source
+In the REPL, statements end with `~`. Scripts use `.aether` / `.ae`.
+
+---
+
+## Architecture
+
+```
+Source (.ae)
+    │
+    ▼
+┌─────────────┐
+│   Lexer     │  → tokens
+│  aether-lang│
+├─────────────┤
+│   Parser    │  → AST
+├─────────────┤
+│ Interpreter │  → IR
+├─────────────┤
+│   VM        │  → execution
+└─────────────┘
+    │
+    ▼
+┌─────────────┐
+│ aether-core │  ← manifold embeddings, TDA, geometry
+│ aether-kernel│ ← bare-metal microkernel (x86_64)
+└─────────────┘
+```
+
+---
+
+## Verified Stack (Full Trust Chain)
+
+```
+Lean 4 Proofs (apoth3osis.io)
+       │
+       ▼  Curry-Howard → Compiled
+Verified C (IPFS) + Safe Rust (IPFS)
+       │
+       ▼  FFI / bindings
+Aether-Lang Runtime (this repo)
+```
+
+The AETHER Verified Kernel provides the **trusted math foundation** for Aether-Lang's
+topological operations — zero false negatives in attention sparsification, energy-based
+convergence certificates, GC guard bounds at 1/k², and Betti approximation theorems.
+
+---
+
+## CLI Reference
+
+```bash
+aether repl                  # Interactive REPL (~ to end statements)
+aether run path/to/file.ae  # Execute script
+aether check path/to/file.ae # Type-check only
+```
+
+---
+
+## Repository Layout
+
+```
+crates/
+  aether-lang/    — Lexer, parser, AST, interpreter, VM
+  aether-core/     — Manifolds, embeddings, TDA, geometry
+  aether-kernel/   — Bare-metal x86_64 microkernel (no_std)
+  aether-cli/      — REPL + command-line interface
+  aegis-core/      — Compatibility / alternate core
+  aegis-cli/       — Compatibility CLI
+docs/
+  GETTING_STARTED.md
+  LANGUAGE.md
+  ARCHITECTURE.md
+examples/
+  *.ae             — Example Aether scripts
+```
+
+---
+
+## Building
 
 ```bash
 rustup install nightly
 rustup component add rustfmt clippy
 
-git clone https://github.com/teerthsharma/aether.git
-cd aether
-cargo build -p aether-cli --release
-./target/release/aether repl
+cargo build --release          # full workspace
+cargo test --workspace         # all tests
+cargo build -p aether-kernel   # bare-metal kernel (nightly required)
 ```
 
-## Hello, manifold
+---
 
-```aether
-// hello.aether
-manifold M = embed(data, dim=3, tau=5)
-block B = M.cluster(0:64)
-centroid C = B.center
+## Links
 
-render M {
-    color: by_density
-}
-```
+- **Verified Kernel:** [apoth3osis.io/paper-proof-code/aether-verified-kernel](https://www.apoth3osis.io/paper-proof-code/aether-verified-kernel)
+- **Lean 4 Proofs:** IPFS (content-addressed, immutable)
+- **Language Docs:** [docs/](docs/)
 
-> **Note:** In the REPL, statements are terminated with `~`. Scripts use the `.aether` (or `.ae`) extension.
+---
 
-## CLI usage
-
-```bash
-aether repl                 # Interactive REPL
-aether run path/to/file.aether
-aether check path/to/file.aether
-```
-
-## Documentation
-
-- [Getting Started](docs/GETTING_STARTED.md)
-- [Language Guide](docs/LANGUAGE.md)
-- [Syntax Reference](docs/SYNTAX.md)
-- [Examples](docs/EXAMPLES.md)
-- [Architecture](docs/ARCHITECTURE.md)
-- [FAQ](docs/FAQ.md)
-
-## Repository layout
-
-- `crates/aether-lang` — Lexer, parser, AST, interpreter, VM
-- `crates/aether-core` — Manifolds, ML, math, geometry
-- `crates/aether-cli` — `aether` command-line interface
-- `crates/aegis-*` — Compatibility crates and alternate CLI
-- `docs/` — Full documentation and references
-- `examples/` — Example Aether scripts
-
-## Contributing
-
-See [CONTRIBUTING.md](CONTRIBUTING.md) for development workflow and standards.
-
-## License
-
-MIT — see [LICENSE](LICENSE).
+*λ — where manifold topology meets verified foundations.*
