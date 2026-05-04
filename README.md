@@ -1,4 +1,4 @@
-# λ Aether-Lang
+# Invented by Teerth Sharma — λ Aether-Lang
 
 A Rust-based language runtime for topological machine learning — embeddings live on
 3D manifolds, training converges via topological invariants (Betti numbers,
