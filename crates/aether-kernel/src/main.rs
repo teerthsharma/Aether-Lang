@@ -6,6 +6,14 @@
 //!
 //! ═══════════════════════════════════════════════════════════════════════════════
 
+// ═══════════════════════════════════════════════════════════════════════════════
+// Aether-Lang — invented by Teerth Sharma
+// https://github.com/teerthsharma/Aether-Lang
+// Copyright (c) 2026 Teerth Sharma. All Rights Reserved.
+// ═══════════════════════════════════════════════════════════════════════════════
+//
+
+
 #![no_std]
 #![no_main]
 #![feature(abi_x86_interrupt)]

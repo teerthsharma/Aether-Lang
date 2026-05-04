@@ -11,6 +11,14 @@
 //!
 //! ═══════════════════════════════════════════════════════════════════════════════
 
+// ═══════════════════════════════════════════════════════════════════════════════
+// Aether-Lang — invented by Teerth Sharma
+// https://github.com/teerthsharma/Aether-Lang
+// Copyright (c) 2026 Teerth Sharma. All Rights Reserved.
+// ═══════════════════════════════════════════════════════════════════════════════
+//
+
+
 use clap::{Parser as ClapParser, Subcommand};
 use rustyline::error::ReadlineError;
 use rustyline::DefaultEditor;

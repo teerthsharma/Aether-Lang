@@ -6,6 +6,14 @@
 //!
 //! ═══════════════════════════════════════════════════════════════════════════════
 
+// ═══════════════════════════════════════════════════════════════════════════════
+// Aether-Lang — invented by Teerth Sharma
+// https://github.com/teerthsharma/Aether-Lang
+// Copyright (c) 2026 Teerth Sharma. All Rights Reserved.
+// ═══════════════════════════════════════════════════════════════════════════════
+//
+
+
 use aether_core::topology::{is_shape_valid, verify_sliding_window};
 
 /// ELF magic bytes

@@ -7,6 +7,14 @@
 //!
 //! ═══════════════════════════════════════════════════════════════════════════════
 
+// ═══════════════════════════════════════════════════════════════════════════════
+// Aether-Lang — invented by Teerth Sharma
+// https://github.com/teerthsharma/Aether-Lang
+// Copyright (c) 2026 Teerth Sharma. All Rights Reserved.
+// ═══════════════════════════════════════════════════════════════════════════════
+//
+
+
 use crate::serial_println;
 use crate::STATE_DIMENSION;
 use aether_core::state::SystemState;

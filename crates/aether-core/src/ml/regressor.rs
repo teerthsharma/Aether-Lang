@@ -9,6 +9,14 @@
 //! relationships because the manifold encodes the data's true shape.
 //! ═══════════════════════════════════════════════════════════════════════════════
 
+// ═══════════════════════════════════════════════════════════════════════════════
+// Aether-Lang — invented by Teerth Sharma
+// https://github.com/teerthsharma/Aether-Lang
+// Copyright (c) 2026 Teerth Sharma. All Rights Reserved.
+// ═══════════════════════════════════════════════════════════════════════════════
+//
+
+
 #![allow(dead_code)]
 
 use heapless::Vec as HVec;
