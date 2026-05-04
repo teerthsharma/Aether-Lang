@@ -1,5 +1,13 @@
 use alloc::vec::Vec;
 
+// ═══════════════════════════════════════════════════════════════════════════════
+// Aether-Lang — invented by Teerth Sharma
+// https://github.com/teerthsharma/Aether-Lang
+// Copyright (c) 2026 Teerth Sharma. All Rights Reserved.
+// ═══════════════════════════════════════════════════════════════════════════════
+//
+
+
 /// Represents the I/O capabilities of the organism (hardware).
 #[derive(Debug, Clone, Copy, Default)]
 pub struct IoCaps {

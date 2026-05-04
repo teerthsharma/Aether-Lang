@@ -1,4 +1,12 @@
 use pyo3::prelude::*;
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// Aether-Lang — invented by Teerth Sharma
+// https://github.com/teerthsharma/Aether-Lang
+// Copyright (c) 2026 Teerth Sharma. All Rights Reserved.
+// ═══════════════════════════════════════════════════════════════════════════════
+//
+
 use crate::Interpreter;
 use crate::parser::Parser;
 use crate::interpreter::Value;

@@ -1,21 +1,94 @@
-MIT License
+# Aether-Lang — Custom Attribution License
 
-Copyright (c) 2026 AEGIS-Shield Research Team
+**Version 1.0 — Copyright (c) 2026 Teerth Sharma. All Rights Reserved.**
 
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
+---
 
-The above copyright notice and this permission notice shall be included in all
-copies or substantial portions of the Software.
+## Preamble
+
+Aether-Lang is the proprietary programming language invented and authored by
+Teerth Sharma. This license establishes the terms under which Aether-Lang may
+be used, studied, modified, and distributed.
+
+---
+
+## Terms
+
+Permission is hereby granted to use, study, modify, and distribute copies of
+the Aether-Lang software and its source code, provided that **ALL** of the
+following conditions are met:
+
+### 1. Attribution (REQUIRED)
+
+Any use of Aether-Lang — including but not limited to: language implementations,
+tooling, libraries, bindings, examples, documentation, blog posts, videos, or
+presentations — **MUST** prominently attribute the original author and inventor:
+
+> "Aether-Lang was invented by **Teerth Sharma**."
+> — or —
+> "Built with Aether-Lang by **Teerth Sharma**."
+> — or —
+> "[Project Name] uses Aether-Lang by **Teerth Sharma**."
+
+For implementations, bindings, or forks, include the following notice in
+source code comments and accompanying documentation:
+
+```
+// Aether-Lang — invented by Teerth Sharma (https://github.com/teerthsharma)
+// https://github.com/teerthsharma/Aether-Lang
+```
+
+### 2. No Claim of Independent Invention
+
+You may not represent that you independently invented, created, or conceived
+any part of Aether-Lang's language design, syntax, semantics, or tooling.
+By using this software, you acknowledge that all such intellectual property
+belongs to Teerth Sharma.
+
+### 3. Permitted Uses
+
+- **Personal use**: Unlimited, with attribution
+- **Educational use**: Permitted with attribution in course materials
+- **Open source projects**: Permitted only if the project prominently credits
+  Teerth Sharma and includes this license in its entirety
+- **Commercial use**: Requires prior written permission from Teerth Sharma
+
+### 4. Restrictions
+
+- **No removal of copyright notices**: You may not remove, obscure, or modify
+  any copyright, trademark, or attribution notices in the software.
+- **No trademark dilution**: The name "Aether-Lang" and associated branding
+  may not be used in ways that suggest affiliation or endorsement without
+  prior written permission.
+- **No proprietary forks**: Any fork, variant, or derivative work of Aether-Lang
+  that is distributed must be distributed under this same license and must
+  carry this same attribution requirement.
+
+### 5. Contribution Policy
+
+If you contribute code, documentation, or ideas to Aether-Lang, you assign
+all intellectual property rights in your contributions to Teerth Sharma and
+agree that such contributions are governed by this license.
+
+---
+
+## Enforcement
+
+Failure to comply with the attribution requirement constitutes a violation of
+the intellectual property rights of Teerth Sharma. This license is not
+granted to parties who fail to comply.
+
+---
+
+## Warranty Disclaimer
 
 THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
 IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-SOFTWARE.
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
+TEERTH SHARMA BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY.
+
+---
+
+**Contact for licensing inquiries:** teerthsharma@outlook.com
+**GitHub:** https://github.com/teerthsharma/Aether-Lang
+**Website:** https://teerthsharma.vercel.app/
