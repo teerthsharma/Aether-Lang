@@ -5,3 +5,6 @@
 ## 2026-05-01 - Avoid High-Level Tensor Ops in Scalar Reductions
 **Learning:** High-level `Tensor` operations like `sub()` and `mul()` trigger intermediate heap allocations for shape and stride metadata. When computing scalar reductions (like MSE, distances, or loss functions), using these operations introduces severe memory overhead inside hot loops. Attempting to use `.min()` length truncation as a safeguard is an anti-pattern as it masks shape mismatch errors.
 **Action:** For scalar reductions, assert shape equality (`assert_eq!(a.shape, b.shape)`) and perform a single-pass iteration directly over the underlying borrowed data arrays (`a.data.borrow()`) to eliminate intermediate allocations and safely compute the result.
+## 2026-05-05 - Avoid `libm::sqrt` in Hot Spatial Scans
+**Learning:** `SparseAttentionGraph::add_point` performs hot O(N) spatial scans using `ManifoldPoint::is_neighbor`. Relying on `distance()` internally calls `libm::sqrt()`, which adds significant overhead in these loops.
+**Action:** Use squared distance comparisons (`d^2 < r^2`) with an inline loop and early exit (`!(sum < eps_sq)`) to avoid `sqrt` overhead. Reject negative or NaN thresholds before the loop (`!(epsilon > 0.0)`).
