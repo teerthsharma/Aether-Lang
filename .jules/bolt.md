@@ -5,3 +5,7 @@
 ## 2026-05-01 - Avoid High-Level Tensor Ops in Scalar Reductions
 **Learning:** High-level `Tensor` operations like `sub()` and `mul()` trigger intermediate heap allocations for shape and stride metadata. When computing scalar reductions (like MSE, distances, or loss functions), using these operations introduces severe memory overhead inside hot loops. Attempting to use `.min()` length truncation as a safeguard is an anti-pattern as it masks shape mismatch errors.
 **Action:** For scalar reductions, assert shape equality (`assert_eq!(a.shape, b.shape)`) and perform a single-pass iteration directly over the underlying borrowed data arrays (`a.data.borrow()`) to eliminate intermediate allocations and safely compute the result.
+
+## 2026-05-09 - Avoid Tensor Clones in Autograd Backpropagation
+**Learning:** During reverse-mode backpropagation in `aether-core::ml::autograd`, fetching the output gradient using `clone()` triggers a heap allocation for the `Tensor` shape and strides vectors, even though the data storage is shared. This causes massive memory overhead across all operations (`Add`, `Mul`, `MatMul`, `ReLU`).
+**Action:** Use `Option::take()` to acquire ownership of the gradient from the `grads` vector, avoiding borrow checker issues. Pass the tensor by value to the `accumulate_grad` helper (moving newly allocated tensors directly into the vector without cloning), and then put the original output gradient back into the tape using `grads[out.index] = Some(grad)`.
