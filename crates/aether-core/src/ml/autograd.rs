@@ -17,7 +17,6 @@
 // ═══════════════════════════════════════════════════════════════════════════════
 //
 
-
 #[cfg(not(feature = "std"))]
 extern crate alloc;
 
@@ -201,30 +200,32 @@ impl<'a> Context<'a> {
             match op {
                 Op::Add { out, lhs, rhs } => {
                     // Solves borrow checker by cloning Option first
-                    let grad_out = grads[out.index].clone();
+                    let grad_out = grads[out.index].take();
                     if let Some(grad) = grad_out {
                         // dL/d(lhs) += dL/dout * 1
-                        Self::accumulate_grad(&mut grads, lhs.index, &grad);
-                        Self::accumulate_grad(&mut grads, rhs.index, &grad);
+                        Self::accumulate_grad(&mut grads, lhs.index, grad.clone());
+                        Self::accumulate_grad(&mut grads, rhs.index, grad.clone());
+                        grads[out.index] = Some(grad);
                     }
                 }
                 Op::Mul { out, lhs, rhs } => {
-                    let grad_out = grads[out.index].clone();
+                    let grad_out = grads[out.index].take();
                     if let Some(grad) = grad_out {
                         let lhs_val = self.heap.get(*lhs).unwrap();
                         let rhs_val = self.heap.get(*rhs).unwrap();
 
                         // dL/dLhs = grad_out * rhs
                         let d_lhs: Tensor = grad.mul(rhs_val);
-                        Self::accumulate_grad(&mut grads, lhs.index, &d_lhs);
+                        Self::accumulate_grad(&mut grads, lhs.index, d_lhs);
 
                         // dL/dRhs = grad_out * lhs
                         let d_rhs: Tensor = grad.mul(lhs_val);
-                        Self::accumulate_grad(&mut grads, rhs.index, &d_rhs);
+                        Self::accumulate_grad(&mut grads, rhs.index, d_rhs);
+                        grads[out.index] = Some(grad);
                     }
                 }
                 Op::MatMul { out, lhs, rhs } => {
-                    let grad_out = grads[out.index].clone();
+                    let grad_out = grads[out.index].take();
                     if let Some(grad) = grad_out {
                         let lhs_val = self.heap.get(*lhs).unwrap();
                         let rhs_val = self.heap.get(*rhs).unwrap();
@@ -232,21 +233,23 @@ impl<'a> Context<'a> {
                         // C = A @ B
                         // dA = dC @ B^T
                         let d_lhs: Tensor = grad.matmul(&rhs_val.transpose());
-                        Self::accumulate_grad(&mut grads, lhs.index, &d_lhs);
+                        Self::accumulate_grad(&mut grads, lhs.index, d_lhs);
 
                         // dB = A^T @ dC
                         let d_rhs: Tensor = lhs_val.transpose().matmul(&grad);
-                        Self::accumulate_grad(&mut grads, rhs.index, &d_rhs);
+                        Self::accumulate_grad(&mut grads, rhs.index, d_rhs);
+                        grads[out.index] = Some(grad);
                     }
                 }
                 Op::ReLU { out, input } => {
-                    let grad_out = grads[out.index].clone();
+                    let grad_out = grads[out.index].take();
                     if let Some(grad) = grad_out {
                         let input_val = self.heap.get(*input).unwrap();
                         // dL/dx = grad_out * (1 if x > 0 else 0)
                         let mask = input_val.map(|x| if x > 0.0 { 1.0 } else { 0.0 });
                         let d_input: Tensor = grad.mul(&mask);
-                        Self::accumulate_grad(&mut grads, input.index, &d_input);
+                        Self::accumulate_grad(&mut grads, input.index, d_input);
+                        grads[out.index] = Some(grad);
                     }
                 }
             }
@@ -255,18 +258,18 @@ impl<'a> Context<'a> {
         grads
     }
 
-    fn accumulate_grad(grads: &mut Vec<Option<Tensor>>, idx: usize, grad: &Tensor) {
+    fn accumulate_grad(grads: &mut Vec<Option<Tensor>>, idx: usize, grad: Tensor) {
         if idx >= grads.len() {
             grads.resize(idx + 1 + 256, None);
         }
 
         match &mut grads[idx] {
             Some(existing) => {
-                let new = existing.add(grad);
+                let new = existing.add(&grad);
                 grads[idx] = Some(new);
             }
             None => {
-                grads[idx] = Some(grad.clone());
+                grads[idx] = Some(grad);
             }
         }
     }

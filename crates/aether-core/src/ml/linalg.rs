@@ -14,7 +14,6 @@
 // ═══════════════════════════════════════════════════════════════════════════════
 //
 
-
 #![allow(dead_code)]
 
 #[cfg(feature = "alloc")]
@@ -56,22 +55,37 @@ impl LossConfig {
     pub fn derivative(&self, y_true: &Tensor, y_pred: &Tensor) -> Tensor {
         match self {
             LossConfig::MSE => {
-                let diff = y_pred.sub(y_true);
-                let n = y_true.shape.iter().product::<usize>() as f64;
-                diff.scale(2.0 / n)
+                assert_eq!(y_true.shape, y_pred.shape);
+                let true_data = y_true.data.borrow();
+                let pred_data = y_pred.data.borrow();
+                let n = true_data.len();
+                let mut grad_data = Vec::with_capacity(n);
+                let scale = 2.0 / (n as f64);
+
+                for i in 0..n {
+                    grad_data.push((pred_data[i] - true_data[i]) * scale);
+                }
+                Tensor::new(&grad_data, &y_pred.shape)
             }
             LossConfig::MAE => {
-                let diff = y_pred.sub(y_true);
-                let n = y_true.shape.iter().product::<usize>() as f64;
-                diff.map(|x| {
-                    if x > 0.0 {
-                        1.0 / n
-                    } else if x < 0.0 {
-                        -1.0 / n
+                assert_eq!(y_true.shape, y_pred.shape);
+                let true_data = y_true.data.borrow();
+                let pred_data = y_pred.data.borrow();
+                let n = true_data.len();
+                let mut grad_data = Vec::with_capacity(n);
+                let scale = 1.0 / (n as f64);
+
+                for i in 0..n {
+                    let diff = pred_data[i] - true_data[i];
+                    if diff > 0.0 {
+                        grad_data.push(scale);
+                    } else if diff < 0.0 {
+                        grad_data.push(-scale);
                     } else {
-                        0.0
+                        grad_data.push(0.0);
                     }
-                })
+                }
+                Tensor::new(&grad_data, &y_pred.shape)
             }
             LossConfig::BinaryCrossEntropy => {
                 // dL/dp = (1-y)/(1-p) - y/p
