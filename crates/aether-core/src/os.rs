@@ -17,7 +17,6 @@
 // ═══════════════════════════════════════════════════════════════════════════════
 //
 
-
 /// CPU Register Context
 ///
 /// This structure represents the state of the CPU registers. It is used for:

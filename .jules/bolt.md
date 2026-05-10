@@ -5,3 +5,7 @@
 ## 2026-05-01 - Avoid High-Level Tensor Ops in Scalar Reductions
 **Learning:** High-level `Tensor` operations like `sub()` and `mul()` trigger intermediate heap allocations for shape and stride metadata. When computing scalar reductions (like MSE, distances, or loss functions), using these operations introduces severe memory overhead inside hot loops. Attempting to use `.min()` length truncation as a safeguard is an anti-pattern as it masks shape mismatch errors.
 **Action:** For scalar reductions, assert shape equality (`assert_eq!(a.shape, b.shape)`) and perform a single-pass iteration directly over the underlying borrowed data arrays (`a.data.borrow()`) to eliminate intermediate allocations and safely compute the result.
+
+## 2026-05-18 - KNN Select K Nearest Neighbors
+**Learning:** In `aether-core`, `KNNClassifier` uses a fixed-size `distances` array (capped by `MAX_POINTS = 256`). Finding $k$ nearest neighbors using a manual O(K*N) selection/bubble sort is slow.
+**Action:** Optimize finding the $k$ nearest neighbors by using `select_nth_unstable_by`, which provides $O(N)$ average complexity and correctly provides the total ordering required by `core` slice methods while safely handling `NaN` values with `partial_cmp().unwrap_or(core::cmp::Ordering::Equal)`.
