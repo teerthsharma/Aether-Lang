@@ -14,11 +14,8 @@
 // ═══════════════════════════════════════════════════════════════════════════════
 //
 
-
 #![allow(dead_code)]
 
-#[cfg(feature = "alloc")]
-use alloc::vec;
 #[cfg(feature = "alloc")]
 use alloc::vec::Vec;
 
@@ -204,12 +201,12 @@ where
     let mut grad_data = grad.data.borrow_mut();
 
     // We need a deep copy to mutate independent probe.
-    let mut x_plus = Tensor::new(&x.data.borrow(), &x.shape);
-    let mut x_minus = Tensor::new(&x.data.borrow(), &x.shape);
+    let x_plus = Tensor::new(&x.data.borrow(), &x.shape);
+    let x_minus = Tensor::new(&x.data.borrow(), &x.shape);
 
     {
-        let mut xp_data = x_plus.data.borrow_mut();
-        let mut xm_data = x_minus.data.borrow_mut();
+        let xp_data = x_plus.data.borrow_mut();
+        let xm_data = x_minus.data.borrow_mut();
 
         drop(xp_data);
         drop(xm_data);
