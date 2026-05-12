@@ -19,7 +19,6 @@
 // ═══════════════════════════════════════════════════════════════════════════════
 //
 
-
 #![allow(dead_code)]
 
 use crate::ml::convergence::{Answer, BettiNumbers, ConvergenceDetector, ResidualAnalyzer};

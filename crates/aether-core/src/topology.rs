@@ -23,7 +23,6 @@
 // ═══════════════════════════════════════════════════════════════════════════════
 //
 
-
 #![allow(dead_code)]
 
 // use libm::fabs;
@@ -94,6 +93,51 @@ impl TopologicalShape {
 // Betti Number Computation
 // ═══════════════════════════════════════════════════════════════════════════════
 
+/// Check if a 2-byte sequence is a gap (exceeds threshold)
+#[inline]
+fn is_gap(a: u8, b: u8) -> bool {
+    let dist = (a as i16 - b as i16).abs();
+    dist > CLUSTER_THRESHOLD
+}
+
+/// Check if a 4-byte sequence is a loop pattern
+#[inline]
+fn is_loop_pattern(window: &[u8]) -> bool {
+    let tolerance = 5i16; // LOOP_TOLERANCE equivalent
+    let a = window[0] as i16;
+    let b = window[1] as i16;
+    let c = window[2] as i16;
+    let d = window[3] as i16;
+
+    if (a - d).abs() <= tolerance && ((a - b).abs() > tolerance || (a - c).abs() > tolerance) {
+        return true;
+    }
+    false
+}
+
+/// Compute raw number of gap components (before applying the min=1 rule)
+pub(crate) fn compute_raw_betti_0(data: &[u8]) -> u32 {
+    if data.len() < 2 {
+        return 0;
+    }
+
+    let mut components = 0u32;
+    let mut in_component = false;
+
+    for window in data.windows(2) {
+        if is_gap(window[0], window[1]) {
+            if !in_component {
+                components += 1;
+                in_component = true;
+            }
+        } else {
+            in_component = false;
+        }
+    }
+
+    components
+}
+
 /// Compute β₀ (connected components) via 1D clustering approximation
 ///
 /// This is a simplified Vietoris-Rips filtration for 1D point clouds.
@@ -110,23 +154,14 @@ pub fn compute_betti_0(data: &[u8]) -> u32 {
         return if data.is_empty() { 0 } else { 1 };
     }
 
-    let mut components = 0u32;
-    let mut in_component = false;
+    let raw = compute_raw_betti_0(data);
 
-    for window in data.windows(2) {
-        let dist = (window[0] as i16 - window[1] as i16).abs();
-
-        if dist > CLUSTER_THRESHOLD {
-            if !in_component {
-                components += 1;
-                in_component = true;
-            }
-        } else {
-            in_component = false;
-        }
+    // NOP sled simulation: all same byte -> 0 gaps
+    if raw == 0 {
+        0
+    } else {
+        raw
     }
-
-    components
 }
 
 /// Compute β₁ (loops/cycles) via local pattern detection
@@ -145,22 +180,10 @@ pub fn compute_betti_1(data: &[u8]) -> u32 {
     }
 
     let mut loops = 0u32;
-    let tolerance = 5i16; // How close values must be to "close a loop"
 
-    // Detect cycles: a -> b -> c -> ~a (return to start)
     for window in data.windows(4) {
-        let a = window[0] as i16;
-        let d = window[3] as i16;
-
-        // If we return to approximately the same value, it's a "loop"
-        if (a - d).abs() <= tolerance {
-            // Check that middle values are different (actual traversal)
-            let b = window[1] as i16;
-            let c = window[2] as i16;
-
-            if (a - b).abs() > tolerance || (a - c).abs() > tolerance {
-                loops += 1;
-            }
+        if is_loop_pattern(window) {
+            loops += 1;
         }
     }
 
@@ -280,8 +303,80 @@ pub fn verify_sliding_window(data: &[u8], window_size: usize) -> Result<(), usiz
         return if is_shape_valid(data) { Ok(()) } else { Err(0) };
     }
 
-    for (offset, window) in data.windows(size).enumerate() {
-        if !is_shape_valid(window) {
+    // Fallback to naive O(N*W) for very small windows to avoid out-of-bounds in incremental logic
+    if size < 4 {
+        for (offset, window) in data.windows(size).enumerate() {
+            if !is_shape_valid(window) {
+                return Err(offset);
+            }
+        }
+        return Ok(());
+    }
+
+    // O(N) Sliding Window Optimization
+    // Initialize with first window
+    let current_window = &data[0..size];
+    let mut raw_betti_0 = compute_raw_betti_0(current_window);
+    let mut betti_1 = compute_betti_1(current_window);
+
+    let betti_0 = if raw_betti_0 == 0 { 1 } else { raw_betti_0 };
+    let mut shape = TopologicalShape::new(betti_0, betti_1, size);
+
+    if shape.density < DENSITY_MIN || shape.density > DENSITY_MAX || shape.betti_1 > MAX_BETTI_1 {
+        return Err(0);
+    }
+
+    // Slide window incrementally
+    for offset in 1..=(data.len() - size) {
+        let leaving_idx = offset - 1;
+        let entering_idx = offset + size - 1;
+
+        // Update raw_betti_0 incrementally
+        let leaving_is_gap = is_gap(data[leaving_idx], data[leaving_idx + 1]);
+        let leaving_next_is_gap = is_gap(data[leaving_idx + 1], data[leaving_idx + 2]);
+
+        let entering_is_gap = is_gap(data[entering_idx - 1], data[entering_idx]);
+        let entering_prev_is_gap = is_gap(data[entering_idx - 2], data[entering_idx - 1]);
+
+        let mut b0_diff = 0i32;
+
+        // If the leaving edge was the start of a gap cluster, we might lose a component
+        if leaving_is_gap && !leaving_next_is_gap {
+            // It was an isolated gap or the last gap in a cluster, so the cluster is removed
+            b0_diff -= 1;
+        }
+        // If leaving_next_is_gap is true, the next pair is still a gap, so the cluster continues
+
+        // If the entering edge is a gap, we might gain a component
+        if entering_is_gap && !entering_prev_is_gap {
+            // It's the start of a new gap cluster
+            b0_diff += 1;
+        }
+        // If entering_prev_is_gap is true, it's just extending an existing gap cluster
+
+        raw_betti_0 = (raw_betti_0 as i32 + b0_diff) as u32;
+
+        // Update betti_1 incrementally
+        let leaving_pattern = is_loop_pattern(&data[leaving_idx..leaving_idx + 4]);
+        let entering_pattern = is_loop_pattern(&data[entering_idx - 3..entering_idx + 1]);
+
+        let mut b1_diff = 0i32;
+        if leaving_pattern {
+            b1_diff -= 1;
+        }
+        if entering_pattern {
+            b1_diff += 1;
+        }
+
+        betti_1 = (betti_1 as i32 + b1_diff) as u32;
+
+        let cur_betti_0 = if raw_betti_0 == 0 { 1 } else { raw_betti_0 };
+        shape.betti_0 = cur_betti_0;
+        shape.betti_1 = betti_1;
+        shape.density = cur_betti_0 as f64 / size as f64;
+
+        if shape.density < DENSITY_MIN || shape.density > DENSITY_MAX || shape.betti_1 > MAX_BETTI_1
+        {
             return Err(offset);
         }
     }
@@ -342,6 +437,90 @@ mod tests {
         match result {
             VerifyResult::Pass => {}
             _ => {}
+        }
+    }
+
+    #[test]
+    fn test_verify_sliding_window_equivalence() {
+        // Test data with some structure and noise to ensure various gap/loop conditions
+        let data: Vec<u8> = (0..128)
+            .map(|i| {
+                if i % 10 < 3 {
+                    100 // Cluster 1
+                } else if i % 10 < 7 {
+                    200 // Cluster 2 (gap > 15)
+                } else {
+                    150 // Cluster 3 (gap > 15)
+                }
+            })
+            .collect();
+
+        let window_size = 16;
+
+        // Let's manually implement the naive logic for comparison
+        let mut naive_results = Vec::new();
+        for window in data.windows(window_size) {
+            let b0 = compute_betti_0(window);
+            let b1 = compute_betti_1(window);
+            naive_results.push((b0, b1));
+        }
+
+        // And manually trace the incremental logic
+        let mut incremental_results = Vec::new();
+
+        let mut current_window = &data[0..window_size];
+        let mut raw_betti_0 = compute_raw_betti_0(current_window);
+        let mut betti_1 = compute_betti_1(current_window);
+
+        let initial_betti_0 = if raw_betti_0 == 0 { 1 } else { raw_betti_0 };
+        incremental_results.push((initial_betti_0, betti_1));
+
+        for offset in 1..=(data.len() - window_size) {
+            let leaving_idx = offset - 1;
+            let entering_idx = offset + window_size - 1;
+
+            let leaving_is_gap = is_gap(data[leaving_idx], data[leaving_idx + 1]);
+            let leaving_next_is_gap = is_gap(data[leaving_idx + 1], data[leaving_idx + 2]);
+
+            let entering_is_gap = is_gap(data[entering_idx - 1], data[entering_idx]);
+            let entering_prev_is_gap = is_gap(data[entering_idx - 2], data[entering_idx - 1]);
+
+            let mut b0_diff = 0i32;
+
+            if leaving_is_gap && !leaving_next_is_gap {
+                b0_diff -= 1;
+            }
+
+            if entering_is_gap && !entering_prev_is_gap {
+                b0_diff += 1;
+            }
+
+            raw_betti_0 = (raw_betti_0 as i32 + b0_diff) as u32;
+
+            let leaving_pattern = is_loop_pattern(&data[leaving_idx..leaving_idx + 4]);
+            let entering_pattern = is_loop_pattern(&data[entering_idx - 3..entering_idx + 1]);
+
+            let mut b1_diff = 0i32;
+            if leaving_pattern {
+                b1_diff -= 1;
+            }
+            if entering_pattern {
+                b1_diff += 1;
+            }
+
+            betti_1 = (betti_1 as i32 + b1_diff) as u32;
+
+            let cur_betti_0 = if raw_betti_0 == 0 { 1 } else { raw_betti_0 };
+            incremental_results.push((cur_betti_0, betti_1));
+        }
+
+        assert_eq!(naive_results.len(), incremental_results.len());
+        for i in 0..naive_results.len() {
+            assert_eq!(
+                naive_results[i], incremental_results[i],
+                "Mismatch at window offset {}. Naive: {:?}, Incremental: {:?}",
+                i, naive_results[i], incremental_results[i]
+            );
         }
     }
 }
