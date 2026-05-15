@@ -13,7 +13,6 @@
 // ═══════════════════════════════════════════════════════════════════════════════
 //
 
-
 #![allow(dead_code)]
 
 // use heapless::Vec as HVec;
@@ -203,13 +202,12 @@ impl<const D: usize> KNNClassifier<D> {
             *dist = (self.distance(x, &self.x_train[i]), self.y_train[i]);
         }
 
-        // Sort by distance (simple bubble sort for small k)
-        for i in 0..self.k.min(self.n_train) {
-            for j in (i + 1)..self.n_train {
-                if distances[j].0 < distances[i].0 {
-                    distances.swap(i, j);
-                }
-            }
+        // Select k nearest neighbors (O(N) instead of O(K*N) manual selection sort)
+        let k_min = self.k.min(self.n_train);
+        if k_min > 0 {
+            distances[..self.n_train].select_nth_unstable_by(k_min - 1, |a, b| {
+                a.0.partial_cmp(&b.0).unwrap_or(core::cmp::Ordering::Equal)
+            });
         }
 
         // Vote among k nearest
