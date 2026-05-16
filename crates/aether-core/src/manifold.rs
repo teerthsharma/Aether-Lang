@@ -75,8 +75,31 @@ impl<const D: usize> ManifoldPoint<D> {
     }
 
     /// Check if within epsilon-neighborhood (sparse attention criterion)
+    ///
+    /// **Optimization Note:**
+    /// This method avoids computing the full Euclidean distance (which includes `libm::sqrt`)
+    /// by comparing the squared distance directly against the squared epsilon value. It also
+    /// incorporates an early exit condition, returning `false` as soon as the accumulated
+    /// squared distance exceeds the threshold. This significantly accelerates the hot loops
+    /// inside `SparseAttentionGraph::add_point`.
     pub fn is_neighbor(&self, other: &Self, epsilon: f64) -> bool {
-        self.distance(other) < epsilon
+        // Explicitly return false for negative or NaN epsilon values
+        if !(epsilon > 0.0) {
+            return false;
+        }
+
+        let epsilon_sq = epsilon * epsilon;
+        let mut sum_sq = 0.0;
+        for i in 0..D {
+            let d = self.coords[i] - other.coords[i];
+            sum_sq += d * d;
+
+            // Early exit if the squared distance exceeds the threshold
+            if sum_sq >= epsilon_sq {
+                return false;
+            }
+        }
+        true
     }
 }
 
