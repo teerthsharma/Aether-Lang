@@ -5,3 +5,7 @@
 ## 2026-05-01 - Avoid High-Level Tensor Ops in Scalar Reductions
 **Learning:** High-level `Tensor` operations like `sub()` and `mul()` trigger intermediate heap allocations for shape and stride metadata. When computing scalar reductions (like MSE, distances, or loss functions), using these operations introduces severe memory overhead inside hot loops. Attempting to use `.min()` length truncation as a safeguard is an anti-pattern as it masks shape mismatch errors.
 **Action:** For scalar reductions, assert shape equality (`assert_eq!(a.shape, b.shape)`) and perform a single-pass iteration directly over the underlying borrowed data arrays (`a.data.borrow()`) to eliminate intermediate allocations and safely compute the result.
+
+## 2023-10-25 - Avoid redundant tensor slice allocations
+**Learning:** In `aether-core::ml`, replacing manual index-based loops and `Tensor::new()` with iterator chains (`.iter().zip().map().collect()`) and `Tensor::from_vec()` during tensor initialization avoids redundant O(N) slice allocations and allows LLVM to elide bounds checks, improving performance.
+**Action:** Use functional iterator patterns (`zip`, `map`, `collect`) combined with `Tensor::from_vec()` when initializing tensors to prevent unnecessary heap allocations for tensor data.
