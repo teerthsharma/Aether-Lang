@@ -13,7 +13,6 @@
 // ═══════════════════════════════════════════════════════════════════════════════
 //
 
-
 #![allow(dead_code)]
 
 // use heapless::Vec as HVec;
@@ -203,13 +202,12 @@ impl<const D: usize> KNNClassifier<D> {
             *dist = (self.distance(x, &self.x_train[i]), self.y_train[i]);
         }
 
-        // Sort by distance (simple bubble sort for small k)
-        for i in 0..self.k.min(self.n_train) {
-            for j in (i + 1)..self.n_train {
-                if distances[j].0 < distances[i].0 {
-                    distances.swap(i, j);
-                }
-            }
+        // Find k nearest neighbors in O(N) average time using select_nth_unstable_by
+        let k_min = self.k.min(self.n_train);
+        if k_min > 0 {
+            distances[..self.n_train].select_nth_unstable_by(k_min - 1, |a, b| {
+                a.0.partial_cmp(&b.0).unwrap_or(core::cmp::Ordering::Equal)
+            });
         }
 
         // Vote among k nearest
@@ -721,6 +719,16 @@ impl<const D: usize> Default for NearestCentroid<D> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn test_knn() {
+        let mut knn = KNNClassifier::new(3);
+        let x = [[0.0, 0.0], [1.0, 1.0], [5.0, 5.0], [6.0, 6.0]];
+        let y = [0, 0, 1, 1];
+        knn.fit(&x, &y, 4);
+        assert_eq!(knn.predict(&[0.1, 0.1]), 0);
+        assert_eq!(knn.predict(&[5.5, 5.5]), 1);
+    }
 
     #[test]
     fn test_logistic_regression() {
