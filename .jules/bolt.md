@@ -5,3 +5,7 @@
 ## 2026-05-01 - Avoid High-Level Tensor Ops in Scalar Reductions
 **Learning:** High-level `Tensor` operations like `sub()` and `mul()` trigger intermediate heap allocations for shape and stride metadata. When computing scalar reductions (like MSE, distances, or loss functions), using these operations introduces severe memory overhead inside hot loops. Attempting to use `.min()` length truncation as a safeguard is an anti-pattern as it masks shape mismatch errors.
 **Action:** For scalar reductions, assert shape equality (`assert_eq!(a.shape, b.shape)`) and perform a single-pass iteration directly over the underlying borrowed data arrays (`a.data.borrow()`) to eliminate intermediate allocations and safely compute the result.
+
+## 2026-06-01 - Avoid Double Allocations and Bounds Checks in Tensor Operations
+**Learning:** In element-wise Tensor operations (`add`, `mul`, `sub`, `scale`, `map`), manually iterating by index and pushing to a pre-allocated vector triggers bounds checks. Additionally, passing the collected vector to `Tensor::new()` creates a second redundant heap allocation because `new()` clones the slice into a `Vec`.
+**Action:** Use iterator chains (`.iter().zip().map().collect()`) to allow LLVM to elide bounds checks, and use `Tensor::from_vec()` to initialize the tensor directly from the collected vector without duplicating allocations.
