@@ -5,3 +5,7 @@
 ## 2026-05-01 - Avoid High-Level Tensor Ops in Scalar Reductions
 **Learning:** High-level `Tensor` operations like `sub()` and `mul()` trigger intermediate heap allocations for shape and stride metadata. When computing scalar reductions (like MSE, distances, or loss functions), using these operations introduces severe memory overhead inside hot loops. Attempting to use `.min()` length truncation as a safeguard is an anti-pattern as it masks shape mismatch errors.
 **Action:** For scalar reductions, assert shape equality (`assert_eq!(a.shape, b.shape)`) and perform a single-pass iteration directly over the underlying borrowed data arrays (`a.data.borrow()`) to eliminate intermediate allocations and safely compute the result.
+
+## 2026-06-03 - Avoid Metadata Clones in Autograd Backward Pass
+**Learning:** The reverse-mode `backward` pass in autograd previously cloned gradients (`grads[out.index].clone()`) to avoid borrow checker errors, which led to unnecessary heap allocations for `Tensor` metadata (shape and strides).
+**Action:** Use `Option::take()` to acquire ownership of the gradient during the backward pass, and update helper functions like `accumulate_grad` to accept `Tensor` by value, avoiding redundant metadata clones.
