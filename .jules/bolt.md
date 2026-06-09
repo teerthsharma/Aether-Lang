@@ -5,3 +5,7 @@
 ## 2026-05-01 - Avoid High-Level Tensor Ops in Scalar Reductions
 **Learning:** High-level `Tensor` operations like `sub()` and `mul()` trigger intermediate heap allocations for shape and stride metadata. When computing scalar reductions (like MSE, distances, or loss functions), using these operations introduces severe memory overhead inside hot loops. Attempting to use `.min()` length truncation as a safeguard is an anti-pattern as it masks shape mismatch errors.
 **Action:** For scalar reductions, assert shape equality (`assert_eq!(a.shape, b.shape)`) and perform a single-pass iteration directly over the underlying borrowed data arrays (`a.data.borrow()`) to eliminate intermediate allocations and safely compute the result.
+
+## 2026-06-09 - Inline Squared Distance Comparisons in Clustering
+**Learning:** Exact distance calculations using libm::sqrt in spatial scan algorithms like DBSCAN and component counting are a bottleneck. Calculating exact Euclidean distance does unnecessary work when comparing against a constant threshold, and is further impacted by std/libm overhead.
+**Action:** In clustering modules, optimize spatial scans by using inline squared distance comparisons with an inner early exit condition (e.g., `!(sum < eps_sq)`). Always explicitly reject invalid (NaN/negative) thresholds before the loop.
