@@ -5,3 +5,7 @@
 ## 2026-05-01 - Avoid High-Level Tensor Ops in Scalar Reductions
 **Learning:** High-level `Tensor` operations like `sub()` and `mul()` trigger intermediate heap allocations for shape and stride metadata. When computing scalar reductions (like MSE, distances, or loss functions), using these operations introduces severe memory overhead inside hot loops. Attempting to use `.min()` length truncation as a safeguard is an anti-pattern as it masks shape mismatch errors.
 **Action:** For scalar reductions, assert shape equality (`assert_eq!(a.shape, b.shape)`) and perform a single-pass iteration directly over the underlying borrowed data arrays (`a.data.borrow()`) to eliminate intermediate allocations and safely compute the result.
+
+## 2024-05-24 - Optimize Tensor Cloning in Neural Network Forward Pass
+**Learning:** High-level iterations over network layers can introduce unnecessary heap allocations if the initial input tensor is cloned unconditionally. In `MLP::forward`, cloning the input before passing it to the first layer adds redundant overhead.
+**Action:** Extract the first layer using `iter_mut()` and pass the input directly by reference (`&Tensor`). This avoids the initial clone, as subsequent layers naturally consume the output of the previous layer.
