@@ -14,7 +14,6 @@
 // ═══════════════════════════════════════════════════════════════════════════════
 //
 
-
 #![allow(dead_code)]
 
 #[cfg(feature = "alloc")]
@@ -409,8 +408,16 @@ impl MLP {
 
     /// Forward pass through all layers
     pub fn forward(&mut self, input: &Tensor) -> Tensor {
-        let mut current = input.clone();
-        for layer in &mut self.layers {
+        let mut iter = self.layers.iter_mut();
+
+        let first_layer = match iter.next() {
+            Some(layer) => layer,
+            None => return input.clone(), // Or handle empty MLP
+        };
+
+        let mut current = first_layer.forward(input);
+
+        for layer in iter {
             current = layer.forward(&current);
         }
         current
