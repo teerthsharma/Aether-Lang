@@ -196,46 +196,45 @@ impl Tensor {
     /// Element-wise addition
     pub fn add(&self, other: &Tensor) -> Tensor {
         assert_eq!(self.shape, other.shape, "Shape mismatch for add");
-        let total_size: usize = self.shape.iter().product();
-        let mut result_data = Vec::with_capacity(total_size);
 
         let data_a = self.data.borrow();
         let data_b = other.data.borrow();
 
-        for i in 0..total_size {
-            result_data.push(data_a[i] + data_b[i]);
-        }
+        // ⚡ Bolt: Use iterator chains and from_vec to avoid O(N) slice allocations
+        let result_data: Vec<f64> = data_a
+            .iter()
+            .zip(data_b.iter())
+            .map(|(a, b)| a + b)
+            .collect();
 
-        Self::new(&result_data, &self.shape)
+        Self::from_vec(result_data, self.shape.clone())
     }
 
     /// Element-wise multiplication
     pub fn mul(&self, other: &Tensor) -> Tensor {
         assert_eq!(self.shape, other.shape, "Shape mismatch for mul");
-        let total_size: usize = self.shape.iter().product();
-        let mut result_data = Vec::with_capacity(total_size);
 
         let data_a = self.data.borrow();
         let data_b = other.data.borrow();
 
-        for i in 0..total_size {
-            result_data.push(data_a[i] * data_b[i]);
-        }
+        // ⚡ Bolt: Use iterator chains and from_vec to avoid O(N) slice allocations
+        let result_data: Vec<f64> = data_a
+            .iter()
+            .zip(data_b.iter())
+            .map(|(a, b)| a * b)
+            .collect();
 
-        Self::new(&result_data, &self.shape)
+        Self::from_vec(result_data, self.shape.clone())
     }
 
     /// Scalar multiplication
     pub fn scale(&self, s: f64) -> Tensor {
-        let total_size: usize = self.shape.iter().product();
-        let mut result_data = Vec::with_capacity(total_size);
         let data = self.data.borrow();
 
-        for i in 0..total_size {
-            result_data.push(data[i] * s);
-        }
+        // ⚡ Bolt: Use iterator chains and from_vec to avoid O(N) slice allocations
+        let result_data: Vec<f64> = data.iter().map(|a| a * s).collect();
 
-        Self::new(&result_data, &self.shape)
+        Self::from_vec(result_data, self.shape.clone())
     }
 
     /// Transpose (2D)
@@ -267,17 +266,18 @@ impl Tensor {
     /// Element-wise subtraction
     pub fn sub(&self, other: &Tensor) -> Tensor {
         assert_eq!(self.shape, other.shape, "Shape mismatch for sub");
-        let total_size: usize = self.shape.iter().product();
-        let mut result_data = Vec::with_capacity(total_size);
 
         let data_a = self.data.borrow();
         let data_b = other.data.borrow();
 
-        for i in 0..total_size {
-            result_data.push(data_a[i] - data_b[i]);
-        }
+        // ⚡ Bolt: Use iterator chains and from_vec to avoid O(N) slice allocations
+        let result_data: Vec<f64> = data_a
+            .iter()
+            .zip(data_b.iter())
+            .map(|(a, b)| a - b)
+            .collect();
 
-        Self::new(&result_data, &self.shape)
+        Self::from_vec(result_data, self.shape.clone())
     }
 
     /// Element-wise mapping
@@ -285,14 +285,11 @@ impl Tensor {
     where
         F: Fn(f64) -> f64,
     {
-        let total_size: usize = self.shape.iter().product();
-        let mut result_data = Vec::with_capacity(total_size);
         let data = self.data.borrow();
 
-        for i in 0..total_size {
-            result_data.push(f(data[i]));
-        }
+        // ⚡ Bolt: Use iterator chains and from_vec to avoid O(N) slice allocations
+        let result_data: Vec<f64> = data.iter().copied().map(f).collect();
 
-        Self::new(&result_data, &self.shape)
+        Self::from_vec(result_data, self.shape.clone())
     }
 }
