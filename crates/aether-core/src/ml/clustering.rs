@@ -273,6 +273,11 @@ impl<const D: usize> KMeans<D> {
 
 /// Automatically determine optimal K using topological analysis
 pub fn auto_k_selection<const D: usize>(data: &[[f64; D]], n: usize, epsilon: f64) -> usize {
+    if !(epsilon > 0.0) {
+        return n.clamp(1, MAX_POINTS);
+    }
+    let eps_sq = epsilon * epsilon;
+
     // Build epsilon-neighborhood graph and count connected components (β₀)
     let mut components = 0;
     let mut visited = [false; MAX_POINTS];
@@ -300,8 +305,17 @@ pub fn auto_k_selection<const D: usize>(data: &[[f64; D]], n: usize, epsilon: f6
             // Add neighbors
             for i in 0..n {
                 if !visited[i] && i != current {
-                    let dist = distance(&data[current], &data[i]);
-                    if dist < epsilon && top < 64 {
+                    let mut sum = 0.0;
+                    let mut is_neighbor = true;
+                    for d in 0..D {
+                        let diff = data[current][d] - data[i][d];
+                        sum += diff * diff;
+                        if !(sum < eps_sq) {
+                            is_neighbor = false;
+                            break;
+                        }
+                    }
+                    if is_neighbor && top < 64 {
                         stack[top] = i;
                         top += 1;
                     }
@@ -447,9 +461,23 @@ impl<const D: usize> DBSCAN<D> {
         i: usize,
     ) -> heapless::Vec<usize, MAX_POINTS> {
         let mut neighbors = heapless::Vec::new();
+        if !(self.epsilon >= 0.0) {
+            return neighbors;
+        }
+        let eps_sq = self.epsilon * self.epsilon;
 
         for j in 0..n {
-            if distance(&data[i], &data[j]) <= self.epsilon {
+            let mut sum = 0.0;
+            let mut is_neighbor = true;
+            for d in 0..D {
+                let diff = data[i][d] - data[j][d];
+                sum += diff * diff;
+                if !(sum <= eps_sq) {
+                    is_neighbor = false;
+                    break;
+                }
+            }
+            if is_neighbor {
                 let _ = neighbors.push(j);
             }
         }
