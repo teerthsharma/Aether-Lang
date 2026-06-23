@@ -90,7 +90,7 @@ pub struct ConfigPair {
 /// Binary Operators
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum BinaryOp {
-    Add, Sub, Mul, Div,
+    Add, Sub, Mul, Div, Mod,
     Eq, Neq, Lt, Gt, Le, Ge,
     And, Or,
 }
@@ -195,6 +195,13 @@ pub struct VarDecl {
     pub value: Expr,
 }
 
+/// Variable reassignment: count = count + 1
+#[derive(Debug, Clone, PartialEq)]
+pub struct AssignStmt {
+    pub name: Ident,
+    pub value: Expr,
+}
+
 /// Regression statement with configuration
 #[derive(Debug, Clone, PartialEq)]
 pub struct RegressStmt {
@@ -280,9 +287,10 @@ pub struct ForStmt {
     pub body: Block,
 }
 
-/// Seal loop (topological): seal { ... }
+/// Seal loop (topological): seal until condition { ... } or seal { ... }
 #[derive(Debug, Clone, PartialEq)]
 pub struct LoopStmt {
+    pub until: Option<Expr>,
     pub body: Block,
 }
 
@@ -332,6 +340,7 @@ pub enum StmtKind {
     Manifold(ManifoldDecl),
     Block(BlockDecl),
     Var(VarDecl),
+    Assign(AssignStmt),
     Regress(RegressStmt),
     Render(RenderStmt),
 
