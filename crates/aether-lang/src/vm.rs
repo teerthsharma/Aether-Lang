@@ -22,6 +22,8 @@
 #[cfg(not(feature = "std"))]
 use alloc::vec::Vec;
 #[cfg(not(feature = "std"))]
+use alloc::vec;
+#[cfg(not(feature = "std"))]
 use alloc::boxed::Box;
 #[cfg(not(feature = "std"))]
 use alloc::string::String;
@@ -30,10 +32,8 @@ use alloc::string::String;
 use std::vec::Vec;
 #[cfg(feature = "std")]
 use std::string::String;
-#[cfg(feature = "std")]
-use std::boxed::Box;
 
-use crate::ast::{Program, Statement, StmtKind, Expr, ExprKind, BinaryOp, Literal};
+use crate::ast::{Program, Statement, StmtKind, Expr, ExprKind, BinaryOp, UnaryOp, Literal};
 use crate::interpreter::Value;
 use aether_core::memory::ManifoldHeap; // From Phase 1
 
@@ -43,13 +43,17 @@ use aether_core::memory::ManifoldHeap; // From Phase 1
 pub enum OpCode {
     /// Push constant value onto stack
     PUSH(f64), 
+    /// Push boolean value onto stack
+    PUSH_BOOL(bool),
     /// Push variable value
     LOAD(usize), // Index into constant pool or variable table? Let's use register/slot index
     /// Store top of stack to variable
     STORE(usize),
     
     /// Arithmetic
-    ADD, SUB, MUL, DIV,
+    ADD, SUB, MUL, DIV, MOD, NEG,
+    EQ, NEQ, LT, GT, LE, GE,
+    AND, OR, NOT,
     
     /// Topology / Core Logic
     /// Embeds the top value into the manifold
@@ -62,6 +66,8 @@ pub enum OpCode {
     /// Control Flow
     JMP(isize),
     JMP_IF_FALSE(isize),
+    CALL(usize, usize),
+    RET,
     
     /// Output
     PRINT,
@@ -87,6 +93,12 @@ pub struct TitanVM {
     
     /// Call Frame / Locals (simplified map for now, or vector)
     locals: Vec<Value>,
+    frames: Vec<CallFrame>,
+}
+
+struct CallFrame {
+    return_ip: usize,
+    locals: Vec<Value>,
 }
 
 impl TitanVM {
@@ -97,6 +109,7 @@ impl TitanVM {
             stack: Vec::with_capacity(1024),
             heap: ManifoldHeap::new(),
             locals: vec![Value::Unit; 256], // Pre-alloc locals slots
+            frames: Vec::new(),
         }
     }
     
@@ -118,6 +131,7 @@ impl TitanVM {
                 OpCode::HALT => break,
                 
                 OpCode::PUSH(v) => self.stack.push(Value::Num(v)),
+                OpCode::PUSH_BOOL(v) => self.stack.push(Value::Bool(v)),
                 
                 OpCode::ADD => {
                     let b = self.pop_num()?;
@@ -139,6 +153,60 @@ impl TitanVM {
                     if b == 0.0 { return Err("Division by zero".into()); }
                     let a = self.pop_num()?;
                     self.stack.push(Value::Num(a / b));
+                }
+                OpCode::MOD => {
+                    let b = self.pop_num()?;
+                    if b == 0.0 { return Err("Modulo by zero".into()); }
+                    let a = self.pop_num()?;
+                    self.stack.push(Value::Num(a % b));
+                }
+                OpCode::NEG => {
+                    let value = self.pop_num()?;
+                    self.stack.push(Value::Num(-value));
+                }
+                OpCode::EQ => {
+                    let b = self.stack.pop().ok_or("Stack underflow")?;
+                    let a = self.stack.pop().ok_or("Stack underflow")?;
+                    self.stack.push(Value::Bool(values_equal(&a, &b)));
+                }
+                OpCode::NEQ => {
+                    let b = self.stack.pop().ok_or("Stack underflow")?;
+                    let a = self.stack.pop().ok_or("Stack underflow")?;
+                    self.stack.push(Value::Bool(!values_equal(&a, &b)));
+                }
+                OpCode::LT => {
+                    let b = self.pop_num()?;
+                    let a = self.pop_num()?;
+                    self.stack.push(Value::Bool(a < b));
+                }
+                OpCode::GT => {
+                    let b = self.pop_num()?;
+                    let a = self.pop_num()?;
+                    self.stack.push(Value::Bool(a > b));
+                }
+                OpCode::LE => {
+                    let b = self.pop_num()?;
+                    let a = self.pop_num()?;
+                    self.stack.push(Value::Bool(a <= b));
+                }
+                OpCode::GE => {
+                    let b = self.pop_num()?;
+                    let a = self.pop_num()?;
+                    self.stack.push(Value::Bool(a >= b));
+                }
+                OpCode::AND => {
+                    let b = self.pop_truthy()?;
+                    let a = self.pop_truthy()?;
+                    self.stack.push(Value::Bool(a && b));
+                }
+                OpCode::OR => {
+                    let b = self.pop_truthy()?;
+                    let a = self.pop_truthy()?;
+                    self.stack.push(Value::Bool(a || b));
+                }
+                OpCode::NOT => {
+                    let value = self.pop_truthy()?;
+                    self.stack.push(Value::Bool(!value));
                 }
                 
                 OpCode::PRINT => {
@@ -202,6 +270,41 @@ impl TitanVM {
                          self.ip = next as usize;
                     }
                 }
+
+                OpCode::CALL(target, arity) => {
+                    if target >= self.code.len() {
+                        return Err("Function target out of bounds".into());
+                    }
+
+                    let mut args = Vec::with_capacity(arity);
+                    for _ in 0..arity {
+                        args.push(self.stack.pop().ok_or("Stack underflow")?);
+                    }
+                    args.reverse();
+
+                    let frame = CallFrame {
+                        return_ip: self.ip,
+                        locals: core::mem::replace(&mut self.locals, vec![Value::Unit; 256]),
+                    };
+                    self.frames.push(frame);
+
+                    if self.locals.len() < arity {
+                        self.locals.resize(arity, Value::Unit);
+                    }
+                    for (idx, value) in args.into_iter().enumerate() {
+                        self.locals[idx] = value;
+                    }
+
+                    self.ip = target;
+                }
+
+                OpCode::RET => {
+                    let value = self.stack.pop().unwrap_or(Value::Unit);
+                    let frame = self.frames.pop().ok_or("Return outside function")?;
+                    self.locals = frame.locals;
+                    self.ip = frame.return_ip;
+                    self.stack.push(value);
+                }
                 
                 _ => return Err("Unimplemented OpCode".into()),
             }
@@ -217,6 +320,24 @@ impl TitanVM {
             None => Err("Stack Underflow".into()),
         }
     }
+
+    fn pop_truthy(&mut self) -> Result<bool, String> {
+        match self.stack.pop() {
+            Some(Value::Bool(value)) => Ok(value),
+            Some(Value::Num(value)) => Ok(value != 0.0),
+            Some(_) => Err("Type Error: Expected Boolean".into()),
+            None => Err("Stack Underflow".into()),
+        }
+    }
+}
+
+fn values_equal(left: &Value, right: &Value) -> bool {
+    match (left, right) {
+        (Value::Num(a), Value::Num(b)) => a == b,
+        (Value::Bool(a), Value::Bool(b)) => a == b,
+        (Value::Str(a), Value::Str(b)) => a == b,
+        _ => false,
+    }
 }
 
 /// The Compiler: AST -> Bytecode
@@ -224,6 +345,19 @@ pub struct Compiler {
     code: Vec<OpCode>,
     /// Simple symbol table: name -> index
     locals: Vec<String>,
+    functions: Vec<CompiledFunction>,
+    loop_stack: Vec<LoopContext>,
+}
+
+struct CompiledFunction {
+    name: String,
+    target: usize,
+    arity: usize,
+}
+
+struct LoopContext {
+    break_jumps: Vec<usize>,
+    continue_jumps: Vec<usize>,
 }
 
 impl Compiler {
@@ -231,6 +365,8 @@ impl Compiler {
         Self { 
             code: Vec::new(),
             locals: Vec::new(),
+            functions: Vec::new(),
+            loop_stack: Vec::new(),
         }
     }
     
@@ -249,6 +385,35 @@ impl Compiler {
             let idx = self.locals.len();
             self.locals.push(name.to_string());
             idx
+        }
+    }
+
+    fn emit_jump_placeholder(&mut self) -> usize {
+        let idx = self.code.len();
+        self.code.push(OpCode::JMP(0));
+        idx
+    }
+
+    fn patch_jump_to(&mut self, idx: usize, target: usize) {
+        let offset = (target as isize) - (idx as isize) - 1;
+        self.code[idx] = OpCode::JMP(offset);
+    }
+
+    fn push_loop_context(&mut self) {
+        self.loop_stack.push(LoopContext {
+            break_jumps: Vec::new(),
+            continue_jumps: Vec::new(),
+        });
+    }
+
+    fn patch_loop_context(&mut self, continue_target: usize, break_target: usize) {
+        if let Some(context) = self.loop_stack.pop() {
+            for idx in context.continue_jumps {
+                self.patch_jump_to(idx, continue_target);
+            }
+            for idx in context.break_jumps {
+                self.patch_jump_to(idx, break_target);
+            }
         }
     }
     
@@ -271,6 +436,11 @@ impl Compiler {
                 let idx = self.resolve_local(&decl.name);
                 self.code.push(OpCode::STORE(idx));
             }
+            StmtKind::Assign(stmt) => {
+                self.compile_expr(&stmt.value);
+                let idx = self.resolve_local(&stmt.name);
+                self.code.push(OpCode::STORE(idx));
+            }
             StmtKind::While(stmt) => {
                 // Label: Start
                 let start_ip = self.code.len();
@@ -283,6 +453,7 @@ impl Compiler {
                 self.code.push(OpCode::JMP_IF_FALSE(0));
                 
                 // Body
+                self.push_loop_context();
                 for s in &stmt.body.statements {
                     self.compile_stmt(s);
                 }
@@ -295,6 +466,7 @@ impl Compiler {
                 // Patch Jump If False
                 let patch_offset = (self.code.len() as isize) - (jmp_false_idx as isize) - 1;
                 self.code[jmp_false_idx] = OpCode::JMP_IF_FALSE(patch_offset);
+                self.patch_loop_context(start_ip, self.code.len());
             }
             StmtKind::If(stmt) => {
                 // Condition
@@ -363,11 +535,13 @@ impl Compiler {
                 self.code.push(OpCode::JMP_IF_FALSE(0));
 
                 // 5. Body
+                self.push_loop_context();
                 for s in &stmt.body.statements {
                     self.compile_stmt(s);
                 }
 
                 // 6. Increment Iterator
+                let continue_target = self.code.len();
                 // LOAD iterator
                 self.code.push(OpCode::LOAD(iter_idx));
                 // PUSH 1.0 (step)
@@ -385,13 +559,22 @@ impl Compiler {
                 // 8. Patch Jump If False
                 let patch_offset = (self.code.len() as isize) - (jmp_false_idx as isize) - 1;
                 self.code[jmp_false_idx] = OpCode::JMP_IF_FALSE(patch_offset);
+                self.patch_loop_context(continue_target, self.code.len());
             }
             StmtKind::Loop(stmt) => {
-                // Simple infinite loop (seal loop)
                 // Label: Start
                 let start_ip = self.code.len();
+                let mut jmp_until_idx = None;
+
+                if let Some(condition) = &stmt.until {
+                    self.compile_expr(condition);
+                    self.code.push(OpCode::NOT);
+                    jmp_until_idx = Some(self.code.len());
+                    self.code.push(OpCode::JMP_IF_FALSE(0));
+                }
 
                 // Body
+                self.push_loop_context();
                 for s in &stmt.body.statements {
                     self.compile_stmt(s);
                 }
@@ -400,9 +583,54 @@ impl Compiler {
                 let end_ip = self.code.len();
                 let back_jump = (start_ip as isize) - (end_ip as isize) - 1;
                 self.code.push(OpCode::JMP(back_jump));
+
+                if let Some(idx) = jmp_until_idx {
+                    let patch_offset = (self.code.len() as isize) - (idx as isize) - 1;
+                    self.code[idx] = OpCode::JMP_IF_FALSE(patch_offset);
+                }
+                self.patch_loop_context(start_ip, self.code.len());
+            }
+            StmtKind::Fn(decl) => {
+                let jmp_over_idx = self.code.len();
+                self.code.push(OpCode::JMP(0));
+
+                let target = self.code.len();
+                self.functions.push(CompiledFunction {
+                    name: decl.name.clone(),
+                    target,
+                    arity: decl.params.len(),
+                });
+
+                let outer_locals = core::mem::replace(&mut self.locals, decl.params.clone());
+                for s in &decl.body.statements {
+                    self.compile_stmt(s);
+                }
+                self.code.push(OpCode::RET);
+                self.locals = outer_locals;
+
+                let patch_offset = (self.code.len() as isize) - (jmp_over_idx as isize) - 1;
+                self.code[jmp_over_idx] = OpCode::JMP(patch_offset);
+            }
+            StmtKind::Return(stmt) => {
+                if let Some(value) = &stmt.value {
+                    self.compile_expr(value);
+                }
+                self.code.push(OpCode::RET);
+            }
+            StmtKind::Break(_) => {
+                let idx = self.emit_jump_placeholder();
+                if let Some(context) = self.loop_stack.last_mut() {
+                    context.break_jumps.push(idx);
+                }
+            }
+            StmtKind::Continue(_) => {
+                let idx = self.emit_jump_placeholder();
+                if let Some(context) = self.loop_stack.last_mut() {
+                    context.continue_jumps.push(idx);
+                }
             }
             _ => {
-                // TODO: Implement Fn, Return, Break, Continue
+                // TODO: Implement unsupported surface forms in the VM compiler.
             }
         }
     }
@@ -412,7 +640,7 @@ impl Compiler {
             ExprKind::Literal(l) => {
                  match l {
                      Literal::Num(n) => self.code.push(OpCode::PUSH(*n)),
-                     Literal::Bool(b) => self.code.push(OpCode::PUSH(if *b { 1.0 } else { 0.0 })),
+                     Literal::Bool(b) => self.code.push(OpCode::PUSH_BOOL(*b)),
                      _ => {},
                  }
             }
@@ -428,16 +656,34 @@ impl Compiler {
                     BinaryOp::Sub => self.code.push(OpCode::SUB),
                     BinaryOp::Mul => self.code.push(OpCode::MUL),
                     BinaryOp::Div => self.code.push(OpCode::DIV),
-                    BinaryOp::Lt => {
-                        self.code.push(OpCode::SUB); // a - b
-                        // If < 0, then true. This is hacky. Titan needs proper CMP.
-                        // Impl: if top < 0 push 1 else 0? 
-                        // Simplified: we don't have LT opcode.
-                        // Let's use strict JMP behavior or add CMP opcode. 
-                        // For bench_calc we might need loop counter.
-                        // Temporarily assuming strict arithmetic loops.
+                    BinaryOp::Mod => self.code.push(OpCode::MOD),
+                    BinaryOp::Eq => self.code.push(OpCode::EQ),
+                    BinaryOp::Neq => self.code.push(OpCode::NEQ),
+                    BinaryOp::Lt => self.code.push(OpCode::LT),
+                    BinaryOp::Gt => self.code.push(OpCode::GT),
+                    BinaryOp::Le => self.code.push(OpCode::LE),
+                    BinaryOp::Ge => self.code.push(OpCode::GE),
+                    BinaryOp::And => self.code.push(OpCode::AND),
+                    BinaryOp::Or => self.code.push(OpCode::OR),
+                }
+            }
+            ExprKind::UnaryOp(op, expr) => {
+                self.compile_expr(expr);
+                match op {
+                    UnaryOp::Neg => self.code.push(OpCode::NEG),
+                    UnaryOp::Not => self.code.push(OpCode::NOT),
+                }
+            }
+            ExprKind::Call { name, args } => {
+                let function_idx = self.functions.iter().position(|function| function.name == *name);
+                if let Some(function_idx) = function_idx {
+                    for arg in args {
+                        if let crate::ast::CallArg::Positional(expr) = arg {
+                            self.compile_expr(expr);
+                        }
                     }
-                    _ => {},
+                    let function = &self.functions[function_idx];
+                    self.code.push(OpCode::CALL(function.target, function.arity));
                 }
             }
             _ => {}
@@ -448,6 +694,17 @@ impl Compiler {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::parser::Parser;
+
+    fn run_source(source: &str) -> Value {
+        let mut parser = Parser::new(source);
+        let program = parser.parse().expect("source should parse");
+        let compiler = Compiler::new();
+        let code = compiler.compile(&program);
+        let mut vm = TitanVM::new();
+        vm.load_code(code);
+        vm.run().expect("vm should run")
+    }
 
     #[test]
     fn test_titan_math() {
@@ -541,5 +798,84 @@ mod tests {
         } else {
             panic!("Expected number, got {:?}", res);
         }
+    }
+
+    #[test]
+    fn test_vm_modulo_comparison_and_boolean_ops() {
+        let res = run_source("let ok = 10 % 4 == 2 && !false~ ok~");
+
+        assert!(matches!(res, Value::Bool(true)));
+    }
+
+    #[test]
+    fn test_vm_assignment_if_and_while_match_interpreter_surface() {
+        let res = run_source(
+            "let i = 0~
+             if 1 < 2 { i = i + 1~ }
+             while i < 3 { i = i + 1~ }
+             i~",
+        );
+
+        assert!(matches!(res, Value::Num(3.0)));
+    }
+
+    #[test]
+    fn test_vm_seal_until_condition() {
+        let res = run_source("let count = 0~ seal until count >= 3 { count = count + 1~ } count~");
+
+        assert!(matches!(res, Value::Num(3.0)));
+    }
+
+    #[test]
+    fn test_vm_user_function_explicit_return() {
+        let res = run_source("fn add(a, b) { return a + b~ } let result = add(2, 3)~ result~");
+
+        assert!(matches!(res, Value::Num(5.0)));
+    }
+
+    #[test]
+    fn test_vm_user_function_implicit_last_expression_return() {
+        let res = run_source("fn one() { let x = 1~ x~ } one()~");
+
+        assert!(matches!(res, Value::Num(1.0)));
+    }
+
+    #[test]
+    fn test_vm_user_function_parameters_are_call_frame_local() {
+        let res = run_source("let x = 10~ fn id(x) { return x~ } let y = id(3)~ let z = x + y~ z~");
+
+        assert!(matches!(res, Value::Num(13.0)));
+    }
+
+    #[test]
+    fn test_vm_break_exits_while_loop() {
+        let res = run_source(
+            "let i = 0~
+             let sum = 0~
+             while i < 10 {
+                 i = i + 1~
+                 if i == 4 { break~ }
+                 sum = sum + i~
+             }
+             sum~",
+        );
+
+        assert!(matches!(res, Value::Num(6.0)));
+    }
+
+    #[test]
+    fn test_vm_continue_skips_to_next_while_iteration() {
+        let res = run_source(
+            "let i = 0~
+             let sum = 0~
+             while i < 5 {
+                 i = i + 1~
+                 if i == 3 { continue~ }
+                 sum = sum + i~
+             }
+             sum~",
+        );
+
+        assert!(matches!(res, Value::Num(12.0)));
     }
 }

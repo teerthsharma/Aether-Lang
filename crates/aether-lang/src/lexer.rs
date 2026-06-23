@@ -184,6 +184,10 @@ impl<'a> Lexer<'a> {
         self.chars.peek()
     }
 
+    fn peek_next_char(&self) -> Option<char> {
+        self.chars.clone().nth(1)
+    }
+
     /// Skip whitespace (except newlines which are tokens)
     fn skip_whitespace(&mut self) {
         while let Some(&c) = self.peek() {
@@ -282,7 +286,7 @@ impl<'a> Lexer<'a> {
         }
 
         // Check for decimal point
-        if let Some(&'.') = self.peek() {
+        if self.peek() == Some(&'.') && self.peek_next_char().map(|c| c.is_ascii_digit()).unwrap_or(false) {
             self.advance();
             let mut frac_part: i64 = 0;
             let mut frac_digits = 0;
@@ -479,5 +483,15 @@ mod tests {
         let mut lexer = Lexer::new("~");
         let token = lexer.next_token();
         assert!(matches!(token.kind, TokenKind::Tilde));
+    }
+
+    #[test]
+    fn test_lex_dot_dot_range_after_integer() {
+        let mut lexer = Lexer::new("1..10");
+        let tokens = lexer.tokenize();
+
+        assert!(matches!(tokens[0].kind, TokenKind::Number(1)));
+        assert!(matches!(tokens[1].kind, TokenKind::DotDot));
+        assert!(matches!(tokens[2].kind, TokenKind::Number(10)));
     }
 }

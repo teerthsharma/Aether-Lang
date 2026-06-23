@@ -100,6 +100,8 @@ pub enum Value {
     Object(ObjectHandle),
     /// Native Function (for Standard Library)
     NativeFn(NativeFunction),
+    /// User-defined function
+    Function(FnDecl),
     /// Dynamic List (Python-like)
     List(Vec<Value>),
     /// ML Types
@@ -529,6 +531,13 @@ pub struct Interpreter {
     sample_data: Vec<f64>,
 }
 
+enum RuntimeFlow {
+    Value(Value),
+    Return(Value),
+    Break,
+    Continue,
+}
+
 impl Interpreter {
     pub fn new() -> Self {
         let mut data = Vec::new();
@@ -554,33 +563,38 @@ impl Interpreter {
     pub fn execute(&mut self, program: &Program) -> Result<Value, String> {
         let mut last_value = Value::Unit;
         for stmt in &program.statements {
-            last_value = self.execute_statement(stmt)?;
+            match self.execute_statement(stmt)? {
+                RuntimeFlow::Value(value) => last_value = value,
+                RuntimeFlow::Return(value) => return Ok(value),
+                RuntimeFlow::Break => return Err(String::from("break outside loop")),
+                RuntimeFlow::Continue => return Err(String::from("continue outside loop")),
+            }
         }
         Ok(last_value)
     }
 
-    fn execute_statement(&mut self, stmt: &Statement) -> Result<Value, String> {
+    fn execute_statement(&mut self, stmt: &Statement) -> Result<RuntimeFlow, String> {
         match &stmt.node {
-            StmtKind::Manifold(decl) => self.execute_manifold(decl),
-            StmtKind::Block(decl) => self.execute_block(decl),
-            StmtKind::Var(decl) => self.execute_var(decl),
-            StmtKind::Regress(stmt) => self.execute_regress(stmt),
-            StmtKind::Render(stmt) => self.execute_render(stmt),
-            StmtKind::Class(decl) => self.execute_class(decl),
-            StmtKind::Import(stmt) => self.execute_import(stmt),
+            StmtKind::Manifold(decl) => self.execute_manifold(decl).map(RuntimeFlow::Value),
+            StmtKind::Block(decl) => self.execute_block(decl).map(RuntimeFlow::Value),
+            StmtKind::Var(decl) => self.execute_var(decl).map(RuntimeFlow::Value),
+            StmtKind::Assign(stmt) => self.execute_assign(stmt).map(RuntimeFlow::Value),
+            StmtKind::Regress(stmt) => self.execute_regress(stmt).map(RuntimeFlow::Value),
+            StmtKind::Render(stmt) => self.execute_render(stmt).map(RuntimeFlow::Value),
+            StmtKind::Class(decl) => self.execute_class(decl).map(RuntimeFlow::Value),
+            StmtKind::Import(stmt) => self.execute_import(stmt).map(RuntimeFlow::Value),
             StmtKind::If(stmt) => self.execute_if(stmt),
-            StmtKind::While(stmt) => self.execute_while(stmt),
-            StmtKind::Loop(stmt) => self.execute_seal(stmt),
-            StmtKind::For(_) => Ok(Value::Unit),
-            StmtKind::Fn(_) => Ok(Value::Unit),
-            StmtKind::Return(_) => Ok(Value::Unit),
-            StmtKind::Break(_) => Ok(Value::Unit),
-            StmtKind::Continue(_) => Ok(Value::Unit),
+            StmtKind::While(stmt) => self.execute_while(stmt).map(RuntimeFlow::Value),
+            StmtKind::Loop(stmt) => self.execute_seal(stmt).map(RuntimeFlow::Value),
+            StmtKind::For(stmt) => self.execute_for(stmt).map(RuntimeFlow::Value),
+            StmtKind::Fn(decl) => self.execute_fn_decl(decl).map(RuntimeFlow::Value),
+            StmtKind::Return(stmt) => self.execute_return(stmt),
+            StmtKind::Break(_) => Ok(RuntimeFlow::Break),
+            StmtKind::Continue(_) => Ok(RuntimeFlow::Continue),
             StmtKind::Expr(expr) => {
-                self.evaluate_expr(expr)?;
-                Ok(Value::Unit)
+                self.evaluate_expr(expr).map(RuntimeFlow::Value)
             },
-            StmtKind::Empty => Ok(Value::Unit),
+            StmtKind::Empty => Ok(RuntimeFlow::Value(Value::Unit)),
         }
     }
 
@@ -600,6 +614,20 @@ impl Interpreter {
         self.classes.push(class_def);
         self.variables.insert(decl.name.clone(), Value::Class(handle));
         Ok(Value::Class(handle))
+    }
+
+    fn execute_fn_decl(&mut self, decl: &FnDecl) -> Result<Value, String> {
+        self.variables.insert(decl.name.clone(), Value::Function(decl.clone()));
+        Ok(Value::Unit)
+    }
+
+    fn execute_return(&mut self, stmt: &ReturnStmt) -> Result<RuntimeFlow, String> {
+        let value = if let Some(expr) = &stmt.value {
+            self.evaluate_expr(expr)?
+        } else {
+            Value::Unit
+        };
+        Ok(RuntimeFlow::Return(value))
     }
 
     #[allow(unused_variables)]
@@ -795,6 +823,16 @@ impl Interpreter {
         Ok(value)
     }
 
+    fn execute_assign(&mut self, stmt: &AssignStmt) -> Result<Value, String> {
+        if !self.variables.contains_key(&stmt.name) {
+            return Err(format!("cannot assign undefined variable '{}'", stmt.name));
+        }
+
+        let value = self.evaluate_expr(&stmt.value)?;
+        self.variables.insert(stmt.name.clone(), value.clone());
+        Ok(value)
+    }
+
     fn execute_regress(&mut self, stmt: &RegressStmt) -> Result<Value, String> {
         let config = &stmt.config;
         let epsilon = match &config.until {
@@ -816,15 +854,20 @@ impl Interpreter {
         Ok(Value::Unit)
     }
 
-    fn execute_stmt_block(&mut self, block: &Block) -> Result<Value, String> {
-        let mut last_val = Value::Unit;
+    fn execute_stmt_block(&mut self, block: &Block) -> Result<RuntimeFlow, String> {
+        let mut last_value = Value::Unit;
         for stmt in &block.statements {
-            last_val = self.execute_statement(stmt)?;
+            match self.execute_statement(stmt)? {
+                RuntimeFlow::Value(value) => last_value = value,
+                RuntimeFlow::Return(value) => return Ok(RuntimeFlow::Return(value)),
+                RuntimeFlow::Break => return Ok(RuntimeFlow::Break),
+                RuntimeFlow::Continue => return Ok(RuntimeFlow::Continue),
+            }
         }
-        Ok(last_val)
+        Ok(RuntimeFlow::Value(last_value))
     }
 
-    fn execute_if(&mut self, stmt: &IfStmt) -> Result<Value, String> {
+    fn execute_if(&mut self, stmt: &IfStmt) -> Result<RuntimeFlow, String> {
         let cond_val = self.evaluate_expr(&stmt.condition)?;
         let is_true = match cond_val {
             Value::Bool(b) => b,
@@ -835,12 +878,12 @@ impl Interpreter {
         } else if let Some(else_branch) = &stmt.else_branch {
             self.execute_stmt_block(else_branch)
         } else {
-            Ok(Value::Unit)
+            Ok(RuntimeFlow::Value(Value::Unit))
         }
     }
 
     fn execute_while(&mut self, stmt: &WhileStmt) -> Result<Value, String> {
-        let mut last_val = Value::Unit;
+        let mut last_value = Value::Unit;
         loop {
             let cond_val = self.evaluate_expr(&stmt.condition)?;
             let is_true = match cond_val {
@@ -848,18 +891,65 @@ impl Interpreter {
                 _ => return Err(String::from("condition must be boolean")),
             };
             if !is_true { break; }
-            last_val = self.execute_stmt_block(&stmt.body)?;
+            match self.execute_stmt_block(&stmt.body)? {
+                RuntimeFlow::Value(value) => last_value = value,
+                RuntimeFlow::Return(value) => return Ok(value),
+                RuntimeFlow::Break => break,
+                RuntimeFlow::Continue => continue,
+            }
         }
-        Ok(last_val)
+        Ok(last_value)
+    }
+
+    fn execute_for(&mut self, stmt: &ForStmt) -> Result<Value, String> {
+        let start = stmt.range.start.as_f64() as i64;
+        let end = stmt.range.end.as_f64() as i64;
+        let step = if start <= end { 1 } else { -1 };
+        let mut current = start;
+        let mut last_value = Value::Unit;
+
+        while (step > 0 && current < end) || (step < 0 && current > end) {
+            self.variables.insert(stmt.iterator.clone(), Value::Num(current as f64));
+            match self.execute_stmt_block(&stmt.body)? {
+                RuntimeFlow::Value(value) => last_value = value,
+                RuntimeFlow::Return(value) => return Ok(value),
+                RuntimeFlow::Break => break,
+                RuntimeFlow::Continue => {
+                    current += step;
+                    continue;
+                }
+            }
+            current += step;
+        }
+
+        self.variables.insert(stmt.iterator.clone(), Value::Num(current as f64));
+        Ok(last_value)
     }
 
     fn execute_seal(&mut self, stmt: &LoopStmt) -> Result<Value, String> {
         let max_iters = 1000;
-        let mut last_val = Value::Unit;
+        let mut last_value = Value::Unit;
         for _ in 0..max_iters {
-            last_val = self.execute_stmt_block(&stmt.body)?;
+            if let Some(condition) = &stmt.until {
+                if self.evaluate_condition(condition)? {
+                    break;
+                }
+            }
+            match self.execute_stmt_block(&stmt.body)? {
+                RuntimeFlow::Value(value) => last_value = value,
+                RuntimeFlow::Return(value) => return Ok(value),
+                RuntimeFlow::Break => break,
+                RuntimeFlow::Continue => continue,
+            }
         }
-        Ok(last_val)
+        Ok(last_value)
+    }
+
+    fn evaluate_condition(&mut self, expr: &Expr) -> Result<bool, String> {
+        match self.evaluate_expr(expr)? {
+            Value::Bool(value) => Ok(value),
+            _ => Err(String::from("condition must be boolean")),
+        }
     }
 
     fn evaluate_expr(&mut self, expr: &Expr) -> Result<Value, String> {
@@ -887,7 +977,10 @@ impl Interpreter {
                  let r = self.evaluate_expr(right)?;
                  self.evaluate_binary(l, *op, r)
             },
-            ExprKind::UnaryOp(_, _) => Err(String::from("Unary ops not implemented yet")),
+            ExprKind::UnaryOp(op, expr) => {
+                 let value = self.evaluate_expr(expr)?;
+                 self.evaluate_unary(*op, value)
+            },
             ExprKind::Index { object, range } => {
                 // Simplified: returns a descriptive string or handle? 
                 // For now, let's treat it as a lookup that returns a sub-manifold or block value
@@ -913,7 +1006,28 @@ impl Interpreter {
             (Value::Num(a), BinaryOp::Sub, Value::Num(b)) => Ok(Value::Num(a - b)),
             (Value::Num(a), BinaryOp::Mul, Value::Num(b)) => Ok(Value::Num(a * b)),
             (Value::Num(a), BinaryOp::Div, Value::Num(b)) => Ok(Value::Num(a / b)),
+            (Value::Num(a), BinaryOp::Mod, Value::Num(b)) => Ok(Value::Num(a % b)),
+            (Value::Num(a), BinaryOp::Eq, Value::Num(b)) => Ok(Value::Bool(a == b)),
+            (Value::Num(a), BinaryOp::Neq, Value::Num(b)) => Ok(Value::Bool(a != b)),
+            (Value::Num(a), BinaryOp::Lt, Value::Num(b)) => Ok(Value::Bool(a < b)),
+            (Value::Num(a), BinaryOp::Gt, Value::Num(b)) => Ok(Value::Bool(a > b)),
+            (Value::Num(a), BinaryOp::Le, Value::Num(b)) => Ok(Value::Bool(a <= b)),
+            (Value::Num(a), BinaryOp::Ge, Value::Num(b)) => Ok(Value::Bool(a >= b)),
+            (Value::Bool(a), BinaryOp::Eq, Value::Bool(b)) => Ok(Value::Bool(a == b)),
+            (Value::Bool(a), BinaryOp::Neq, Value::Bool(b)) => Ok(Value::Bool(a != b)),
+            (Value::Bool(a), BinaryOp::And, Value::Bool(b)) => Ok(Value::Bool(a && b)),
+            (Value::Bool(a), BinaryOp::Or, Value::Bool(b)) => Ok(Value::Bool(a || b)),
+            (Value::Str(a), BinaryOp::Eq, Value::Str(b)) => Ok(Value::Bool(a == b)),
+            (Value::Str(a), BinaryOp::Neq, Value::Str(b)) => Ok(Value::Bool(a != b)),
             _ => Err("Invalid binary operation".into())
+        }
+    }
+
+    fn evaluate_unary(&self, op: UnaryOp, value: Value) -> Result<Value, String> {
+        match (op, value) {
+            (UnaryOp::Neg, Value::Num(n)) => Ok(Value::Num(-n)),
+            (UnaryOp::Not, Value::Bool(b)) => Ok(Value::Bool(!b)),
+            _ => Err("Invalid unary operation".into()),
         }
     }
 
@@ -929,11 +1043,42 @@ impl Interpreter {
         if let Some(val) = self.variables.get(name) {
             match val.clone() {
                 Value::NativeFn(func) => self.execute_native_fn(func, args),
+                Value::Function(func) => self.execute_user_fn(&func, args),
                 _ => Ok(Value::Unit),
             }
         } else {
             Ok(Value::Unit)
         }
+    }
+
+    fn execute_user_fn(&mut self, func: &FnDecl, args: &[CallArg]) -> Result<Value, String> {
+        if args.len() != func.params.len() {
+            return Err(format!(
+                "function '{}' expected {} arguments, got {}",
+                func.name,
+                func.params.len(),
+                args.len()
+            ));
+        }
+
+        let mut frame = self.variables.clone();
+        for (param, arg) in func.params.iter().zip(args.iter()) {
+            let CallArg::Positional(expr) = arg else {
+                return Err(format!("function '{}' does not accept named arguments", func.name));
+            };
+            let value = self.evaluate_expr(expr)?;
+            frame.insert(param.clone(), value);
+        }
+
+        let outer = core::mem::replace(&mut self.variables, frame);
+        let result = match self.execute_stmt_block(&func.body) {
+            Ok(RuntimeFlow::Return(value)) | Ok(RuntimeFlow::Value(value)) => Ok(value),
+            Ok(RuntimeFlow::Break) => Err(String::from("break outside loop")),
+            Ok(RuntimeFlow::Continue) => Err(String::from("continue outside loop")),
+            Err(err) => Err(err),
+        };
+        self.variables = outer;
+        result
     }
 
     fn execute_native_fn(&mut self, func: NativeFunction, args: &[CallArg]) -> Result<Value, String> {
@@ -1162,6 +1307,124 @@ impl Interpreter {
 impl Default for Interpreter {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::parser::Parser;
+
+    #[test]
+    fn executes_comparison_logical_unary_and_modulo_expressions() {
+        let mut parser = Parser::new("let x = 10 % 4~\nlet ok = x == 2 && !false~");
+        let program = parser.parse().expect("program should parse");
+        let mut interpreter = Interpreter::new();
+
+        interpreter.execute(&program).expect("program should execute");
+
+        assert!(matches!(interpreter.variables.get("x"), Some(Value::Num(2.0))));
+        assert!(matches!(interpreter.variables.get("ok"), Some(Value::Bool(true))));
+    }
+
+    #[test]
+    fn executes_reassignment_statement() {
+        let mut parser = Parser::new("let count = 0~\ncount = count + 1~");
+        let program = parser.parse().expect("program should parse");
+        let mut interpreter = Interpreter::new();
+
+        interpreter.execute(&program).expect("program should execute");
+
+        assert!(matches!(interpreter.variables.get("count"), Some(Value::Num(1.0))));
+    }
+
+    #[test]
+    fn executes_while_loop_with_assignment() {
+        let mut parser = Parser::new("let count = 0~\nwhile count < 3 { count = count + 1~ }");
+        let program = parser.parse().expect("program should parse");
+        let mut interpreter = Interpreter::new();
+
+        interpreter.execute(&program).expect("program should execute");
+
+        assert!(matches!(interpreter.variables.get("count"), Some(Value::Num(3.0))));
+    }
+
+    #[test]
+    fn executes_for_loop_over_integer_range() {
+        let mut parser = Parser::new("let sum = 0~\nfor i in 0..4 { sum = sum + i~ }");
+        let program = parser.parse().expect("program should parse");
+        let mut interpreter = Interpreter::new();
+
+        interpreter.execute(&program).expect("program should execute");
+
+        assert!(matches!(interpreter.variables.get("sum"), Some(Value::Num(6.0))));
+        assert!(matches!(interpreter.variables.get("i"), Some(Value::Num(4.0))));
+    }
+
+    #[test]
+    fn break_exits_loop_and_continue_skips_remaining_body() {
+        let mut parser = Parser::new(
+            "let i = 0~
+             let sum = 0~
+             while i < 5 {
+                 i = i + 1~
+                 if i == 2 { continue~ }
+                 if i == 4 { break~ }
+                 sum = sum + i~
+             }",
+        );
+        let program = parser.parse().expect("program should parse");
+        let mut interpreter = Interpreter::new();
+
+        interpreter.execute(&program).expect("program should execute");
+
+        assert!(matches!(interpreter.variables.get("i"), Some(Value::Num(4.0))));
+        assert!(matches!(interpreter.variables.get("sum"), Some(Value::Num(4.0))));
+    }
+
+    #[test]
+    fn seal_until_stops_when_condition_becomes_true() {
+        let mut parser = Parser::new("let count = 0~\nseal until count >= 3 { count = count + 1~ }");
+        let program = parser.parse().expect("program should parse");
+        let mut interpreter = Interpreter::new();
+
+        interpreter.execute(&program).expect("program should execute");
+
+        assert!(matches!(interpreter.variables.get("count"), Some(Value::Num(3.0))));
+    }
+
+    #[test]
+    fn executes_user_defined_function_with_return() {
+        let mut parser = Parser::new("fn add(a, b) { return a + b~ }\nlet result = add(2, 3)~");
+        let program = parser.parse().expect("program should parse");
+        let mut interpreter = Interpreter::new();
+
+        interpreter.execute(&program).expect("program should execute");
+
+        assert!(matches!(interpreter.variables.get("result"), Some(Value::Num(5.0))));
+    }
+
+    #[test]
+    fn function_without_explicit_return_uses_last_value() {
+        let mut parser = Parser::new("fn one() { let x = 1~ x~ }\nlet result = one()~");
+        let program = parser.parse().expect("program should parse");
+        let mut interpreter = Interpreter::new();
+
+        interpreter.execute(&program).expect("program should execute");
+
+        assert!(matches!(interpreter.variables.get("result"), Some(Value::Num(1.0))));
+    }
+
+    #[test]
+    fn function_parameters_do_not_overwrite_outer_variables() {
+        let mut parser = Parser::new("let x = 10~\nfn id(x) { return x~ }\nlet y = id(3)~");
+        let program = parser.parse().expect("program should parse");
+        let mut interpreter = Interpreter::new();
+
+        interpreter.execute(&program).expect("program should execute");
+
+        assert!(matches!(interpreter.variables.get("x"), Some(Value::Num(10.0))));
+        assert!(matches!(interpreter.variables.get("y"), Some(Value::Num(3.0))));
     }
 }
 

@@ -26,6 +26,7 @@ use std::fs;
 use std::path::PathBuf;
 
 use aether_lang::{Interpreter, Parser};
+use aether_lang::parser::ParseError;
 
 /// AEGIS - The Universal Programming Language
 #[derive(ClapParser)]
@@ -140,13 +141,20 @@ fn run_repl() {
     }
 }
 
+fn format_parse_error(error: &ParseError) -> String {
+    format!(
+        "Parse error at line {}, column {}: {}",
+        error.line, error.column, error.message
+    )
+}
+
 /// Execute a single line in the REPL
 fn execute_line(interpreter: &mut Interpreter, source: &str) -> Result<String, String> {
     // Parser internally creates a lexer and tokenizes
     let mut parser = Parser::new(source);
     let ast = parser
         .parse()
-        .map_err(|e| format!("Parse error: {:?}", e))?;
+        .map_err(|e| format_parse_error(&e))?;
 
     // Execute and format result
     let value = interpreter
@@ -183,7 +191,7 @@ fn run_file(path: &PathBuf, mode: &str) {
     let ast = match parser.parse() {
         Ok(a) => a,
         Err(e) => {
-            eprintln!("Parse error: {:?}", e);
+            eprintln!("{}", format_parse_error(&e));
             std::process::exit(1);
         }
     };
@@ -244,8 +252,24 @@ fn check_file(path: &PathBuf) {
             println!("✓ Syntax OK");
         }
         Err(e) => {
-            eprintln!("❌ Parse error: {:?}", e);
+            eprintln!("❌ {}", format_parse_error(&e));
             std::process::exit(1);
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use aether_lang::parser::ParseError;
+
+    #[test]
+    fn formats_parse_error_with_line_and_column() {
+        let error = ParseError::new("expected identifier, found =", 2, 7);
+
+        assert_eq!(
+            format_parse_error(&error),
+            "Parse error at line 2, column 7: expected identifier, found ="
+        );
     }
 }

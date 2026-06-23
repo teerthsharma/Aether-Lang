@@ -90,7 +90,7 @@ impl<'a> Parser<'a> {
              // Our parse_statement handles newline/empty specially.
             
              // Consume leading newlines strictly
-             while self.check(TokenKind::Newline) {
+             while self.check(TokenKind::Newline) || self.check(TokenKind::Tilde) {
                  self.advance();
              }
 
@@ -139,6 +139,13 @@ impl<'a> Parser<'a> {
 
     fn parse_statement(&mut self) -> Result<Statement, ParseError> {
         let token = self.peek().clone();
+        if let TokenKind::Error(msg) = &token.kind {
+            return Err(ParseError::new(
+                &format!("lexer error: {}", msg),
+                token.line,
+                token.column,
+            ));
+        }
         
         let kind = match &token.kind {
             TokenKind::Manifold => self.parse_manifold_decl()?,
@@ -173,11 +180,7 @@ impl<'a> Parser<'a> {
 
             TokenKind::Newline | TokenKind::Eof => StmtKind::Empty,
             _ => {
-                return Err(ParseError::new(
-                    &format!("unexpected token: {:?}", token.kind),
-                    token.line,
-                    token.column,
-                ));
+                return Err(self.unexpected_token_error("statement"));
             }
         };
         
@@ -190,6 +193,8 @@ impl<'a> Parser<'a> {
                 span: self.make_span(&token, &token) 
             });
         }
+
+        self.consume_statement_separators();
 
         // For statements that we parsed, we want them wrapped. 
         // Note: parse_manifold_decl etc currently return StmtKind, need to adapt helper methods.
@@ -242,8 +247,7 @@ impl<'a> Parser<'a> {
             self.expect(TokenKind::Equals)?;
             let value = self.parse_expr()?;
 
-            Ok(StmtKind::Var(VarDecl {
-                type_hint: None,
+            Ok(StmtKind::Assign(AssignStmt {
                 name: first_ident,
                 value,
             }))
@@ -415,8 +419,14 @@ impl<'a> Parser<'a> {
     
     fn parse_seal_stmt(&mut self) -> Result<StmtKind, ParseError> {
         self.expect(TokenKind::Seal)?;
+        let until = if self.check(TokenKind::Until) {
+            self.advance();
+            Some(self.parse_expr()?)
+        } else {
+            None
+        };
         let body = self.parse_block_stmts()?;
-        Ok(StmtKind::Loop(LoopStmt { body }))
+        Ok(StmtKind::Loop(LoopStmt { until, body }))
     }
     
     fn parse_fn_decl(&mut self) -> Result<StmtKind, ParseError> {
@@ -437,7 +447,7 @@ impl<'a> Parser<'a> {
     
     fn parse_return_stmt(&mut self) -> Result<StmtKind, ParseError> {
         self.expect(TokenKind::Return)?;
-        let value = if self.check(TokenKind::Newline) || self.check(TokenKind::RBrace) {
+        let value = if self.check(TokenKind::Newline) || self.check(TokenKind::Tilde) || self.check(TokenKind::RBrace) {
             None
         } else {
             Some(self.parse_expr()?)
@@ -451,13 +461,77 @@ impl<'a> Parser<'a> {
 
     // Start with lowest precedence
     fn parse_expr(&mut self) -> Result<Expr, ParseError> {
-        self.parse_range()
+        self.parse_or()
+    }
+
+    fn parse_or(&mut self) -> Result<Expr, ParseError> {
+        let mut left = self.parse_and()?;
+
+        while self.check(TokenKind::Or) {
+            self.advance();
+            let right = self.parse_and()?;
+            left = self.binary_expr(left, BinaryOp::Or, right);
+        }
+
+        Ok(left)
+    }
+
+    fn parse_and(&mut self) -> Result<Expr, ParseError> {
+        let mut left = self.parse_equality()?;
+
+        while self.check(TokenKind::And) {
+            self.advance();
+            let right = self.parse_equality()?;
+            left = self.binary_expr(left, BinaryOp::And, right);
+        }
+
+        Ok(left)
+    }
+
+    fn parse_equality(&mut self) -> Result<Expr, ParseError> {
+        let mut left = self.parse_comparison()?;
+
+        while self.check(TokenKind::EqEq) || self.check(TokenKind::NotEq) {
+            let op_token = self.advance();
+            let op = match op_token.kind {
+                TokenKind::EqEq => BinaryOp::Eq,
+                TokenKind::NotEq => BinaryOp::Neq,
+                _ => unreachable!(),
+            };
+            let right = self.parse_comparison()?;
+            left = self.binary_expr(left, op, right);
+        }
+
+        Ok(left)
+    }
+
+    fn parse_comparison(&mut self) -> Result<Expr, ParseError> {
+        let mut left = self.parse_range()?;
+
+        while self.check(TokenKind::Less)
+            || self.check(TokenKind::Greater)
+            || self.check(TokenKind::LessEq)
+            || self.check(TokenKind::GreaterEq)
+        {
+            let op_token = self.advance();
+            let op = match op_token.kind {
+                TokenKind::Less => BinaryOp::Lt,
+                TokenKind::Greater => BinaryOp::Gt,
+                TokenKind::LessEq => BinaryOp::Le,
+                TokenKind::GreaterEq => BinaryOp::Ge,
+                _ => unreachable!(),
+            };
+            let right = self.parse_range()?;
+            left = self.binary_expr(left, op, right);
+        }
+
+        Ok(left)
     }
     
     fn parse_range(&mut self) -> Result<Expr, ParseError> {
         let left = self.parse_arithmetic()?; // Using arithmetic as base for range
         
-        if self.check(TokenKind::Colon) {
+        if self.check(TokenKind::Colon) || self.check(TokenKind::DotDot) {
              self.advance();
              // range start/end must be numbers, but parse_arithmetic returns Spanned<ExprKind>
              // We need to extract number values if possible, or return Error
@@ -507,16 +581,17 @@ impl<'a> Parser<'a> {
     }
 
     fn parse_term(&mut self) -> Result<Expr, ParseError> {
-         let mut left = self.parse_primary()?;
+         let mut left = self.parse_unary()?;
          
-         while self.check(TokenKind::Star) || self.check(TokenKind::Slash) {
+         while self.check(TokenKind::Star) || self.check(TokenKind::Slash) || self.check(TokenKind::Percent) {
             let op_token = self.advance();
             let op = match op_token.kind {
                 TokenKind::Star => BinaryOp::Mul,
                 TokenKind::Slash => BinaryOp::Div,
+                TokenKind::Percent => BinaryOp::Mod,
                 _ => unreachable!(),
             };
-            let right = self.parse_primary()?;
+            let right = self.parse_unary()?;
             
              let span = Span {
                  start: left.span.start,
@@ -530,6 +605,30 @@ impl<'a> Parser<'a> {
          }
          
          Ok(left)
+    }
+
+    fn parse_unary(&mut self) -> Result<Expr, ParseError> {
+        if self.check(TokenKind::Minus) || self.check(TokenKind::Not) {
+            let op_token = self.advance();
+            let op = match op_token.kind {
+                TokenKind::Minus => UnaryOp::Neg,
+                TokenKind::Not => UnaryOp::Not,
+                _ => unreachable!(),
+            };
+            let expr = self.parse_unary()?;
+            let span = Span {
+                start: op_token.start,
+                end: expr.span.end,
+                line: op_token.line,
+                col: op_token.column,
+            };
+            return Ok(Expr {
+                node: ExprKind::UnaryOp(op, Box::new(expr)),
+                span,
+            });
+        }
+
+        self.parse_primary()
     }
 
     fn parse_primary(&mut self) -> Result<Expr, ParseError> {
@@ -580,7 +679,16 @@ impl<'a> Parser<'a> {
                  return self.parse_call_expr_cont(String::from("convergence"), &token);
             },
             
-            _ => return Err(ParseError::new("expected expression", token.line, token.column)),
+            TokenKind::Error(ref msg) => return Err(ParseError::new(
+                &format!("lexer error: {}", msg),
+                token.line,
+                token.column,
+            )),
+            _ => return Err(ParseError::new(
+                &format!("expected expression, found {}", token_label(&token.kind)),
+                token.line,
+                token.column,
+            )),
         };
         
         Ok(self.wrap_expr(kind, &token))
@@ -687,10 +795,13 @@ impl<'a> Parser<'a> {
                  // Convert f64 back to Number enum just for internal usage in Range?
                  // Wait, Range struct in ast.rs expects Number enum.
                  // So I must construct Number.
-                 // f64 to Number::Float
                  let int_part = *f as i64;
                  let frac_part = ((*f - int_part as f64) * 1_000_000.0) as i64;
-                 Ok(Number::Float { int_part, frac_part })
+                 if frac_part == 0 {
+                     Ok(Number::Int(int_part))
+                 } else {
+                     Ok(Number::Float { int_part, frac_part })
+                 }
             },
             _ => Err(ParseError::new("expected number", expr.span.line, expr.span.col))
         }
@@ -704,7 +815,11 @@ impl<'a> Parser<'a> {
                 int_part: int,
                 frac_part: frac,
             }),
-            _ => Err(ParseError::new("expected number", token.line, token.column)),
+            _ => Err(ParseError::new(
+                &format!("expected number, found {}", token_label(&token.kind)),
+                token.line,
+                token.column,
+            )),
         }
     }
     
@@ -791,7 +906,7 @@ impl<'a> Parser<'a> {
         self.expect(TokenKind::LBrace)?;
         let mut statements = Vec::new();
         while !self.check(TokenKind::RBrace) && !self.is_at_end() {
-            while self.check(TokenKind::Newline) { self.advance(); }
+            while self.check(TokenKind::Newline) || self.check(TokenKind::Tilde) { self.advance(); }
             if self.check(TokenKind::RBrace) { break; }
             let stmt = self.parse_statement()?;
              if !matches!(stmt.node, StmtKind::Empty) {
@@ -800,6 +915,26 @@ impl<'a> Parser<'a> {
         }
         self.expect(TokenKind::RBrace)?;
         Ok(Block { statements })
+    }
+
+    fn binary_expr(&self, left: Expr, op: BinaryOp, right: Expr) -> Expr {
+        let span = Span {
+            start: left.span.start,
+            end: right.span.end,
+            line: left.span.line,
+            col: left.span.col,
+        };
+
+        Expr {
+            node: ExprKind::BinaryOp(Box::new(left), op, Box::new(right)),
+            span,
+        }
+    }
+
+    fn consume_statement_separators(&mut self) {
+        while self.check(TokenKind::Tilde) || self.check(TokenKind::Newline) {
+            self.advance();
+        }
     }
 
     fn peek(&self) -> &Token {
@@ -844,12 +979,7 @@ impl<'a> Parser<'a> {
         if self.check(kind.clone()) {
             Ok(self.advance())
         } else {
-            let token = self.peek();
-            Err(ParseError::new(
-                "unexpected token",
-                token.line,
-                token.column,
-            ))
+            Err(self.unexpected_token_error(token_label(&kind).as_str()))
         }
     }
 
@@ -857,7 +987,11 @@ impl<'a> Parser<'a> {
         let token = self.advance();
         match token.kind {
             TokenKind::Identifier(s) => Ok(s),
-            _ => Err(ParseError::new("expected identifier", token.line, token.column)),
+            _ => Err(ParseError::new(
+                &format!("expected identifier, found {}", token_label(&token.kind)),
+                token.line,
+                token.column,
+            )),
         }
     }
     
@@ -882,7 +1016,159 @@ impl<'a> Parser<'a> {
              TokenKind::Output => Ok(String::from("output")),
              TokenKind::Escalate => Ok(String::from("escalate")),
              TokenKind::Convergence => Ok(String::from("convergence")),
-             _ => Err(ParseError::new("expected argument name", token.line, token.column))
+             _ => Err(ParseError::new(
+                 &format!("expected argument name, found {}", token_label(&token.kind)),
+                 token.line,
+                 token.column,
+             ))
          }
+    }
+
+    fn unexpected_token_error(&self, expected: &str) -> ParseError {
+        let token = self.peek();
+        match &token.kind {
+            TokenKind::Error(msg) => ParseError::new(
+                &format!("lexer error: {}", msg),
+                token.line,
+                token.column,
+            ),
+            kind => ParseError::new(
+                &format!("expected {}, found {}", expected, token_label(kind)),
+                token.line,
+                token.column,
+            ),
+        }
+    }
+}
+
+impl core::fmt::Display for ParseError {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        write!(f, "line {}, column {}: {}", self.line, self.column, self.message)
+    }
+}
+
+fn token_label(kind: &TokenKind) -> String {
+    match kind {
+        TokenKind::Identifier(name) => format!("identifier '{}'", name),
+        TokenKind::Number(value) => format!("number {}", value),
+        TokenKind::Float(int, frac) => format!("float {}.{:06}", int, frac),
+        TokenKind::StringLit(value) => format!("string {:?}", value),
+        TokenKind::Error(msg) => format!("lexer error '{}'", msg),
+        TokenKind::Equals => String::from("="),
+        TokenKind::Colon => String::from(":"),
+        TokenKind::Comma => String::from(","),
+        TokenKind::Dot => String::from("."),
+        TokenKind::LBrace => String::from("{"),
+        TokenKind::RBrace => String::from("}"),
+        TokenKind::LBracket => String::from("["),
+        TokenKind::RBracket => String::from("]"),
+        TokenKind::LParen => String::from("("),
+        TokenKind::RParen => String::from(")"),
+        TokenKind::Plus => String::from("+"),
+        TokenKind::Minus => String::from("-"),
+        TokenKind::Star => String::from("*"),
+        TokenKind::Slash => String::from("/"),
+        TokenKind::Percent => String::from("%"),
+        TokenKind::Less => String::from("<"),
+        TokenKind::Greater => String::from(">"),
+        TokenKind::LessEq => String::from("<="),
+        TokenKind::GreaterEq => String::from(">="),
+        TokenKind::EqEq => String::from("=="),
+        TokenKind::NotEq => String::from("!="),
+        TokenKind::And => String::from("&&"),
+        TokenKind::Or => String::from("||"),
+        TokenKind::Not => String::from("!"),
+        TokenKind::DotDot => String::from(".."),
+        TokenKind::Tilde => String::from("~"),
+        TokenKind::Newline => String::from("newline"),
+        TokenKind::Eof => String::from("end of file"),
+        other => format!("{:?}", other).to_lowercase(),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parses_tilde_terminated_statements() {
+        let mut parser = Parser::new("let x = 1~\nlet y = x + 2~");
+        let program = parser.parse().expect("program should parse");
+
+        assert_eq!(program.statements.len(), 2);
+    }
+
+    #[test]
+    fn parses_doc_expression_operators() {
+        let mut parser = Parser::new("let ok = 1 < 2 && !false~");
+        let program = parser.parse().expect("program should parse");
+
+        let StmtKind::Var(var) = &program.statements[0].node else {
+            panic!("expected variable declaration");
+        };
+
+        assert!(matches!(
+            var.value.node,
+            ExprKind::BinaryOp(_, BinaryOp::And, _)
+        ));
+    }
+
+    #[test]
+    fn parses_dot_dot_range_in_for_loop() {
+        let mut parser = Parser::new("for i in 0..3 { print(i)~ }");
+        let program = parser.parse().expect("program should parse");
+
+        let StmtKind::For(for_stmt) = &program.statements[0].node else {
+            panic!("expected for statement");
+        };
+
+        assert_eq!(for_stmt.range.start, Number::Int(0));
+        assert_eq!(for_stmt.range.end, Number::Int(3));
+    }
+
+    #[test]
+    fn parses_reassignment_as_assignment_statement() {
+        let mut parser = Parser::new("let count = 0~\ncount = count + 1~");
+        let program = parser.parse().expect("program should parse");
+
+        let StmtKind::Assign(assign) = &program.statements[1].node else {
+            panic!("expected assignment statement");
+        };
+
+        assert_eq!(assign.name, "count");
+    }
+
+    #[test]
+    fn parses_seal_until_condition() {
+        let mut parser = Parser::new("seal until count >= 3 { count = count + 1~ }");
+        let program = parser.parse().expect("program should parse");
+
+        let StmtKind::Loop(loop_stmt) = &program.statements[0].node else {
+            panic!("expected seal loop");
+        };
+
+        assert!(loop_stmt.until.is_some());
+    }
+
+    #[test]
+    fn reports_lexer_error_with_original_message() {
+        let mut parser = Parser::new("let name = \"unterminated");
+        let err = parser.parse().expect_err("program should fail");
+
+        assert!(err.message.contains("lexer error"));
+        assert!(err.message.contains("unexpected EOF in string"));
+        assert_eq!(err.line, 1);
+        assert_eq!(err.column, 12);
+    }
+
+    #[test]
+    fn reports_expected_and_found_token() {
+        let mut parser = Parser::new("let = 1~");
+        let err = parser.parse().expect_err("program should fail");
+
+        assert!(err.message.contains("expected identifier"));
+        assert!(err.message.contains("found ="));
+        assert_eq!(err.line, 1);
+        assert_eq!(err.column, 5);
     }
 }
