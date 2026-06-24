@@ -9,3 +9,7 @@
 ## 2026-06-20 - Fast Spatial Neighborhood Checks
 **Learning:** In hot paths doing spatial scanning (like SparseAttentionGraph), calling `libm::sqrt` for distance thresholds is a massive bottleneck. Moreover, using a squared distance optimization `d^2 < r^2` must be robust to NaN values.
 **Action:** Always optimize spatial neighborhood checks using squared distances (`eps_sq`) inside an inline loop. Explicitly check for invalid thresholds before the loop (e.g. `!(epsilon > 0.0)`), and use the `!(sum < eps_sq)` pattern for early exits to handle NaNs safely while matching standard Euclidean semantics without the `sqrt` overhead.
+
+## 2026-06-24 - Zero-Copy Backpropagation via Option::take()
+**Learning:** In `aether-core`, `Tensor` structs contain heap-allocated metadata (like shape and strides). Operations like `last_z.as_ref().unwrap().clone()` in `DenseLayer::backward` trigger redundant heap allocations and slow down the training loop, even when the data itself is reference-counted.
+**Action:** When a cached tensor is only needed once during the backward pass (e.g., `last_z` and `last_input`), use `Option::take()` instead of `as_ref().clone()`. This transfers ownership out of the cache without cloning the metadata, saving memory allocations during backpropagation.

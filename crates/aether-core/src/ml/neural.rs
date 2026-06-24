@@ -14,7 +14,6 @@
 // ═══════════════════════════════════════════════════════════════════════════════
 //
 
-
 #![allow(dead_code)]
 
 #[cfg(feature = "alloc")]
@@ -263,14 +262,12 @@ impl DenseLayer {
     pub fn backward(&mut self, grad_output: &Tensor, config: &OptimizerConfig) -> Tensor {
         let last_z = self
             .last_z
-            .as_ref()
-            .expect("Forward must be called before backward")
-            .clone();
+            .take()
+            .expect("Forward must be called before backward");
         let last_input = self
             .last_input
-            .as_ref()
-            .expect("Forward must be called before backward")
-            .clone();
+            .take()
+            .expect("Forward must be called before backward");
 
         let act_deriv = self.activation.derivative(&last_z);
         let delta = grad_output.mul(&act_deriv);
@@ -409,8 +406,15 @@ impl MLP {
 
     /// Forward pass through all layers
     pub fn forward(&mut self, input: &Tensor) -> Tensor {
-        let mut current = input.clone();
-        for layer in &mut self.layers {
+        if self.layers.is_empty() {
+            return input.clone();
+        }
+
+        let mut iter = self.layers.iter_mut();
+        let first_layer = iter.next().unwrap();
+        let mut current = first_layer.forward(input);
+
+        for layer in iter {
             current = layer.forward(&current);
         }
         current
