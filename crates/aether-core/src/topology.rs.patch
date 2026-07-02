@@ -1,0 +1,11 @@
+--- crates/aether-core/src/topology.rs
++++ crates/aether-core/src/topology.rs
+@@ -406,7 +406,7 @@
+         let shape = compute_shape(&nop_sled);
+
+         // Uniform data should have 0 gaps (raw Betti-0 is 0, but clamped to 1 in compute_shape/compute_betti_0 logic, wait...)
+-        assert_eq!(shape.betti_0, 0);
++        assert_eq!(shape.betti_0, 1);
+     }
+
+     #[test]

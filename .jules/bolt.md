@@ -9,3 +9,7 @@
 ## 2026-06-20 - Fast Spatial Neighborhood Checks
 **Learning:** In hot paths doing spatial scanning (like SparseAttentionGraph), calling `libm::sqrt` for distance thresholds is a massive bottleneck. Moreover, using a squared distance optimization `d^2 < r^2` must be robust to NaN values.
 **Action:** Always optimize spatial neighborhood checks using squared distances (`eps_sq`) inside an inline loop. Explicitly check for invalid thresholds before the loop (e.g. `!(epsilon > 0.0)`), and use the `!(sum < eps_sq)` pattern for early exits to handle NaNs safely while matching standard Euclidean semantics without the `sqrt` overhead.
+
+## 2026-07-02 - O(N) Sliding Window Optimization
+**Learning:** `verify_sliding_window` iteratively verified topological shape by recalculating Betti-0 and Betti-1 statistics in a loop, resulting in a naive O(N*W) time complexity.
+**Action:** Always reformulate window-based algorithms, such as computing bounds and calculating components, using incremental offsets. By detecting entering and leaving "gaps" or "loops" we can advance the topology checks with O(1) arithmetic updates per step, shifting the overall algorithm to O(N).
