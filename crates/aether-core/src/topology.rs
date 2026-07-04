@@ -34,6 +34,9 @@
 /// Geometric distance threshold for clustering (Betti-0 calculation)
 const CLUSTER_THRESHOLD: i16 = 15;
 
+/// Tolerance for loop closure (Betti-1 calculation)
+const LOOP_TOLERANCE: i16 = 5;
+
 /// Sliding window size for topology analysis
 const WINDOW_SIZE: usize = 64;
 
@@ -144,7 +147,7 @@ pub fn compute_betti_1(data: &[u8]) -> u32 {
     }
 
     let mut loops = 0u32;
-    let tolerance = 5i16; // How close values must be to "close a loop"
+    let tolerance = LOOP_TOLERANCE; // How close values must be to "close a loop"
 
     // Detect cycles: a -> b -> c -> ~a (return to start)
     for window in data.windows(4) {
@@ -279,9 +282,84 @@ pub fn verify_sliding_window(data: &[u8], window_size: usize) -> Result<(), usiz
         return if is_shape_valid(data) { Ok(()) } else { Err(0) };
     }
 
-    for (offset, window) in data.windows(size).enumerate() {
-        if !is_shape_valid(window) {
-            return Err(offset);
+    // Helper: Is the distance between two bytes a gap?
+    let is_gap = |a: u8, b: u8| (a as i16 - b as i16).abs() > CLUSTER_THRESHOLD;
+
+    // Helper: Does a 4-byte slice form a loop pattern?
+    let is_loop_pattern = |window: &[u8]| -> bool {
+        let tolerance = LOOP_TOLERANCE;
+        let a = window[0] as i16;
+        let d = window[3] as i16;
+        if (a - d).abs() <= tolerance {
+            let b = window[1] as i16;
+            let c = window[2] as i16;
+            if (a - b).abs() > tolerance || (a - c).abs() > tolerance {
+                return true;
+            }
+        }
+        false
+    };
+
+    // Initialize with first window
+    let mut current_betti_0 = compute_betti_0(&data[0..size]);
+    let mut current_betti_1 = compute_betti_1(&data[0..size]);
+
+    // Check first window
+    let mut density = if size > 0 {
+        current_betti_0 as f64 / size as f64
+    } else {
+        0.0
+    };
+
+    if density < DENSITY_MIN || density > DENSITY_MAX || current_betti_1 > MAX_BETTI_1 {
+        return Err(0);
+    }
+
+    // Iterate through remaining windows
+    for i in 0..data.len() - size {
+        // Update Betti 0 (Incremental O(1))
+        if size >= 2 {
+            // Check if we are removing a gap that was a component start
+            let leaving_gap = is_gap(data[i], data[i + 1]);
+            let next_gap = is_gap(data[i + 1], data[i + 2]);
+
+            // If leaving a gap that wasn't continued, we lose a component
+            if leaving_gap && !next_gap {
+                current_betti_0 -= 1;
+            }
+
+            // Check if we are adding a gap that becomes a component start
+            let new_last_gap = is_gap(data[i + size - 1], data[i + size]);
+            let prev_last_gap = is_gap(data[i + size - 2], data[i + size - 1]);
+
+            // If adding a gap that isn't a continuation, we gain a component
+            if new_last_gap && !prev_last_gap {
+                current_betti_0 += 1;
+            }
+        }
+
+        // Update Betti 1 (Incremental O(1))
+        if size >= 4 {
+            // Remove loop at start of old window
+            if is_loop_pattern(&data[i..i + 4]) {
+                current_betti_1 -= 1;
+            }
+
+            // Add loop at end of new window
+            if is_loop_pattern(&data[i + size - 3..i + size + 1]) {
+                current_betti_1 += 1;
+            }
+        }
+
+        // Verify new window state
+        density = if size > 0 {
+            current_betti_0 as f64 / size as f64
+        } else {
+            0.0
+        };
+
+        if density < DENSITY_MIN || density > DENSITY_MAX || current_betti_1 > MAX_BETTI_1 {
+            return Err(i + 1);
         }
     }
 
@@ -342,5 +420,86 @@ mod tests {
             VerifyResult::Pass => {}
             _ => {}
         }
+    }
+
+    #[test]
+    fn test_verify_sliding_window_fail() {
+        let nop_sled = [0x90u8; 100];
+        // Window size 64.
+        // First window: density 0. Should fail at offset 0.
+        let result = verify_sliding_window(&nop_sled, 64);
+        assert_eq!(result, Err(0));
+    }
+
+    #[test]
+    fn test_verify_sliding_window_equivalence() {
+        // Generative property-based test:
+        // Compare incremental sliding window result against naive implementation
+        // for random data to ensure mathematical equivalence.
+
+        // Pseudo-random deterministic data
+        let mut data = Vec::with_capacity(1000);
+        let mut seed: u64 = 0x12345678;
+        for _ in 0..1000 {
+            seed = seed.wrapping_mul(6364136223846793005).wrapping_add(1);
+            data.push((seed >> 33) as u8);
+        }
+
+        let window_size = 64;
+
+        // Calculate naive ground truth
+        // Note: verify_sliding_window returns Ok(()) or Err(offset).
+        // If naive fails at offset X, optimized must fail at offset X.
+
+        let mut expected_result: Result<(), usize> = Ok(());
+        for (offset, window) in data.windows(window_size).enumerate() {
+            if !is_shape_valid(window) {
+                expected_result = Err(offset);
+                break;
+            }
+        }
+
+        let actual_result = verify_sliding_window(&data, window_size);
+
+        assert_eq!(actual_result, expected_result, "Optimization diverged from ground truth!");
+    }
+
+    #[test]
+    fn test_verify_sliding_window_transition() {
+        // Construct valid data: Gap (20), Link (1)...
+        // Density ~0.5.
+        // Then switch to NOP sled.
+        let mut data = Vec::new();
+        let mut val: u8 = 0;
+        // 70 bytes of valid data
+        for i in 0..70 {
+            data.push(val);
+            if i % 2 == 0 {
+                val = val.wrapping_add(20);
+            } else {
+                val = val.wrapping_add(1);
+            }
+        }
+        // Append NOPs
+        for _ in 0..70 {
+            data.push(0x90);
+        }
+
+        // Window size 64.
+        // At offset 0: valid.
+        // As window slides, NOPs enter.
+        // NOPs are links (0x90 - 0x90 = 0 < 15).
+        // So components count will decrease.
+        // When density < 0.1, it should fail.
+        // Density 0.1 => 6.4 components.
+        // Initial components ~32.
+        // We need to replace ~26 components with links.
+        // Each 2 NOPs replace a Gap/Link pair?
+        // It should fail eventually.
+
+        let result = verify_sliding_window(&data, 64);
+        assert!(result.is_err());
+        let offset = result.unwrap_err();
+        assert!(offset > 0);
     }
 }
