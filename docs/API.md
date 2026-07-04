@@ -336,6 +336,54 @@ if detector.is_drifting(0.1) {
 
 ## Topology Module
 
+### `topology::persistent_homology`
+
+Computes exact persistent homology over a bounded filtered complex. The core
+engine supports H0/H1/H2 by generating vertices, edges, triangles, and
+tetrahedra, then reducing boundary columns over Z2.
+
+```rust
+use aether_core::persistence::{
+    persistent_homology, ComplexKind, PersistenceConfig,
+};
+use aether_core::manifold::ManifoldPoint;
+
+let points = [
+    ManifoldPoint::<2>::new([0.0, 0.0]),
+    ManifoldPoint::<2>::new([1.0, 0.0]),
+    ManifoldPoint::<2>::new([1.0, 1.0]),
+    ManifoldPoint::<2>::new([0.0, 1.0]),
+];
+
+let diagram = persistent_homology(&points, PersistenceConfig {
+    max_homology_dim: 2,
+    max_points: 32,
+    max_simplices: 8192,
+    max_radius: f64::INFINITY,
+    complex_kind: ComplexKind::VietorisRips,
+})?;
+
+let betti = diagram.betti_at(1.0);
+```
+
+Low-load DSL runs can use `ComplexKind::Witness { max_landmarks }`, which
+uses farthest-point landmarks and lazy witness filtration instead of dense
+Vietoris-Rips generation over every embedded point.
+
+### AETHER DSL Topology
+
+```aegis
+import topology~
+let data = [1.0, 1.0, 1.0, 1.0, 1.0]~
+manifold M = embed(data, tau=1)~
+let diagram = topology.ph(M, max_dim=2, mode="witness", landmarks=16)~
+let b = topology.betti(diagram, radius=0.5)~
+let bars = topology.intervals(diagram)~
+```
+
+`topology.betti` returns `[β0, β1, β2]`. `topology.intervals` returns
+`[dimension, birth, death]` triples, using `-1.0` for essential intervals.
+
 ### `topology::BinaryTopology`
 
 Compute topology of binary data.
