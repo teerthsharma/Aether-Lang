@@ -18,15 +18,14 @@
 // ═══════════════════════════════════════════════════════════════════════════════
 //
 
-
 use clap::{Parser as ClapParser, Subcommand};
 use rustyline::error::ReadlineError;
 use rustyline::DefaultEditor;
 use std::fs;
 use std::path::PathBuf;
 
-use aether_lang::{Interpreter, Parser};
 use aether_lang::parser::ParseError;
+use aether_lang::{Interpreter, Parser};
 
 /// AEGIS - The Universal Programming Language
 #[derive(ClapParser)]
@@ -67,15 +66,17 @@ fn main() {
     // Spawn a thread with 8MB stack to prevent overflow.
     let builder = std::thread::Builder::new().stack_size(8 * 1024 * 1024);
 
-    let handler = builder.spawn(|| {
-        let cli = Cli::parse();
+    let handler = builder
+        .spawn(|| {
+            let cli = Cli::parse();
 
-        match cli.command {
-            Some(Commands::Repl) | None => run_repl(),
-            Some(Commands::Run { file, mode }) => run_file(&file, &mode),
-            Some(Commands::Check { file }) => check_file(&file),
-        }
-    }).unwrap();
+            match cli.command {
+                Some(Commands::Repl) | None => run_repl(),
+                Some(Commands::Run { file, mode }) => run_file(&file, &mode),
+                Some(Commands::Check { file }) => check_file(&file),
+            }
+        })
+        .unwrap();
 
     handler.join().unwrap();
 }
@@ -152,9 +153,7 @@ fn format_parse_error(error: &ParseError) -> String {
 fn execute_line(interpreter: &mut Interpreter, source: &str) -> Result<String, String> {
     // Parser internally creates a lexer and tokenizes
     let mut parser = Parser::new(source);
-    let ast = parser
-        .parse()
-        .map_err(|e| format_parse_error(&e))?;
+    let ast = parser.parse().map_err(|e| format_parse_error(&e))?;
 
     // Execute and format result
     let value = interpreter
@@ -182,7 +181,10 @@ fn run_file(path: &PathBuf, mode: &str) {
     if let Some(ext) = path.extension() {
         let s = ext.to_string_lossy();
         if s != "aether" && s != "ae" {
-            println!("Warning: File extension '.{}' is not standard (.aether or .ae)", s);
+            println!(
+                "Warning: File extension '.{}' is not standard (.aether or .ae)",
+                s
+            );
         }
     }
 
@@ -197,14 +199,14 @@ fn run_file(path: &PathBuf, mode: &str) {
     };
 
     if mode == "titan" {
-        use aether_lang::vm::{TitanVM, Compiler};
+        use aether_lang::vm::{Compiler, TitanVM};
         // Compile to Bytecode
         let compiler = Compiler::new();
         let code = compiler.compile(&ast);
-        
+
         let mut vm = TitanVM::new();
         vm.load_code(code);
-        
+
         match vm.run() {
             Ok(result) => {
                 println!("{:?}", result);

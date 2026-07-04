@@ -19,7 +19,6 @@
 // ═══════════════════════════════════════════════════════════════════════════════
 //
 
-
 #![allow(dead_code)]
 
 extern crate alloc;
@@ -141,7 +140,13 @@ pub struct Token {
 
 impl Token {
     pub fn new(kind: TokenKind, line: usize, column: usize, start: usize, end: usize) -> Self {
-        Self { kind, line, column, start, end }
+        Self {
+            kind,
+            line,
+            column,
+            start,
+            end,
+        }
     }
 }
 
@@ -286,7 +291,12 @@ impl<'a> Lexer<'a> {
         }
 
         // Check for decimal point
-        if self.peek() == Some(&'.') && self.peek_next_char().map(|c| c.is_ascii_digit()).unwrap_or(false) {
+        if self.peek() == Some(&'.')
+            && self
+                .peek_next_char()
+                .map(|c| c.is_ascii_digit())
+                .unwrap_or(false)
+        {
             self.advance();
             let mut frac_part: i64 = 0;
             let mut frac_digits = 0;

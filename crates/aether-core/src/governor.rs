@@ -26,7 +26,6 @@
 // ═══════════════════════════════════════════════════════════════════════════════
 //
 
-
 #![allow(dead_code)]
 
 // use libm::fabs;
@@ -210,7 +209,7 @@ impl GeometricGovernor {
         // Step 5: Update State
         // ═══════════════════════════════════════════════════════════════════
 
-        self.epsilon += adjustment;
+        self.epsilon -= adjustment;
         self.last_error = error;
         self.adjustment_count += 1;
 
