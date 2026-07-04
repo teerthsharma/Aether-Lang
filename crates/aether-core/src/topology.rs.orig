@@ -404,8 +404,8 @@ mod tests {
         let nop_sled = [0x90u8; 64];
         let shape = compute_shape(&nop_sled);
 
-        // Uniform data has 0 gaps, but compute_betti_0 minimum is 1
-        assert_eq!(shape.betti_0, 1);
+        // Uniform data should have 0 gaps
+        assert_eq!(shape.betti_0, 0);
     }
 
     #[test]
