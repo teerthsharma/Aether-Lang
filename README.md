@@ -15,7 +15,7 @@ Aether-Lang = interpreter/VM (Rust) + manifold ML runtime (Rust) + microkernel (
 | Crate | Role |
 |-------|------|
 | `aether-lang` | Lexer → parser → AST → interpreter → VM |
-| `aether-core` | Manifold embeddings, TDA, geometric primitives |
+| `aether-core` | Manifold embeddings, bounded persistent homology, TDA, geometric primitives |
 | `aether-kernel` | Bare-metal x86_64 microkernel (no_std) |
 | `aether-cli` | `aether` REPL and script runner |
 
@@ -72,6 +72,49 @@ In the REPL, statements end with `~`. Scripts use `.aether` / `.ae`.
 
 ---
 
+## Topological ML Core
+
+AETHER now ships a real bounded persistent-homology engine in `aether-core`.
+It builds filtered complexes and reduces them over `Z2` for H0/H1/H2 intervals.
+The core is `no_std`-compatible with `alloc`; `std` is only for convenience.
+
+The engine is designed for DSL runs, so it has hard load controls instead of
+unbounded simplex expansion:
+
+- caps for points, edges, triangles, tetrahedra, and total simplices
+- radius cutoffs for Vietoris-Rips complexes
+- optional landmark/witness mode for cheaper topology over larger signals
+- low-load defaults exposed through the DSL
+
+```aether
+import topology~
+
+let data = [0, 1, 0, -1, 0, 1, 0, -1]~
+let M = embed(data, dim=3, tau=1)~
+let diagram = topology.ph(M, max_dim=2, mode="witness", landmarks=16)~
+let b = topology.betti(diagram, radius=0.5)~
+let bars = topology.intervals(diagram)~
+```
+
+`topology.betti` returns `[β0, β1, β2]`. This is not a Betti stub: the DSL calls
+the same exact filtered-complex reduction used by `aether-core`.
+
+---
+
+## Runtime Performance Notes
+
+The hot paths follow the same rule as the topology core: keep the math real, but
+pay only for what the algorithm needs.
+
+- KNN and nearest-centroid rank by squared distance, avoiding unnecessary `sqrt`.
+- DBSCAN, auto-k selection, sparse-neighborhood checks, and gossip convergence
+  compare squared radii/tolerances in threshold loops.
+- Scalar loss and distance reductions borrow tensor data directly instead of
+  building temporary tensors.
+- The manifold heap Chebyshev guard computes statistics in one pass.
+
+---
+
 ## Architecture
 
 ```
@@ -91,7 +134,7 @@ Source (.ae)
     │
     ▼
 ┌─────────────┐
-│ aether-core │  ← manifold embeddings, TDA, geometry
+│ aether-core │  ← manifold embeddings, persistent homology, TDA, geometry
 │ aether-kernel│ ← bare-metal microkernel (x86_64)
 └─────────────┘
 ```
