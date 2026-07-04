@@ -26,7 +26,6 @@
 #![allow(dead_code)]
 
 use crate::ml::clustering::{KMeans, KMeansResult};
-use libm::sqrt; // Reuse existing clustering logic if needed
 
 /// Maximum dimension for the manifold points
 const MAX_DIM: usize = 3;
@@ -191,7 +190,7 @@ impl GossipRing {
                 let d = node.global_estimate[i] - mean[i];
                 dist_sq += d * d;
             }
-            if sqrt(dist_sq) > tolerance {
+            if dist_sq > tolerance * tolerance {
                 return false;
             }
         }
