@@ -199,21 +199,20 @@ impl<const D: usize> KNNClassifier<D> {
         // Find k nearest neighbors
         let mut distances = [(f64::MAX, 0u32); MAX_POINTS];
         for (i, dist) in distances.iter_mut().enumerate().take(self.n_train) {
-            *dist = (self.distance(x, &self.x_train[i]), self.y_train[i]);
+            *dist = (self.squared_distance(x, &self.x_train[i]), self.y_train[i]);
         }
 
-        // Sort by distance (simple bubble sort for small k)
-        for i in 0..self.k.min(self.n_train) {
-            for j in (i + 1)..self.n_train {
-                if distances[j].0 < distances[i].0 {
-                    distances.swap(i, j);
-                }
-            }
+        let k_min = self.k.min(self.n_train);
+        if k_min > 0 {
+            // Find k nearest neighbors in O(N) using select_nth_unstable_by
+            distances[..self.n_train].select_nth_unstable_by(k_min - 1, |a, b| {
+                a.0.partial_cmp(&b.0).unwrap_or(core::cmp::Ordering::Equal)
+            });
         }
 
         // Vote among k nearest
         let mut votes = [0u32; MAX_CLASSES];
-        for dist in distances.iter().take(self.k.min(self.n_train)) {
+        for dist in distances.iter().take(k_min) {
             let label = dist.1 as usize;
             if label < MAX_CLASSES {
                 votes[label] += 1;
@@ -233,14 +232,14 @@ impl<const D: usize> KNNClassifier<D> {
         best_class
     }
 
-    /// Euclidean distance
-    fn distance(&self, a: &[f64; D], b: &[f64; D]) -> f64 {
+    /// Squared Euclidean distance to avoid sqrt overhead in hot paths
+    fn squared_distance(&self, a: &[f64; D], b: &[f64; D]) -> f64 {
         let mut sum = 0.0;
         for i in 0..D {
             let diff = a[i] - b[i];
             sum += diff * diff;
         }
-        sqrt(sum)
+        sum
     }
 }
 
