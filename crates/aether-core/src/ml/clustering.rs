@@ -297,11 +297,13 @@ pub fn auto_k_selection<const D: usize>(data: &[[f64; D]], n: usize, epsilon: f6
             }
             visited[current] = true;
 
+            let epsilon_sq = epsilon * epsilon;
+
             // Add neighbors
             for i in 0..n {
                 if !visited[i] && i != current {
-                    let dist = distance(&data[current], &data[i]);
-                    if dist < epsilon && top < 64 {
+                    let dist_sq = squared_distance(&data[current], &data[i]);
+                    if dist_sq < epsilon_sq && top < 64 {
                         stack[top] = i;
                         top += 1;
                     }
@@ -317,12 +319,16 @@ pub fn auto_k_selection<const D: usize>(data: &[[f64; D]], n: usize, epsilon: f6
 }
 
 fn distance<const D: usize>(a: &[f64; D], b: &[f64; D]) -> f64 {
+    sqrt(squared_distance(a, b))
+}
+
+fn squared_distance<const D: usize>(a: &[f64; D], b: &[f64; D]) -> f64 {
     let mut sum = 0.0;
     for d in 0..D {
         let diff = a[d] - b[d];
         sum += diff * diff;
     }
-    sqrt(sum)
+    sum
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -447,9 +453,10 @@ impl<const D: usize> DBSCAN<D> {
         i: usize,
     ) -> heapless::Vec<usize, MAX_POINTS> {
         let mut neighbors = heapless::Vec::new();
+        let epsilon_sq = self.epsilon * self.epsilon;
 
         for j in 0..n {
-            if distance(&data[i], &data[j]) <= self.epsilon {
+            if squared_distance(&data[i], &data[j]) <= epsilon_sq {
                 let _ = neighbors.push(j);
             }
         }

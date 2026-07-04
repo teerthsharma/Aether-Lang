@@ -16,7 +16,7 @@
 #![allow(dead_code)]
 
 // use heapless::Vec as HVec;
-use libm::{exp, fabs, log, sqrt};
+use libm::{exp, fabs, log};
 
 /// Maximum classes
 const MAX_CLASSES: usize = 16;
@@ -196,24 +196,21 @@ impl<const D: usize> KNNClassifier<D> {
             return 0;
         }
 
-        // Find k nearest neighbors
+        // Find k nearest neighbors by squared distance. The square root is
+        // monotonic, so ranking does not need to pay for it in this hot path.
         let mut distances = [(f64::MAX, 0u32); MAX_POINTS];
         for (i, dist) in distances.iter_mut().enumerate().take(self.n_train) {
-            *dist = (self.distance(x, &self.x_train[i]), self.y_train[i]);
+            *dist = (self.squared_distance(x, &self.x_train[i]), self.y_train[i]);
         }
 
-        // Sort by distance (simple bubble sort for small k)
-        for i in 0..self.k.min(self.n_train) {
-            for j in (i + 1)..self.n_train {
-                if distances[j].0 < distances[i].0 {
-                    distances.swap(i, j);
-                }
-            }
+        let k = self.k.min(self.n_train);
+        if k < self.n_train {
+            distances[..self.n_train].select_nth_unstable_by(k - 1, |a, b| a.0.total_cmp(&b.0));
         }
 
         // Vote among k nearest
         let mut votes = [0u32; MAX_CLASSES];
-        for dist in distances.iter().take(self.k.min(self.n_train)) {
+        for dist in distances.iter().take(k) {
             let label = dist.1 as usize;
             if label < MAX_CLASSES {
                 votes[label] += 1;
@@ -233,14 +230,14 @@ impl<const D: usize> KNNClassifier<D> {
         best_class
     }
 
-    /// Euclidean distance
-    fn distance(&self, a: &[f64; D], b: &[f64; D]) -> f64 {
+    /// Squared Euclidean distance for ranking.
+    fn squared_distance(&self, a: &[f64; D], b: &[f64; D]) -> f64 {
         let mut sum = 0.0;
         for i in 0..D {
             let diff = a[i] - b[i];
             sum += diff * diff;
         }
-        sqrt(sum)
+        sum
     }
 }
 
@@ -678,7 +675,7 @@ impl<const D: usize> NearestCentroid<D> {
         let mut best_dist = f64::MAX;
 
         for c in 0..self.n_classes {
-            let dist = self.distance(x, &self.centroids[c]);
+            let dist = self.squared_distance(x, &self.centroids[c]);
             if dist < best_dist {
                 best_dist = dist;
                 best_class = c as u32;
@@ -697,13 +694,13 @@ impl<const D: usize> NearestCentroid<D> {
         }
     }
 
-    fn distance(&self, a: &[f64; D], b: &[f64; D]) -> f64 {
+    fn squared_distance(&self, a: &[f64; D], b: &[f64; D]) -> f64 {
         let mut sum = 0.0;
         for i in 0..D {
             let diff = a[i] - b[i];
             sum += diff * diff;
         }
-        sqrt(sum)
+        sum
     }
 }
 
