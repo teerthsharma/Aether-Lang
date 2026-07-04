@@ -60,29 +60,56 @@ $$\Phi(t) = [x(t), x(t-\tau), x(t-2\tau), ..., x(t-(D-1)\tau)]$$
 
 This reconstructs the attractor of the underlying dynamical system.
 
-### 3.2 Betti Numbers
+### 3.2 Persistent Homology
 
-**β₀ (0-dimensional homology)**: Number of connected components
+AETHER's DSL-level topology is grounded in the paper's TDA engine model:
+time-delay embeddings reconstruct an attractor, then a filtered simplicial
+complex exposes the topological features that seal loops and ML convergence
+track.
 
-$$\beta_0 = |H_0(X)|$$
+For a point cloud \(X = \{x_i\}\), AETHER supports exact Vietoris-Rips
+filtration through tetrahedra:
 
-Computed via 1D clustering: count "gaps" where consecutive byte difference > threshold.
+$$VR_\epsilon(X) = \{\sigma \subseteq X : \max_{u,v \in \sigma} d(u,v) \leq \epsilon\}$$
 
-**β₁ (1-dimensional homology)**: Number of loops/cycles
+Boundary matrices are reduced over \(\mathbb{Z}_2\). A simplex with an empty
+reduced column births a feature; a later simplex whose reduced boundary has
+low pivot kills that feature. This produces a persistence diagram:
 
-$$\beta_1 = |H_1(X)|$$
+$$D_k = \{(b_i, d_i) : i \in H_k\}$$
 
-Approximated by detecting oscillation patterns in byte stream.
+Supported dimensions:
 
-### 3.3 Shape Signature
+- **H₀ / β₀**: connected components
+- **H₁ / β₁**: loops and circular attractors
+- **H₂ / β₂**: voids, enclosed shells, higher-order gaps
 
-$$Shape(B) = (\beta_0, \beta_1)$$
+### 3.3 Low-Load Witness Mode
 
-### 3.4 Authentication Criterion
+The research paper emphasizes sparse triggering and geometric pruning rather
+than dense all-pairs work. AETHER therefore also supports a bounded lazy
+witness complex. Farthest-point landmarks \(L \subset X\) preserve geometric
+spread, while all points in \(X\) act as witnesses:
+
+$$f(\sigma) = \min_{w \in X} \left(\max_{\ell \in \sigma} d(w,\ell) - d(w,L)\right)$$
+
+where \(d(w,L)\) is the distance to the nearest landmark. A simplex enters
+when \(f(\sigma) \leq \epsilon\). This keeps DSL runs cheap while preserving
+the topological signal better than plain subsampling.
+
+### 3.4 Shape Signature
+
+At radius \(\epsilon\), the active diagram gives:
+
+$$Shape_\epsilon(X) = (\beta_0, \beta_1, \beta_2)$$
+
+### 3.5 Authentication Criterion
 
 $$d_{Wasserstein}(Shape(B), Shape_{ref}) \leq \delta$$
 
-Simplified to density-based heuristic:
+The legacy binary gatekeeper still exposes density heuristics for code
+authentication, but topological ML uses the persistence diagram as the
+authoritative shape object:
 
 $$density = \frac{\beta_0}{|B|} \in [0.1, 0.6] \implies \text{Valid}$$
 

@@ -16,7 +16,6 @@
 // ═══════════════════════════════════════════════════════════════════════════════
 //
 
-
 #![allow(dead_code)]
 
 #[cfg(not(feature = "std"))]
@@ -29,9 +28,9 @@ use alloc::collections::BTreeMap;
 #[cfg(not(feature = "std"))]
 use alloc::string::String;
 #[cfg(not(feature = "std"))]
-use alloc::{format, vec};
-#[cfg(not(feature = "std"))]
 use alloc::string::ToString;
+#[cfg(not(feature = "std"))]
+use alloc::{format, vec};
 
 #[cfg(not(feature = "std"))]
 macro_rules! println {
@@ -50,18 +49,21 @@ use std::vec::Vec;
 use crate::ast::*;
 use aether_core::aether::{BlockMetadata, DriftDetector, HierarchicalBlockTree};
 use aether_core::manifold::{ManifoldPoint, TimeDelayEmbedder};
-use aether_core::ml::{MLP, KMeans, Activation, OptimizerConfig};
-use aether_core::ml::tensor::Tensor;
-use aether_core::ml::linalg::LossConfig;
 use aether_core::ml::convolution::Conv2D;
+use aether_core::ml::linalg::LossConfig;
+use aether_core::ml::tensor::Tensor;
+use aether_core::ml::{Activation, KMeans, OptimizerConfig, MLP};
+use aether_core::persistence::{
+    persistent_homology, ComplexKind, PersistenceConfig, PersistenceDiagram,
+};
 use libm::{fabs, sqrt};
 
+#[cfg(not(feature = "std"))]
+use alloc::sync::Arc;
 #[cfg(feature = "std")]
 use safetensors::SafeTensors;
 #[cfg(feature = "std")]
 use std::sync::Arc;
-#[cfg(not(feature = "std"))]
-use alloc::sync::Arc;
 
 #[cfg(feature = "ml")]
 use candle_core::{Device, Tensor as CandleTensor};
@@ -94,6 +96,8 @@ pub enum Value {
     Point([f64; DIM]),
     /// Regression result
     RegressionResult(RegressionOutput),
+    /// Persistent homology diagram
+    Persistence(PersistenceDiagram),
     /// Class Definition
     Class(ClassHandle),
     /// Object Instance
@@ -127,8 +131,6 @@ pub struct LlamaContext {
     pub name: String,
 }
 
-
-
 /// Native function pointer type
 #[derive(Debug, Clone)]
 pub enum NativeFunction {
@@ -136,7 +138,9 @@ pub enum NativeFunction {
     MathCos,
     MathSqrt,
     MathExp,
+    TopoPh,
     TopoBetti,
+    TopoIntervals,
     Print,
     // ML Constructors
     MlpNew,
@@ -398,7 +402,9 @@ impl EscalatingRegressor {
                 let mut sum_xx = 0.0;
 
                 for (i, p) in manifold.points.iter().enumerate() {
-                    if i >= self.target.len() { break; }
+                    if i >= self.target.len() {
+                        break;
+                    }
                     let x = p.coords[0];
                     let y = self.target[i];
                     sum_x += x;
@@ -435,7 +441,9 @@ impl EscalatingRegressor {
         let mut count = 0;
 
         for (i, p) in manifold.points.iter().enumerate() {
-            if i >= self.target.len() { break; }
+            if i >= self.target.len() {
+                break;
+            }
             let pred = self.predict(p.coords[0], coeffs, model);
             let err = pred - self.target[i];
             mse += err * err;
@@ -480,7 +488,9 @@ impl EscalatingRegressor {
         let mut prev_sign = true;
 
         for (i, p) in manifold.points.iter().enumerate() {
-            if i >= self.target.len() { break; }
+            if i >= self.target.len() {
+                break;
+            }
             let pred = self.predict(p.coords[0], coeffs, model);
             let residual = self.target[i] - pred;
             let sign = residual >= 0.0;
@@ -502,10 +512,14 @@ impl EscalatingRegressor {
     }
 
     fn is_converged(&self, error: f64, current_betti: &(u32, u32)) -> bool {
-        if error < self.epsilon { return true; }
+        if error < self.epsilon {
+            return true;
+        }
         if self.betti_history.len() >= 3 {
             let recent: Vec<&(u32, u32)> = self.betti_history.iter().rev().take(3).collect();
-            if recent.iter().all(|b| **b == *current_betti) { return true; }
+            if recent.iter().all(|b| **b == *current_betti) {
+                return true;
+            }
         }
         false
     }
@@ -547,7 +561,10 @@ impl Interpreter {
         }
 
         let mut variables = BTreeMap::new();
-        variables.insert(String::from("print"), Value::NativeFn(NativeFunction::Print));
+        variables.insert(
+            String::from("print"),
+            Value::NativeFn(NativeFunction::Print),
+        );
 
         Self {
             variables,
@@ -591,9 +608,7 @@ impl Interpreter {
             StmtKind::Return(stmt) => self.execute_return(stmt),
             StmtKind::Break(_) => Ok(RuntimeFlow::Break),
             StmtKind::Continue(_) => Ok(RuntimeFlow::Continue),
-            StmtKind::Expr(expr) => {
-                self.evaluate_expr(expr).map(RuntimeFlow::Value)
-            },
+            StmtKind::Expr(expr) => self.evaluate_expr(expr).map(RuntimeFlow::Value),
             StmtKind::Empty => Ok(RuntimeFlow::Value(Value::Unit)),
         }
     }
@@ -612,12 +627,14 @@ impl Interpreter {
 
         let handle = ClassHandle(self.classes.len());
         self.classes.push(class_def);
-        self.variables.insert(decl.name.clone(), Value::Class(handle));
+        self.variables
+            .insert(decl.name.clone(), Value::Class(handle));
         Ok(Value::Class(handle))
     }
 
     fn execute_fn_decl(&mut self, decl: &FnDecl) -> Result<Value, String> {
-        self.variables.insert(decl.name.clone(), Value::Function(decl.clone()));
+        self.variables
+            .insert(decl.name.clone(), Value::Function(decl.clone()));
         Ok(Value::Unit)
     }
 
@@ -632,7 +649,9 @@ impl Interpreter {
 
     #[allow(unused_variables)]
     fn evaluate_new(&mut self, class_name: &String, args: &[Expr]) -> Result<Value, String> {
-        let class_handle = if let Some(Value::Class(h)) = self.variables.get(class_name) { *h } else {
+        let class_handle = if let Some(Value::Class(h)) = self.variables.get(class_name) {
+            *h
+        } else {
             return Err(format!("Class '{}' not found", class_name));
         };
 
@@ -666,18 +685,51 @@ impl Interpreter {
     fn import_math(&mut self, stmt: &ImportStmt) -> Result<Value, String> {
         if let Some(symbol) = &stmt.symbol {
             match symbol.as_str() {
-                "pi" => { self.variables.insert(String::from("pi"), Value::Num(core::f64::consts::PI)); },
-                "sin" => { self.variables.insert(String::from("sin"), Value::NativeFn(NativeFunction::MathSin)); },
-                "cos" => { self.variables.insert(String::from("cos"), Value::NativeFn(NativeFunction::MathCos)); },
-                "sqrt" => { self.variables.insert(String::from("sqrt"), Value::NativeFn(NativeFunction::MathSqrt)); },
-                "exp" => { self.variables.insert(String::from("exp"), Value::NativeFn(NativeFunction::MathExp)); },
+                "pi" => {
+                    self.variables
+                        .insert(String::from("pi"), Value::Num(core::f64::consts::PI));
+                }
+                "sin" => {
+                    self.variables.insert(
+                        String::from("sin"),
+                        Value::NativeFn(NativeFunction::MathSin),
+                    );
+                }
+                "cos" => {
+                    self.variables.insert(
+                        String::from("cos"),
+                        Value::NativeFn(NativeFunction::MathCos),
+                    );
+                }
+                "sqrt" => {
+                    self.variables.insert(
+                        String::from("sqrt"),
+                        Value::NativeFn(NativeFunction::MathSqrt),
+                    );
+                }
+                "exp" => {
+                    self.variables.insert(
+                        String::from("exp"),
+                        Value::NativeFn(NativeFunction::MathExp),
+                    );
+                }
                 _ => return Err(format!("Symbol '{}' not found in math", symbol)),
             }
         } else {
-             self.variables.insert(String::from("pi"), Value::Num(core::f64::consts::PI));
-             self.variables.insert(String::from("sin"), Value::NativeFn(NativeFunction::MathSin));
-             self.variables.insert(String::from("cos"), Value::NativeFn(NativeFunction::MathCos));
-             self.variables.insert(String::from("sqrt"), Value::NativeFn(NativeFunction::MathSqrt));
+            self.variables
+                .insert(String::from("pi"), Value::Num(core::f64::consts::PI));
+            self.variables.insert(
+                String::from("sin"),
+                Value::NativeFn(NativeFunction::MathSin),
+            );
+            self.variables.insert(
+                String::from("cos"),
+                Value::NativeFn(NativeFunction::MathCos),
+            );
+            self.variables.insert(
+                String::from("sqrt"),
+                Value::NativeFn(NativeFunction::MathSqrt),
+            );
         }
         Ok(Value::Unit)
     }
@@ -685,9 +737,42 @@ impl Interpreter {
     fn import_topology(&mut self, stmt: &ImportStmt) -> Result<Value, String> {
         if let Some(symbol) = &stmt.symbol {
             match symbol.as_str() {
-                "Betti" => self.variables.insert(String::from("Betti"), Value::NativeFn(NativeFunction::TopoBetti)),
+                "ph" => self
+                    .variables
+                    .insert(String::from("ph"), Value::NativeFn(NativeFunction::TopoPh)),
+                "Betti" => self.variables.insert(
+                    String::from("Betti"),
+                    Value::NativeFn(NativeFunction::TopoBetti),
+                ),
+                "betti" => self.variables.insert(
+                    String::from("betti"),
+                    Value::NativeFn(NativeFunction::TopoBetti),
+                ),
+                "intervals" => self.variables.insert(
+                    String::from("intervals"),
+                    Value::NativeFn(NativeFunction::TopoIntervals),
+                ),
                 _ => return Err(format!("Symbol '{}' not found in topology", symbol)),
             };
+        } else {
+            self.variables.insert(
+                String::from("topology"),
+                Value::Module(String::from("topology")),
+            );
+            self.variables
+                .insert(String::from("ph"), Value::NativeFn(NativeFunction::TopoPh));
+            self.variables.insert(
+                String::from("Betti"),
+                Value::NativeFn(NativeFunction::TopoBetti),
+            );
+            self.variables.insert(
+                String::from("betti"),
+                Value::NativeFn(NativeFunction::TopoBetti),
+            );
+            self.variables.insert(
+                String::from("intervals"),
+                Value::NativeFn(NativeFunction::TopoIntervals),
+            );
         }
         Ok(Value::Unit)
     }
@@ -695,51 +780,152 @@ impl Interpreter {
     fn import_ml(&mut self, stmt: &ImportStmt) -> Result<Value, String> {
         if let Some(symbol) = &stmt.symbol {
             match symbol.as_str() {
-                 "MLP" => { self.variables.insert(String::from("MLP"), Value::NativeFn(NativeFunction::MlpNew)); },
-                 "KMeans" => { self.variables.insert(String::from("KMeans"), Value::NativeFn(NativeFunction::KMeansNew)); },
-                 "Conv2D" => { self.variables.insert(String::from("Conv2D"), Value::NativeFn(NativeFunction::Conv2DNew)); },
-                 _ => return Err(format!("Symbol '{}' not found in ml", symbol)),
+                "MLP" => {
+                    self.variables
+                        .insert(String::from("MLP"), Value::NativeFn(NativeFunction::MlpNew));
+                }
+                "KMeans" => {
+                    self.variables.insert(
+                        String::from("KMeans"),
+                        Value::NativeFn(NativeFunction::KMeansNew),
+                    );
+                }
+                "Conv2D" => {
+                    self.variables.insert(
+                        String::from("Conv2D"),
+                        Value::NativeFn(NativeFunction::Conv2DNew),
+                    );
+                }
+                _ => return Err(format!("Symbol '{}' not found in ml", symbol)),
             };
         } else {
-             self.variables.insert(String::from("MLP"), Value::NativeFn(NativeFunction::MlpNew));
-             self.variables.insert(String::from("KMeans"), Value::NativeFn(NativeFunction::KMeansNew));
-             self.variables.insert(String::from("Conv2D"), Value::NativeFn(NativeFunction::Conv2DNew));
-             self.variables.insert(String::from("load_weights"), Value::NativeFn(NativeFunction::MlLoadWeights));
-             self.variables.insert(String::from("matmul"), Value::NativeFn(NativeFunction::MlMatMul));
-             self.variables.insert(String::from("add"), Value::NativeFn(NativeFunction::MlAdd));
-             self.variables.insert(String::from("relu"), Value::NativeFn(NativeFunction::MlRelu));
-             self.variables.insert(String::from("softmax"), Value::NativeFn(NativeFunction::MlSoftmax));
-             self.variables.insert(String::from("attention"), Value::NativeFn(NativeFunction::MlAttention));
-             self.variables.insert(String::from("gpu_check"), Value::NativeFn(NativeFunction::MlGpuCheck));
-             self.variables.insert(String::from("backward"), Value::NativeFn(NativeFunction::MlBackward));
-             self.variables.insert(String::from("update"), Value::NativeFn(NativeFunction::MlUpdate));
-             self.variables.insert(String::from("load_llama"), Value::NativeFn(NativeFunction::MlLoadLlama));
-             self.variables.insert(String::from("generate"), Value::NativeFn(NativeFunction::MlGenerate));
-             self.variables.insert(String::from("Ml"), Value::Module(String::from("Ml")));
+            self.variables
+                .insert(String::from("MLP"), Value::NativeFn(NativeFunction::MlpNew));
+            self.variables.insert(
+                String::from("KMeans"),
+                Value::NativeFn(NativeFunction::KMeansNew),
+            );
+            self.variables.insert(
+                String::from("Conv2D"),
+                Value::NativeFn(NativeFunction::Conv2DNew),
+            );
+            self.variables.insert(
+                String::from("load_weights"),
+                Value::NativeFn(NativeFunction::MlLoadWeights),
+            );
+            self.variables.insert(
+                String::from("matmul"),
+                Value::NativeFn(NativeFunction::MlMatMul),
+            );
+            self.variables
+                .insert(String::from("add"), Value::NativeFn(NativeFunction::MlAdd));
+            self.variables.insert(
+                String::from("relu"),
+                Value::NativeFn(NativeFunction::MlRelu),
+            );
+            self.variables.insert(
+                String::from("softmax"),
+                Value::NativeFn(NativeFunction::MlSoftmax),
+            );
+            self.variables.insert(
+                String::from("attention"),
+                Value::NativeFn(NativeFunction::MlAttention),
+            );
+            self.variables.insert(
+                String::from("gpu_check"),
+                Value::NativeFn(NativeFunction::MlGpuCheck),
+            );
+            self.variables.insert(
+                String::from("backward"),
+                Value::NativeFn(NativeFunction::MlBackward),
+            );
+            self.variables.insert(
+                String::from("update"),
+                Value::NativeFn(NativeFunction::MlUpdate),
+            );
+            self.variables.insert(
+                String::from("load_llama"),
+                Value::NativeFn(NativeFunction::MlLoadLlama),
+            );
+            self.variables.insert(
+                String::from("generate"),
+                Value::NativeFn(NativeFunction::MlGenerate),
+            );
+            self.variables
+                .insert(String::from("Ml"), Value::Module(String::from("Ml")));
         }
         Ok(Value::Unit)
     }
 
     fn import_seal(&mut self, stmt: &ImportStmt) -> Result<Value, String> {
         if let Some(symbol) = &stmt.symbol {
-             match symbol.as_str() {
-                  "train" => { self.variables.insert(String::from("train"), Value::NativeFn(NativeFunction::SealTrain)); },
-                  _ => return Err(format!("Symbol '{}' not found in Seal", symbol)),
-             };
-         } else {
-             self.variables.insert(String::from("Seal"), Value::Module(String::from("Seal")));
-         }
-         Ok(Value::Unit)
+            match symbol.as_str() {
+                "train" => {
+                    self.variables.insert(
+                        String::from("train"),
+                        Value::NativeFn(NativeFunction::SealTrain),
+                    );
+                }
+                _ => return Err(format!("Symbol '{}' not found in Seal", symbol)),
+            };
+        } else {
+            self.variables
+                .insert(String::from("Seal"), Value::Module(String::from("Seal")));
+        }
+        Ok(Value::Unit)
     }
 
     fn execute_manifold(&mut self, decl: &ManifoldDecl) -> Result<Value, String> {
         let tau = self.extract_tau(&decl.init).unwrap_or(3);
         let mut workspace = ManifoldWorkspace::new(tau);
-        workspace.embed_data(&self.sample_data);
+        let data = self.extract_embed_data(&decl.init)?;
+        workspace.embed_data(data.as_deref().unwrap_or(&self.sample_data));
         let handle = ManifoldHandle(self.manifolds.len());
         self.manifolds.push(workspace);
-        self.variables.insert(decl.name.clone(), Value::Manifold(handle));
+        self.variables
+            .insert(decl.name.clone(), Value::Manifold(handle));
         Ok(Value::Manifold(handle))
+    }
+
+    fn extract_embed_data(&mut self, expr: &Expr) -> Result<Option<Vec<f64>>, String> {
+        let ExprKind::Call { name, args } = &expr.node else {
+            return Ok(None);
+        };
+        if name.as_str() != "embed" {
+            return Ok(None);
+        }
+
+        for arg in args {
+            match arg {
+                CallArg::Positional(expr) => {
+                    let value = self.evaluate_expr(expr)?;
+                    return self.value_to_f64_vec(value).map(Some);
+                }
+                CallArg::Named { name, value } if name.as_str() == "data" => {
+                    let value = self.evaluate_expr(value)?;
+                    return self.value_to_f64_vec(value).map(Some);
+                }
+                _ => {}
+            }
+        }
+
+        Ok(None)
+    }
+
+    fn value_to_f64_vec(&self, value: Value) -> Result<Vec<f64>, String> {
+        match value {
+            Value::List(values) => {
+                let mut out = Vec::with_capacity(values.len());
+                for value in values {
+                    match value {
+                        Value::Num(n) => out.push(n),
+                        _ => return Err(String::from("embed data must be a numeric list")),
+                    }
+                }
+                Ok(out)
+            }
+            _ => Err(String::from("embed expects a numeric list")),
+        }
     }
 
     fn extract_tau(&self, expr: &Expr) -> Option<usize> {
@@ -763,7 +949,8 @@ impl Interpreter {
             let block = workspace.extract_block(start, end);
             let handle = BlockHandle(self.blocks.len());
             self.blocks.push(block);
-            self.variables.insert(decl.name.clone(), Value::Block(handle));
+            self.variables
+                .insert(decl.name.clone(), Value::Block(handle));
             Ok(Value::Block(handle))
         } else {
             Err("manifold not found".to_string())
@@ -783,7 +970,7 @@ impl Interpreter {
                 let end = range.end.as_f64() as usize;
                 Ok((handle, start, end))
             }
-            _ => Err("invalid block source".to_string())
+            _ => Err("invalid block source".to_string()),
         }
     }
 
@@ -803,8 +990,12 @@ impl Interpreter {
             if let CallArg::Positional(expr) = arg {
                 match &expr.node {
                     ExprKind::Literal(Literal::Num(n)) => {
-                        if i == 0 { start = *n as usize; }
-                        if i == 1 { end = *n as usize; }
+                        if i == 0 {
+                            start = *n as usize;
+                        }
+                        if i == 1 {
+                            end = *n as usize;
+                        }
                     }
                     ExprKind::Range(r) => {
                         start = r.start.as_f64() as usize;
@@ -890,7 +1081,9 @@ impl Interpreter {
                 Value::Bool(b) => b,
                 _ => return Err(String::from("condition must be boolean")),
             };
-            if !is_true { break; }
+            if !is_true {
+                break;
+            }
             match self.execute_stmt_block(&stmt.body)? {
                 RuntimeFlow::Value(value) => last_value = value,
                 RuntimeFlow::Return(value) => return Ok(value),
@@ -909,7 +1102,8 @@ impl Interpreter {
         let mut last_value = Value::Unit;
 
         while (step > 0 && current < end) || (step < 0 && current > end) {
-            self.variables.insert(stmt.iterator.clone(), Value::Num(current as f64));
+            self.variables
+                .insert(stmt.iterator.clone(), Value::Num(current as f64));
             match self.execute_stmt_block(&stmt.body)? {
                 RuntimeFlow::Value(value) => last_value = value,
                 RuntimeFlow::Return(value) => return Ok(value),
@@ -922,7 +1116,8 @@ impl Interpreter {
             current += step;
         }
 
-        self.variables.insert(stmt.iterator.clone(), Value::Num(current as f64));
+        self.variables
+            .insert(stmt.iterator.clone(), Value::Num(current as f64));
         Ok(last_value)
     }
 
@@ -970,19 +1165,25 @@ impl Interpreter {
             ExprKind::Call { name, args } => self.evaluate_call(name, args),
             ExprKind::New { class, args } => self.evaluate_new(class, args),
             ExprKind::List(elements) => self.evaluate_list(elements),
-            ExprKind::MethodCall { object, method, args } => self.evaluate_method_call(object, method, args),
-            ExprKind::Range(_) => Err(String::from("Ranges cannot be evaluated directly as values")),
+            ExprKind::MethodCall {
+                object,
+                method,
+                args,
+            } => self.evaluate_method_call(object, method, args),
+            ExprKind::Range(_) => Err(String::from(
+                "Ranges cannot be evaluated directly as values",
+            )),
             ExprKind::BinaryOp(left, op, right) => {
-                 let l = self.evaluate_expr(left)?;
-                 let r = self.evaluate_expr(right)?;
-                 self.evaluate_binary(l, *op, r)
-            },
+                let l = self.evaluate_expr(left)?;
+                let r = self.evaluate_expr(right)?;
+                self.evaluate_binary(l, *op, r)
+            }
             ExprKind::UnaryOp(op, expr) => {
-                 let value = self.evaluate_expr(expr)?;
-                 self.evaluate_unary(*op, value)
-            },
+                let value = self.evaluate_expr(expr)?;
+                self.evaluate_unary(*op, value)
+            }
             ExprKind::Index { object, range } => {
-                // Simplified: returns a descriptive string or handle? 
+                // Simplified: returns a descriptive string or handle?
                 // For now, let's treat it as a lookup that returns a sub-manifold or block value
                 let handle = self.get_manifold_handle(object)?;
                 let start = range.start.as_f64() as usize;
@@ -996,10 +1197,12 @@ impl Interpreter {
                     Err(format!("Manifold '{}' not found", object))
                 }
             }
-            ExprKind::Config(_) => Err(String::from("Raw config blocks cannot be evaluated as expressions")),
+            ExprKind::Config(_) => Err(String::from(
+                "Raw config blocks cannot be evaluated as expressions",
+            )),
         }
     }
-    
+
     fn evaluate_binary(&self, left: Value, op: BinaryOp, right: Value) -> Result<Value, String> {
         match (left, op, right) {
             (Value::Num(a), BinaryOp::Add, Value::Num(b)) => Ok(Value::Num(a + b)),
@@ -1019,7 +1222,7 @@ impl Interpreter {
             (Value::Bool(a), BinaryOp::Or, Value::Bool(b)) => Ok(Value::Bool(a || b)),
             (Value::Str(a), BinaryOp::Eq, Value::Str(b)) => Ok(Value::Bool(a == b)),
             (Value::Str(a), BinaryOp::Neq, Value::Str(b)) => Ok(Value::Bool(a != b)),
-            _ => Err("Invalid binary operation".into())
+            _ => Err("Invalid binary operation".into()),
         }
     }
 
@@ -1064,7 +1267,10 @@ impl Interpreter {
         let mut frame = self.variables.clone();
         for (param, arg) in func.params.iter().zip(args.iter()) {
             let CallArg::Positional(expr) = arg else {
-                return Err(format!("function '{}' does not accept named arguments", func.name));
+                return Err(format!(
+                    "function '{}' does not accept named arguments",
+                    func.name
+                ));
             };
             let value = self.evaluate_expr(expr)?;
             frame.insert(param.clone(), value);
@@ -1081,11 +1287,19 @@ impl Interpreter {
         result
     }
 
-    fn execute_native_fn(&mut self, func: NativeFunction, args: &[CallArg]) -> Result<Value, String> {
+    fn execute_native_fn(
+        &mut self,
+        func: NativeFunction,
+        args: &[CallArg],
+    ) -> Result<Value, String> {
         let mut get_f64 = |args: &[CallArg]| -> Result<f64, String> {
             if let Some(CallArg::Positional(expr)) = args.first() {
                 let val = self.evaluate_expr(expr)?;
-                if let Value::Num(n) = val { Ok(n) } else { Err(String::from("Expected number")) }
+                if let Value::Num(n) = val {
+                    Ok(n)
+                } else {
+                    Err(String::from("Expected number"))
+                }
             } else {
                 Err(String::from("Expected number"))
             }
@@ -1096,114 +1310,149 @@ impl Interpreter {
             NativeFunction::MathCos => Ok(Value::Num(libm::cos(get_f64(args)?))),
             NativeFunction::MathSqrt => Ok(Value::Num(libm::sqrt(get_f64(args)?))),
             NativeFunction::MathExp => Ok(Value::Num(libm::exp(get_f64(args)?))),
-            NativeFunction::TopoBetti => Ok(Value::List(vec![Value::Num(1.0), Value::Num(0.0)])),
+            NativeFunction::TopoPh => self.execute_topology_ph(args),
+            NativeFunction::TopoBetti => self.execute_topology_betti(args),
+            NativeFunction::TopoIntervals => self.execute_topology_intervals(args),
             NativeFunction::Print => {
-                 for arg in args {
-                     if let CallArg::Positional(expr) = arg {
-                         let val = self.evaluate_expr(expr)?;
-                         #[cfg(feature = "std")]
-                         println!("{:?}", val);
-                     }
-                 }
-                 Ok(Value::Unit)
-            },
+                for arg in args {
+                    if let CallArg::Positional(expr) = arg {
+                        let val = self.evaluate_expr(expr)?;
+                        #[cfg(feature = "std")]
+                        println!("{:?}", val);
+                    }
+                }
+                Ok(Value::Unit)
+            }
             NativeFunction::MlpNew => {
                 let lr = get_f64(args).unwrap_or(0.01);
-                let config = OptimizerConfig::SGD { learning_rate: lr, momentum: 0.9 };
+                let config = OptimizerConfig::SGD {
+                    learning_rate: lr,
+                    momentum: 0.9,
+                };
                 Ok(Value::Mlp(Box::new(MLP::new(config, LossConfig::MSE))))
-            },
+            }
             NativeFunction::KMeansNew => {
-                 let k = get_f64(args).unwrap_or(2.0) as usize;
-                 Ok(Value::KMeans(Box::new(KMeans::new(k))))
-            },
-            NativeFunction::Conv2DNew => Ok(Value::Conv2D(Box::new(Conv2D::new(1, 1, 3, 1, 1, Activation::ReLU)))),
-            
+                let k = get_f64(args).unwrap_or(2.0) as usize;
+                Ok(Value::KMeans(Box::new(KMeans::new(k))))
+            }
+            NativeFunction::Conv2DNew => Ok(Value::Conv2D(Box::new(Conv2D::new(
+                1,
+                1,
+                3,
+                1,
+                1,
+                Activation::ReLU,
+            )))),
+
             // ML Ops
             NativeFunction::MlMatMul => {
                 let a = self.get_tensor_arg(args, 0)?;
                 let b = self.get_tensor_arg(args, 1)?;
                 Ok(Value::Tensor(a.matmul(&b)))
-            },
+            }
             NativeFunction::MlAdd => {
                 let a = self.get_tensor_arg(args, 0)?;
                 let b = self.get_tensor_arg(args, 1)?;
                 Ok(Value::Tensor(a.add(&b)))
-            },
+            }
             NativeFunction::MlRelu => {
                 let a = self.get_tensor_arg(args, 0)?;
                 Ok(Value::Tensor(Activation::ReLU.apply(&a)))
-            },
+            }
             NativeFunction::MlSoftmax => {
                 let a = self.get_tensor_arg(args, 0)?;
                 Ok(Value::Tensor(Activation::Softmax.apply(&a)))
-            },
+            }
             NativeFunction::MlLoadWeights => {
                 // Acts as "Create Tensor from List"
-                 if let Some(CallArg::Positional(expr)) = args.first() {
-                     let val = self.evaluate_expr(expr)?;
-                     let t = self.value_to_tensor_core(&val)?;
-                     Ok(Value::Tensor(t))
-                 } else {
-                     Err("Missing argument".into())
-                 }
-            },
-            NativeFunction::MlForward => { // Map "forward"
-                 // Args: model, input
-                 // Actually this might be MethodCall on Mlp object
-                 Ok(Value::Unit)
-            },
-            _ => Ok(Value::Unit)
+                if let Some(CallArg::Positional(expr)) = args.first() {
+                    let val = self.evaluate_expr(expr)?;
+                    let t = self.value_to_tensor_core(&val)?;
+                    Ok(Value::Tensor(t))
+                } else {
+                    Err("Missing argument".into())
+                }
+            }
+            NativeFunction::MlForward => {
+                // Map "forward"
+                // Args: model, input
+                // Actually this might be MethodCall on Mlp object
+                Ok(Value::Unit)
+            }
+            _ => Ok(Value::Unit),
         }
     }
 
     fn get_tensor_arg(&mut self, args: &[CallArg], index: usize) -> Result<Tensor, String> {
         if let Some(CallArg::Positional(expr)) = args.get(index) {
-             let val = self.evaluate_expr(expr)?;
-             self.value_to_tensor_core(&val)
+            let val = self.evaluate_expr(expr)?;
+            self.value_to_tensor_core(&val)
         } else {
-             Err(format!("Missing argument {}", index))
+            Err(format!("Missing argument {}", index))
         }
     }
 
     fn value_to_tensor_core(&self, val: &Value) -> Result<Tensor, String> {
-         match val {
+        match val {
             Value::Tensor(t) => Ok(t.clone()),
             Value::List(rows) => {
-                 if rows.is_empty() { return Ok(Tensor::zeros(&[0])); }
-                 
-                 let mut data = Vec::new();
-                 
-                 // Check if 2D or 1D
-                 if let Value::List(_) = &rows[0] {
-                     // 2D
-                     let rows_cnt = rows.len();
-                     let mut cols_cnt = 0;
-                     for (i, row) in rows.iter().enumerate() {
-                         if let Value::List(cols) = row {
-                             if i == 0 { cols_cnt = cols.len(); }
-                             else if cols.len() != cols_cnt { return Err("Ragged tensor".into()); }
-                             for c in cols {
-                                 if let Value::Num(n) = c { data.push(*n); }
-                                 else { return Err("Tensor must contain numbers".into()); }
-                             }
-                         } else { return Err("Expected 2D list".into()); }
-                     }
-                     Ok(Tensor::new(&data, &[rows_cnt, cols_cnt]))
-                 } else {
-                     // 1D
-                      for c in rows {
-                         if let Value::Num(n) = c { data.push(*n); }
-                         else { return Err("Tensor must contain numbers".into()); }
-                     }
-                     Ok(Tensor::new(&data, &[rows.len()]))
-                 }
-            },
-            _ => Err("Expected Tensor or List".into())
-         }
+                if rows.is_empty() {
+                    return Ok(Tensor::zeros(&[0]));
+                }
+
+                let mut data = Vec::new();
+
+                // Check if 2D or 1D
+                if let Value::List(_) = &rows[0] {
+                    // 2D
+                    let rows_cnt = rows.len();
+                    let mut cols_cnt = 0;
+                    for (i, row) in rows.iter().enumerate() {
+                        if let Value::List(cols) = row {
+                            if i == 0 {
+                                cols_cnt = cols.len();
+                            } else if cols.len() != cols_cnt {
+                                return Err("Ragged tensor".into());
+                            }
+                            for c in cols {
+                                if let Value::Num(n) = c {
+                                    data.push(*n);
+                                } else {
+                                    return Err("Tensor must contain numbers".into());
+                                }
+                            }
+                        } else {
+                            return Err("Expected 2D list".into());
+                        }
+                    }
+                    Ok(Tensor::new(&data, &[rows_cnt, cols_cnt]))
+                } else {
+                    // 1D
+                    for c in rows {
+                        if let Value::Num(n) = c {
+                            data.push(*n);
+                        } else {
+                            return Err("Tensor must contain numbers".into());
+                        }
+                    }
+                    Ok(Tensor::new(&data, &[rows.len()]))
+                }
+            }
+            _ => Err("Expected Tensor or List".into()),
+        }
     }
 
-    fn evaluate_method_call(&mut self, object_name: &String, method: &String, args: &[CallArg]) -> Result<Value, String> {
-        let val = if let Some(v) = self.variables.get(object_name) { v.clone() } else { return Err(format!("Object '{}' not found", object_name)); };
+    fn evaluate_method_call(
+        &mut self,
+        object_name: &String,
+        method: &String,
+        args: &[CallArg],
+    ) -> Result<Value, String> {
+        let val = if let Some(v) = self.variables.get(object_name) {
+            v.clone()
+        } else {
+            return Err(format!("Object '{}' not found", object_name));
+        };
         match val {
             Value::List(mut list) => {
                 let res = match method.as_str() {
@@ -1211,13 +1460,17 @@ impl Interpreter {
                         if let Some(CallArg::Positional(expr)) = args.first() {
                             let val = self.evaluate_expr(expr)?;
                             list.push(val);
-                            self.variables.insert(object_name.clone(), Value::List(list));
+                            self.variables
+                                .insert(object_name.clone(), Value::List(list));
                             Ok(Value::Unit)
-                        } else { Err(String::from("push requires 1 argument")) }
+                        } else {
+                            Err(String::from("push requires 1 argument"))
+                        }
                     }
                     "pop" => {
                         let val = list.pop().unwrap_or(Value::Unit);
-                        self.variables.insert(object_name.clone(), Value::List(list));
+                        self.variables
+                            .insert(object_name.clone(), Value::List(list));
                         Ok(val)
                     }
                     "len" => Ok(Value::Num(list.len() as f64)),
@@ -1228,21 +1481,21 @@ impl Interpreter {
             Value::Mlp(mut mlp) => {
                 match method.as_str() {
                     "add_layer" => {
-                         // input, output, activation key string
-                         // Default to Tanh if not string
-                         let input = self.get_arg_num(args, 0)? as usize;
-                         let output = self.get_arg_num(args, 1)? as usize;
-                         let act_str = self.get_arg_str(args, 2).unwrap_or("tanh".to_string());
-                         let act = match act_str.as_str() {
-                             "relu" => Activation::ReLU,
-                             "sigmoid" => Activation::Sigmoid,
-                             "softmax" => Activation::Softmax,
-                             _ => Activation::Tanh
-                         };
-                         mlp.add_layer(input, output, act, None);
-                         self.variables.insert(object_name.clone(), Value::Mlp(mlp)); // Update
-                         Ok(Value::Unit)
-                    },
+                        // input, output, activation key string
+                        // Default to Tanh if not string
+                        let input = self.get_arg_num(args, 0)? as usize;
+                        let output = self.get_arg_num(args, 1)? as usize;
+                        let act_str = self.get_arg_str(args, 2).unwrap_or("tanh".to_string());
+                        let act = match act_str.as_str() {
+                            "relu" => Activation::ReLU,
+                            "sigmoid" => Activation::Sigmoid,
+                            "softmax" => Activation::Softmax,
+                            _ => Activation::Tanh,
+                        };
+                        mlp.add_layer(input, output, act, None);
+                        self.variables.insert(object_name.clone(), Value::Mlp(mlp)); // Update
+                        Ok(Value::Unit)
+                    }
                     "train" => {
                         // inputs (List/Tensor), targets (List/Tensor), epochs
                         let input = self.get_tensor_arg(args, 0)?;
@@ -1250,57 +1503,231 @@ impl Interpreter {
                         let epochs = self.get_arg_num(args, 2).unwrap_or(1.0) as usize;
                         let res = mlp.fit(&[input], &[target], epochs); // fit expects slice of tensors
                         Ok(Value::Num(res.final_loss))
-                    },
+                    }
                     "forward" | "predict" => {
                         let input = self.get_tensor_arg(args, 0)?;
-                         let output = mlp.forward(&input);
-                         Ok(Value::Tensor(output))
-                    },
+                        let output = mlp.forward(&input);
+                        Ok(Value::Tensor(output))
+                    }
                     _ => Err(format!("Method '{}' not found on MLP", method)),
                 }
             }
-            Value::Module(mod_name) => {
-                 match (mod_name.as_str(), method.as_str()) {
-                     ("Ml", "MLP") => self.execute_native_fn(NativeFunction::MlpNew, args),
-                     ("Ml", "KMeans") => self.execute_native_fn(NativeFunction::KMeansNew, args),
-                     ("Ml", "Conv2D") => self.execute_native_fn(NativeFunction::Conv2DNew, args),
-                     ("Seal", "train") => self.execute_native_fn(NativeFunction::SealTrain, args),
-                     _ => Err(format!("Method '{}' not found in module '{}'", method, mod_name)),
-                 }
-            }
-            _ => Ok(Value::Unit), 
+            Value::Module(mod_name) => match (mod_name.as_str(), method.as_str()) {
+                ("Ml", "MLP") => self.execute_native_fn(NativeFunction::MlpNew, args),
+                ("Ml", "KMeans") => self.execute_native_fn(NativeFunction::KMeansNew, args),
+                ("Ml", "Conv2D") => self.execute_native_fn(NativeFunction::Conv2DNew, args),
+                ("Seal", "train") => self.execute_native_fn(NativeFunction::SealTrain, args),
+                ("topology", "ph") => self.execute_native_fn(NativeFunction::TopoPh, args),
+                ("topology", "betti") | ("topology", "Betti") => {
+                    self.execute_native_fn(NativeFunction::TopoBetti, args)
+                }
+                ("topology", "intervals") => {
+                    self.execute_native_fn(NativeFunction::TopoIntervals, args)
+                }
+                _ => Err(format!(
+                    "Method '{}' not found in module '{}'",
+                    method, mod_name
+                )),
+            },
+            _ => Ok(Value::Unit),
         }
     }
 
     fn get_arg_num(&mut self, args: &[CallArg], index: usize) -> Result<f64, String> {
-         if let Some(CallArg::Positional(expr)) = args.get(index) {
-             let val = self.evaluate_expr(expr)?;
-             if let Value::Num(n) = val { Ok(n) } else { Err("Expected number".into()) }
-         } else { Err("Missing arg".into()) }
+        if let Some(CallArg::Positional(expr)) = args.get(index) {
+            let val = self.evaluate_expr(expr)?;
+            if let Value::Num(n) = val {
+                Ok(n)
+            } else {
+                Err("Expected number".into())
+            }
+        } else {
+            Err("Missing arg".into())
+        }
     }
-    
+
     fn get_arg_str(&mut self, args: &[CallArg], index: usize) -> Result<String, String> {
-          if let Some(CallArg::Positional(expr)) = args.get(index) {
-             let val = self.evaluate_expr(expr)?;
-             if let Value::Str(s) = val { Ok(s) } else { Err("Expected string".into()) }
-         } else { Err("Missing arg".into()) }
+        if let Some(CallArg::Positional(expr)) = args.get(index) {
+            let val = self.evaluate_expr(expr)?;
+            if let Value::Str(s) = val {
+                Ok(s)
+            } else {
+                Err("Expected string".into())
+            }
+        } else {
+            Err("Missing arg".into())
+        }
     }
 
     fn evaluate_field_access(&self, object: &String, field: &String) -> Result<Value, String> {
         if let Some(Value::Object(handle)) = self.variables.get(object) {
             if let Some(obj) = self.objects.get(handle.0) {
-                if let Some(val) = obj.fields.get(field) { return Ok(val.clone()); }
+                if let Some(val) = obj.fields.get(field) {
+                    return Ok(val.clone());
+                }
             }
         }
         if let Some(Value::Module(name)) = self.variables.get(object) {
-             match (name.as_str(), field.as_str()) {
-                 ("Seal", "train") => Ok(Value::NativeFn(NativeFunction::SealTrain)),
-                 ("Ml", "MLP") => Ok(Value::NativeFn(NativeFunction::MlpNew)),
-                 _ => Ok(Value::Unit),
-             }
+            match (name.as_str(), field.as_str()) {
+                ("Seal", "train") => Ok(Value::NativeFn(NativeFunction::SealTrain)),
+                ("Ml", "MLP") => Ok(Value::NativeFn(NativeFunction::MlpNew)),
+                ("topology", "ph") => Ok(Value::NativeFn(NativeFunction::TopoPh)),
+                ("topology", "betti") | ("topology", "Betti") => {
+                    Ok(Value::NativeFn(NativeFunction::TopoBetti))
+                }
+                ("topology", "intervals") => Ok(Value::NativeFn(NativeFunction::TopoIntervals)),
+                _ => Ok(Value::Unit),
+            }
         } else {
-             Ok(Value::Unit)
+            Ok(Value::Unit)
         }
+    }
+
+    fn execute_topology_ph(&mut self, args: &[CallArg]) -> Result<Value, String> {
+        let manifold = self.get_manifold_arg(args, 0)?;
+        let config = self.persistence_config_from_args(args)?;
+        let workspace = self
+            .manifolds
+            .get(manifold.0)
+            .ok_or_else(|| String::from("manifold not found"))?;
+        let diagram = persistent_homology(&workspace.points, config)
+            .map_err(|err| format!("persistent homology failed: {:?}", err))?;
+        Ok(Value::Persistence(diagram))
+    }
+
+    fn execute_topology_betti(&mut self, args: &[CallArg]) -> Result<Value, String> {
+        if args.is_empty() {
+            return Err(String::from(
+                "Betti requires a persistence diagram or manifold",
+            ));
+        }
+
+        let radius = self.get_named_num(args, "radius").unwrap_or(f64::INFINITY);
+        let first = self.get_arg_value(args, 0)?;
+        let diagram = match first {
+            Value::Persistence(diagram) => diagram,
+            Value::Manifold(handle) => {
+                let config = self.persistence_config_from_args(args)?;
+                let workspace = self
+                    .manifolds
+                    .get(handle.0)
+                    .ok_or_else(|| String::from("manifold not found"))?;
+                persistent_homology(&workspace.points, config)
+                    .map_err(|err| format!("persistent homology failed: {:?}", err))?
+            }
+            _ => {
+                return Err(String::from(
+                    "Betti expects a persistence diagram or manifold",
+                ))
+            }
+        };
+        let betti = diagram.betti_at(radius);
+        Ok(Value::List(vec![
+            Value::Num(betti.beta_0 as f64),
+            Value::Num(betti.beta_1 as f64),
+            Value::Num(betti.beta_2 as f64),
+        ]))
+    }
+
+    fn execute_topology_intervals(&mut self, args: &[CallArg]) -> Result<Value, String> {
+        let value = self.get_arg_value(args, 0)?;
+        let diagram = match value {
+            Value::Persistence(diagram) => diagram,
+            _ => return Err(String::from("intervals expects a persistence diagram")),
+        };
+
+        Ok(Value::List(
+            diagram
+                .pairs
+                .iter()
+                .map(|pair| {
+                    Value::List(vec![
+                        Value::Num(pair.dimension as f64),
+                        Value::Num(pair.birth),
+                        Value::Num(pair.death.unwrap_or(-1.0)),
+                    ])
+                })
+                .collect(),
+        ))
+    }
+
+    fn persistence_config_from_args(
+        &mut self,
+        args: &[CallArg],
+    ) -> Result<PersistenceConfig, String> {
+        let mut config = PersistenceConfig::low_load();
+        config.max_homology_dim = self.get_named_num(args, "max_dim").unwrap_or(2.0) as usize;
+        config.max_radius = self.get_named_num(args, "radius").unwrap_or(f64::INFINITY);
+        config.max_points = self
+            .get_named_num(args, "max_points")
+            .unwrap_or(config.max_points as f64) as usize;
+        config.max_simplices = self
+            .get_named_num(args, "max_simplices")
+            .unwrap_or(config.max_simplices as f64) as usize;
+
+        if let Some(mode) = self.get_named_str(args, "mode")? {
+            config.complex_kind = match mode.as_str() {
+                "vr" | "rips" | "vietoris_rips" => ComplexKind::VietorisRips,
+                "witness" | "landmark" => ComplexKind::Witness {
+                    max_landmarks: self
+                        .get_named_num(args, "landmarks")
+                        .unwrap_or(config.max_points as f64)
+                        as usize,
+                },
+                _ => return Err(format!("unknown topology mode '{}'", mode)),
+            };
+        }
+
+        Ok(config)
+    }
+
+    fn get_manifold_arg(
+        &mut self,
+        args: &[CallArg],
+        index: usize,
+    ) -> Result<ManifoldHandle, String> {
+        match self.get_arg_value(args, index)? {
+            Value::Manifold(handle) => Ok(handle),
+            _ => Err(String::from("expected manifold")),
+        }
+    }
+
+    fn get_arg_value(&mut self, args: &[CallArg], index: usize) -> Result<Value, String> {
+        match args.get(index) {
+            Some(CallArg::Positional(expr)) => self.evaluate_expr(expr),
+            Some(CallArg::Named { value, .. }) => self.evaluate_expr(value),
+            None => Err(format!("missing argument {}", index)),
+        }
+    }
+
+    fn get_named_num(&mut self, args: &[CallArg], key: &str) -> Option<f64> {
+        args.iter().find_map(|arg| {
+            let CallArg::Named { name, value } = arg else {
+                return None;
+            };
+            if name.as_str() != key {
+                return None;
+            }
+            match self.evaluate_expr(value).ok()? {
+                Value::Num(n) => Some(n),
+                _ => None,
+            }
+        })
+    }
+
+    fn get_named_str(&mut self, args: &[CallArg], key: &str) -> Result<Option<String>, String> {
+        for arg in args {
+            let CallArg::Named { name, value } = arg else {
+                continue;
+            };
+            if name.as_str() == key {
+                return match self.evaluate_expr(value)? {
+                    Value::Str(s) => Ok(Some(s)),
+                    _ => Err(format!("{} must be a string", key)),
+                };
+            }
+        }
+        Ok(None)
     }
 }
 
@@ -1321,10 +1748,18 @@ mod tests {
         let program = parser.parse().expect("program should parse");
         let mut interpreter = Interpreter::new();
 
-        interpreter.execute(&program).expect("program should execute");
+        interpreter
+            .execute(&program)
+            .expect("program should execute");
 
-        assert!(matches!(interpreter.variables.get("x"), Some(Value::Num(2.0))));
-        assert!(matches!(interpreter.variables.get("ok"), Some(Value::Bool(true))));
+        assert!(matches!(
+            interpreter.variables.get("x"),
+            Some(Value::Num(2.0))
+        ));
+        assert!(matches!(
+            interpreter.variables.get("ok"),
+            Some(Value::Bool(true))
+        ));
     }
 
     #[test]
@@ -1333,9 +1768,14 @@ mod tests {
         let program = parser.parse().expect("program should parse");
         let mut interpreter = Interpreter::new();
 
-        interpreter.execute(&program).expect("program should execute");
+        interpreter
+            .execute(&program)
+            .expect("program should execute");
 
-        assert!(matches!(interpreter.variables.get("count"), Some(Value::Num(1.0))));
+        assert!(matches!(
+            interpreter.variables.get("count"),
+            Some(Value::Num(1.0))
+        ));
     }
 
     #[test]
@@ -1344,9 +1784,14 @@ mod tests {
         let program = parser.parse().expect("program should parse");
         let mut interpreter = Interpreter::new();
 
-        interpreter.execute(&program).expect("program should execute");
+        interpreter
+            .execute(&program)
+            .expect("program should execute");
 
-        assert!(matches!(interpreter.variables.get("count"), Some(Value::Num(3.0))));
+        assert!(matches!(
+            interpreter.variables.get("count"),
+            Some(Value::Num(3.0))
+        ));
     }
 
     #[test]
@@ -1355,10 +1800,18 @@ mod tests {
         let program = parser.parse().expect("program should parse");
         let mut interpreter = Interpreter::new();
 
-        interpreter.execute(&program).expect("program should execute");
+        interpreter
+            .execute(&program)
+            .expect("program should execute");
 
-        assert!(matches!(interpreter.variables.get("sum"), Some(Value::Num(6.0))));
-        assert!(matches!(interpreter.variables.get("i"), Some(Value::Num(4.0))));
+        assert!(matches!(
+            interpreter.variables.get("sum"),
+            Some(Value::Num(6.0))
+        ));
+        assert!(matches!(
+            interpreter.variables.get("i"),
+            Some(Value::Num(4.0))
+        ));
     }
 
     #[test]
@@ -1376,21 +1829,35 @@ mod tests {
         let program = parser.parse().expect("program should parse");
         let mut interpreter = Interpreter::new();
 
-        interpreter.execute(&program).expect("program should execute");
+        interpreter
+            .execute(&program)
+            .expect("program should execute");
 
-        assert!(matches!(interpreter.variables.get("i"), Some(Value::Num(4.0))));
-        assert!(matches!(interpreter.variables.get("sum"), Some(Value::Num(4.0))));
+        assert!(matches!(
+            interpreter.variables.get("i"),
+            Some(Value::Num(4.0))
+        ));
+        assert!(matches!(
+            interpreter.variables.get("sum"),
+            Some(Value::Num(4.0))
+        ));
     }
 
     #[test]
     fn seal_until_stops_when_condition_becomes_true() {
-        let mut parser = Parser::new("let count = 0~\nseal until count >= 3 { count = count + 1~ }");
+        let mut parser =
+            Parser::new("let count = 0~\nseal until count >= 3 { count = count + 1~ }");
         let program = parser.parse().expect("program should parse");
         let mut interpreter = Interpreter::new();
 
-        interpreter.execute(&program).expect("program should execute");
+        interpreter
+            .execute(&program)
+            .expect("program should execute");
 
-        assert!(matches!(interpreter.variables.get("count"), Some(Value::Num(3.0))));
+        assert!(matches!(
+            interpreter.variables.get("count"),
+            Some(Value::Num(3.0))
+        ));
     }
 
     #[test]
@@ -1399,9 +1866,14 @@ mod tests {
         let program = parser.parse().expect("program should parse");
         let mut interpreter = Interpreter::new();
 
-        interpreter.execute(&program).expect("program should execute");
+        interpreter
+            .execute(&program)
+            .expect("program should execute");
 
-        assert!(matches!(interpreter.variables.get("result"), Some(Value::Num(5.0))));
+        assert!(matches!(
+            interpreter.variables.get("result"),
+            Some(Value::Num(5.0))
+        ));
     }
 
     #[test]
@@ -1410,9 +1882,14 @@ mod tests {
         let program = parser.parse().expect("program should parse");
         let mut interpreter = Interpreter::new();
 
-        interpreter.execute(&program).expect("program should execute");
+        interpreter
+            .execute(&program)
+            .expect("program should execute");
 
-        assert!(matches!(interpreter.variables.get("result"), Some(Value::Num(1.0))));
+        assert!(matches!(
+            interpreter.variables.get("result"),
+            Some(Value::Num(1.0))
+        ));
     }
 
     #[test]
@@ -1421,10 +1898,70 @@ mod tests {
         let program = parser.parse().expect("program should parse");
         let mut interpreter = Interpreter::new();
 
-        interpreter.execute(&program).expect("program should execute");
+        interpreter
+            .execute(&program)
+            .expect("program should execute");
 
-        assert!(matches!(interpreter.variables.get("x"), Some(Value::Num(10.0))));
-        assert!(matches!(interpreter.variables.get("y"), Some(Value::Num(3.0))));
+        assert!(matches!(
+            interpreter.variables.get("x"),
+            Some(Value::Num(10.0))
+        ));
+        assert!(matches!(
+            interpreter.variables.get("y"),
+            Some(Value::Num(3.0))
+        ));
+    }
+
+    #[test]
+    fn manifold_embed_uses_user_numeric_list() {
+        let mut parser = Parser::new(
+            "let data = [1.0, 2.0, 3.0, 4.0]~
+             manifold M = embed(data, tau=1)~",
+        );
+        let program = parser.parse().expect("program should parse");
+        let mut interpreter = Interpreter::new();
+
+        interpreter
+            .execute(&program)
+            .expect("program should execute");
+
+        let Value::Manifold(handle) = interpreter.variables.get("M").unwrap() else {
+            panic!("expected manifold handle");
+        };
+        let workspace = &interpreter.manifolds[handle.0];
+        assert_eq!(workspace.points.len(), 2);
+        assert_eq!(workspace.points[0].coords, [3.0, 2.0, 1.0]);
+        assert_eq!(workspace.points[1].coords, [4.0, 3.0, 2.0]);
+    }
+
+    #[test]
+    fn topology_betti_uses_persistent_homology_engine() {
+        let mut parser = Parser::new(
+            "import topology~
+             let data = [1.0, 1.0, 1.0, 1.0, 1.0]~
+             manifold M = embed(data, tau=1)~
+             let diagram = topology.ph(M, max_dim=2, mode=\"vr\", max_points=16)~
+             let b = topology.betti(diagram, radius=0.0)~",
+        );
+        let program = parser.parse().expect("program should parse");
+        let mut interpreter = Interpreter::new();
+
+        interpreter
+            .execute(&program)
+            .expect("program should execute");
+
+        let Some(Value::Persistence(diagram)) = interpreter.variables.get("diagram") else {
+            panic!("expected persistence diagram");
+        };
+        assert!(!diagram.pairs.is_empty());
+
+        let Some(Value::List(betti)) = interpreter.variables.get("b") else {
+            panic!("expected Betti list");
+        };
+        assert!(matches!(
+            betti.as_slice(),
+            [Value::Num(1.0), Value::Num(0.0), Value::Num(0.0)]
+        ));
     }
 }
 

@@ -13,7 +13,6 @@
 // ═══════════════════════════════════════════════════════════════════════════════
 //
 
-
 use core::fmt::{self, Write};
 use spin::Mutex;
 use x86_64::instructions::port::Port;

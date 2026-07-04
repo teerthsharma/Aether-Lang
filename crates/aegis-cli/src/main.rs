@@ -18,7 +18,6 @@
 // ═══════════════════════════════════════════════════════════════════════════════
 //
 
-
 use clap::{Parser as ClapParser, Subcommand};
 use rustyline::error::ReadlineError;
 use rustyline::DefaultEditor;
@@ -66,15 +65,17 @@ fn main() {
     // Spawn a thread with 8MB stack to prevent overflow.
     let builder = std::thread::Builder::new().stack_size(8 * 1024 * 1024);
 
-    let handler = builder.spawn(|| {
-        let cli = Cli::parse();
+    let handler = builder
+        .spawn(|| {
+            let cli = Cli::parse();
 
-        match cli.command {
-            Some(Commands::Repl) | None => run_repl(),
-            Some(Commands::Run { file, mode }) => run_file(&file, &mode),
-            Some(Commands::Check { file }) => check_file(&file),
-        }
-    }).unwrap();
+            match cli.command {
+                Some(Commands::Repl) | None => run_repl(),
+                Some(Commands::Run { file, mode }) => run_file(&file, &mode),
+                Some(Commands::Check { file }) => check_file(&file),
+            }
+        })
+        .unwrap();
 
     handler.join().unwrap();
 }
@@ -174,7 +175,10 @@ fn run_file(path: &PathBuf, mode: &str) {
     if let Some(ext) = path.extension() {
         let s = ext.to_string_lossy();
         if s != "aegis" && s != "ag" {
-            println!("Warning: File extension '.{}' is not standard (.aegis or .ag)", s);
+            println!(
+                "Warning: File extension '.{}' is not standard (.aegis or .ag)",
+                s
+            );
         }
     }
 
@@ -189,14 +193,14 @@ fn run_file(path: &PathBuf, mode: &str) {
     };
 
     if mode == "titan" {
-        use aegis_lang::vm::{TitanVM, Compiler};
+        use aegis_lang::vm::{Compiler, TitanVM};
         // Compile to Bytecode
         let compiler = Compiler::new();
         let code = compiler.compile(&ast);
-        
+
         let mut vm = TitanVM::new();
         vm.load_code(code);
-        
+
         match vm.run() {
             Ok(result) => {
                 println!("{:?}", result);
