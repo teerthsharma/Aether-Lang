@@ -279,9 +279,84 @@ pub fn verify_sliding_window(data: &[u8], window_size: usize) -> Result<(), usiz
         return if is_shape_valid(data) { Ok(()) } else { Err(0) };
     }
 
-    for (offset, window) in data.windows(size).enumerate() {
-        if !is_shape_valid(window) {
-            return Err(offset);
+    // Initialize with first window
+    let mut current_betti_0 = compute_betti_0(&data[0..size]);
+    let mut current_betti_1 = compute_betti_1(&data[0..size]);
+
+    // Check first window
+    let density = current_betti_0 as f64 / size as f64;
+    if density < DENSITY_MIN || density > DENSITY_MAX || current_betti_1 > MAX_BETTI_1 {
+        return Err(0);
+    }
+
+    // Helper closure for gap detection
+    let is_gap = |idx1: usize, idx2: usize| {
+        (data[idx1] as i16 - data[idx2] as i16).abs() > CLUSTER_THRESHOLD
+    };
+
+    // Helper closure for loop pattern detection (same logic as compute_betti_1)
+    let is_loop_pattern = |idx: usize| {
+        if idx + 3 >= data.len() {
+            return false;
+        }
+        let a = data[idx] as i16;
+        let d = data[idx + 3] as i16;
+        let tolerance = 5i16; // LOOP_TOLERANCE
+
+        if (a - d).abs() <= tolerance {
+            let b = data[idx + 1] as i16;
+            let c = data[idx + 2] as i16;
+            if (a - b).abs() > tolerance || (a - c).abs() > tolerance {
+                return true;
+            }
+        }
+        false
+    };
+
+    // Incremental sliding window
+    // i is the index of the byte leaving the window
+    for i in 0..(data.len() - size) {
+        // Update Betti 0 (Connected Components of Gaps)
+        if size >= 2 {
+            // Remove contribution from the left
+            if is_gap(i, i + 1) {
+                // If the leaving gap was a start of a component...
+                // It is a start if it's the first gap in window (always true for i relative to window start)
+                // AND the next gap (i+1, i+2) is NOT a gap (so component ended)
+                // OR the next gap IS a gap (so component continues, but now starts at i+1)
+
+                // Logic derived: count decreases if leaving gap was start (true) AND next gap is NOT start (wait).
+                // Simplified: count -= (is_gap(0) && !is_gap(1))
+                if !is_gap(i + 1, i + 2) {
+                    current_betti_0 -= 1;
+                }
+            }
+
+            // Add contribution to the right
+            let new_end = i + size; // The new byte index being added
+            // The new gap is between (new_end-1, new_end)
+            if is_gap(new_end - 1, new_end) {
+                // It starts a new component if the previous gap (new_end-2, new_end-1) was NOT a gap
+                if !is_gap(new_end - 2, new_end - 1) {
+                    current_betti_0 += 1;
+                }
+            }
+        }
+
+        // Update Betti 1 (Loops)
+        if size >= 4 {
+            if is_loop_pattern(i) {
+                current_betti_1 -= 1;
+            }
+            if is_loop_pattern(i + size - 3) {
+                current_betti_1 += 1;
+            }
+        }
+
+        // Verify shape
+        let density = current_betti_0 as f64 / size as f64;
+        if density < DENSITY_MIN || density > DENSITY_MAX || current_betti_1 > MAX_BETTI_1 {
+            return Err(i + 1);
         }
     }
 
@@ -342,5 +417,65 @@ mod tests {
             VerifyResult::Pass => {}
             _ => {}
         }
+    }
+
+    #[test]
+    fn test_verify_sliding_window_equivalence() {
+        // Random data - usually fails, so checks early exit equivalence
+        let mut data = vec![0u8; 1000];
+        let mut seed = 12345u64;
+        for i in 0..data.len() {
+            seed = seed.wrapping_mul(6364136223846793005).wrapping_add(1);
+            data[i] = (seed >> 56) as u8;
+        }
+
+        let window_size = 64;
+
+        // Naive implementation check
+        let naive_result = {
+            let mut res = Ok(());
+            if data.len() >= window_size {
+                for (offset, window) in data.windows(window_size).enumerate() {
+                    if !is_shape_valid(window) {
+                        res = Err(offset);
+                        break;
+                    }
+                }
+            } else {
+                 if !is_shape_valid(&data) {
+                     res = Err(0);
+                 }
+            }
+            res
+        };
+
+        // Optimized implementation
+        let opt_result = verify_sliding_window(&data, window_size);
+
+        assert_eq!(naive_result, opt_result, "Optimized implementation does not match naive on random data");
+
+        // "Valid" data - checks full scan equivalence
+        let mut data_valid = vec![0u8; 1000];
+        let mut val = 0u8;
+        for i in 0..data_valid.len() {
+             if i % 3 == 0 { val = val.wrapping_add(20); } else { val = val.wrapping_add(1); }
+             data_valid[i] = val;
+        }
+        // Note: this pattern might still fail Betti-1 check, but let's check equivalence anyway
+
+        let naive_valid = {
+             let mut res = Ok(());
+             if data_valid.len() >= window_size {
+                 for (offset, window) in data_valid.windows(window_size).enumerate() {
+                     if !is_shape_valid(window) {
+                         res = Err(offset);
+                         break;
+                     }
+                 }
+             }
+             res
+        };
+        let opt_valid = verify_sliding_window(&data_valid, window_size);
+        assert_eq!(naive_valid, opt_valid, "Optimized implementation does not match naive on structured data");
     }
 }
