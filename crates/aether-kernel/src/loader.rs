@@ -13,7 +13,6 @@
 // ═══════════════════════════════════════════════════════════════════════════════
 //
 
-
 use aether_core::topology::{is_shape_valid, verify_sliding_window};
 
 /// ELF magic bytes

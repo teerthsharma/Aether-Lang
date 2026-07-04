@@ -20,7 +20,6 @@
 // ═══════════════════════════════════════════════════════════════════════════════
 //
 
-
 #![cfg_attr(not(feature = "std"), no_std)]
 
 #[cfg(feature = "alloc")]
@@ -36,12 +35,17 @@ pub mod manifold;
 pub mod memory;
 pub mod ml;
 pub mod os;
+pub mod persistence;
 pub mod state;
 pub mod topology;
 
 // Re-export key types for convenience
 pub use aether::{BlockMetadata, DriftDetector, HierarchicalBlockTree};
 pub use manifold::{ManifoldPoint, SparseAttentionGraph, TimeDelayEmbedder, TopologicalPipeline};
+pub use persistence::{
+    persistent_homology, time_delay_persistence, BettiNumbers3, ComplexKind, PersistenceConfig,
+    PersistenceDiagram, PersistenceError, PersistencePair,
+};
 pub use topology::{
     compute_betti_0, compute_betti_1, compute_shape, verify_shape, TopologicalShape, VerifyResult,
 };

@@ -14,13 +14,12 @@
 // ═══════════════════════════════════════════════════════════════════════════════
 //
 
-
 #![allow(dead_code)]
 
 extern crate alloc;
+use alloc::boxed::Box;
 use alloc::string::String;
 use alloc::vec::Vec;
-use alloc::boxed::Box;
 
 /// Source Span for diagnostics (Line, Column, Length)
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -52,10 +51,7 @@ impl<T> Spanned<T> {
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum Number {
     Int(i64),
-    Float {
-        int_part: i64,
-        frac_part: i64,
-    },
+    Float { int_part: i64, frac_part: i64 },
 }
 
 impl Number {
@@ -90,18 +86,27 @@ pub struct ConfigPair {
 /// Binary Operators
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum BinaryOp {
-    Add, Sub, Mul, Div, Mod,
-    Eq, Neq, Lt, Gt, Le, Ge,
-    And, Or,
+    Add,
+    Sub,
+    Mul,
+    Div,
+    Mod,
+    Eq,
+    Neq,
+    Lt,
+    Gt,
+    Le,
+    Ge,
+    And,
+    Or,
 }
 
 /// Unary Operators
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum UnaryOp {
-    Neg, Not,
+    Neg,
+    Not,
 }
-
-
 
 // ═══════════════════════════════════════════════════════════════════════════════
 // Expression Types
@@ -115,13 +120,13 @@ pub type Expr = Spanned<ExprKind>;
 pub enum ExprKind {
     /// Literal value
     Literal(Literal),
-    
+
     /// Identifier: M, data, dim
     Ident(Ident),
 
     /// Binary Operation: a + b
     BinaryOp(Box<Expr>, BinaryOp, Box<Expr>),
-    
+
     /// Unary Operation: -a
     UnaryOp(UnaryOp, Box<Expr>),
 

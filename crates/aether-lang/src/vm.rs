@@ -18,22 +18,21 @@
 // ═══════════════════════════════════════════════════════════════════════════════
 //
 
-
-#[cfg(not(feature = "std"))]
-use alloc::vec::Vec;
-#[cfg(not(feature = "std"))]
-use alloc::vec;
 #[cfg(not(feature = "std"))]
 use alloc::boxed::Box;
 #[cfg(not(feature = "std"))]
 use alloc::string::String;
+#[cfg(not(feature = "std"))]
+use alloc::vec;
+#[cfg(not(feature = "std"))]
+use alloc::vec::Vec;
 
-#[cfg(feature = "std")]
-use std::vec::Vec;
 #[cfg(feature = "std")]
 use std::string::String;
+#[cfg(feature = "std")]
+use std::vec::Vec;
 
-use crate::ast::{Program, Statement, StmtKind, Expr, ExprKind, BinaryOp, UnaryOp, Literal};
+use crate::ast::{BinaryOp, Expr, ExprKind, Literal, Program, Statement, StmtKind, UnaryOp};
 use crate::interpreter::Value;
 use aether_core::memory::ManifoldHeap; // From Phase 1
 
@@ -42,19 +41,31 @@ use aether_core::memory::ManifoldHeap; // From Phase 1
 #[allow(non_camel_case_types)]
 pub enum OpCode {
     /// Push constant value onto stack
-    PUSH(f64), 
+    PUSH(f64),
     /// Push boolean value onto stack
     PUSH_BOOL(bool),
     /// Push variable value
     LOAD(usize), // Index into constant pool or variable table? Let's use register/slot index
     /// Store top of stack to variable
     STORE(usize),
-    
+
     /// Arithmetic
-    ADD, SUB, MUL, DIV, MOD, NEG,
-    EQ, NEQ, LT, GT, LE, GE,
-    AND, OR, NOT,
-    
+    ADD,
+    SUB,
+    MUL,
+    DIV,
+    MOD,
+    NEG,
+    EQ,
+    NEQ,
+    LT,
+    GT,
+    LE,
+    GE,
+    AND,
+    OR,
+    NOT,
+
     /// Topology / Core Logic
     /// Embeds the top value into the manifold
     EMBED,
@@ -62,16 +73,16 @@ pub enum OpCode {
     ATTEND,
     /// Explicit entropy regulation point
     PRUNE,
-    
+
     /// Control Flow
     JMP(isize),
     JMP_IF_FALSE(isize),
     CALL(usize, usize),
     RET,
-    
+
     /// Output
     PRINT,
-    
+
     /// End of program
     HALT,
 }
@@ -83,14 +94,13 @@ pub struct TitanVM {
     /// The Bytecode DNA
     code: Vec<OpCode>,
     /// Operand Stack (Fast, hot memory)
-    stack: Vec<Value>, 
+    stack: Vec<Value>,
     // In a real optimized VM, we'd use a primitive stack f64, but for compatibility with AEGIS Value type...
-    // To achieve the 100x speedup, we should probably strictly stick to f64 for calculations 
+    // To achieve the 100x speedup, we should probably strictly stick to f64 for calculations
     // and only box when necessary. But let's start safe.
-    
     /// The Substrate (Heap)
-    heap: ManifoldHeap<Value>, 
-    
+    heap: ManifoldHeap<Value>,
+
     /// Call Frame / Locals (simplified map for now, or vector)
     locals: Vec<Value>,
     frames: Vec<CallFrame>,
@@ -112,27 +122,27 @@ impl TitanVM {
             frames: Vec::new(),
         }
     }
-    
+
     pub fn load_code(&mut self, code: Vec<OpCode>) {
         self.code = code;
         self.ip = 0;
     }
-    
+
     pub fn run(&mut self) -> Result<Value, String> {
         loop {
             if self.ip >= self.code.len() {
                 break;
             }
-            
+
             let op = self.code[self.ip];
             self.ip += 1;
-            
+
             match op {
                 OpCode::HALT => break,
-                
+
                 OpCode::PUSH(v) => self.stack.push(Value::Num(v)),
                 OpCode::PUSH_BOOL(v) => self.stack.push(Value::Bool(v)),
-                
+
                 OpCode::ADD => {
                     let b = self.pop_num()?;
                     let a = self.pop_num()?;
@@ -150,13 +160,17 @@ impl TitanVM {
                 }
                 OpCode::DIV => {
                     let b = self.pop_num()?;
-                    if b == 0.0 { return Err("Division by zero".into()); }
+                    if b == 0.0 {
+                        return Err("Division by zero".into());
+                    }
                     let a = self.pop_num()?;
                     self.stack.push(Value::Num(a / b));
                 }
                 OpCode::MOD => {
                     let b = self.pop_num()?;
-                    if b == 0.0 { return Err("Modulo by zero".into()); }
+                    if b == 0.0 {
+                        return Err("Modulo by zero".into());
+                    }
                     let a = self.pop_num()?;
                     self.stack.push(Value::Num(a % b));
                 }
@@ -208,31 +222,31 @@ impl TitanVM {
                     let value = self.pop_truthy()?;
                     self.stack.push(Value::Bool(!value));
                 }
-                
+
                 OpCode::PRINT => {
                     let val = self.stack.pop().ok_or("Stack underflow")?;
                     // In no_std we might print differently, for now simple debug
                     #[cfg(feature = "std")]
                     println!("{:?}", val);
                 }
-                
+
                 OpCode::EMBED => {
                     let _val = self.pop_num()?;
                     // In a real integration, this would push to the TimeDelayEmbedder
                     // For now, we simulate the 'Action'
                     // self.heap.alloc(Value::Num(val)); // Store in manifold
                 }
-                
+
                 OpCode::PRUNE => {
                     // Trigger Entropy Regulation
                     self.heap.regulate_entropy(|_h| {
                         // Mark roots (stack, locals)
                         // This binding is tricky without referencing self inside closure
-                        // Ideally pass a closure that captures the roots. 
+                        // Ideally pass a closure that captures the roots.
                         // Simplified:
                     });
                 }
-                
+
                 OpCode::LOAD(idx) => {
                     if idx < self.locals.len() {
                         self.stack.push(self.locals[idx].clone());
@@ -248,14 +262,16 @@ impl TitanVM {
                     }
                     self.locals[idx] = val;
                 }
-                
+
                 OpCode::JMP(offset) => {
                     // safer pointer arithmetic
                     let next = self.ip as isize + offset;
-                    if next < 0 { return Err("Invalid Jump".into()); }
+                    if next < 0 {
+                        return Err("Invalid Jump".into());
+                    }
                     self.ip = next as usize;
                 }
-                
+
                 OpCode::JMP_IF_FALSE(offset) => {
                     let val = self.stack.pop().ok_or("Stack underflow")?;
                     let condition = match val {
@@ -263,11 +279,13 @@ impl TitanVM {
                         Value::Num(n) => n != 0.0,
                         _ => false,
                     };
-                    
+
                     if !condition {
-                         let next = self.ip as isize + offset;
-                         if next < 0 { return Err("Invalid Jump".into()); }
-                         self.ip = next as usize;
+                        let next = self.ip as isize + offset;
+                        if next < 0 {
+                            return Err("Invalid Jump".into());
+                        }
+                        self.ip = next as usize;
                     }
                 }
 
@@ -305,14 +323,14 @@ impl TitanVM {
                     self.ip = frame.return_ip;
                     self.stack.push(value);
                 }
-                
+
                 _ => return Err("Unimplemented OpCode".into()),
             }
         }
-        
+
         Ok(self.stack.pop().unwrap_or(Value::Unit))
     }
-    
+
     fn pop_num(&mut self) -> Result<f64, String> {
         match self.stack.pop() {
             Some(Value::Num(n)) => Ok(n),
@@ -362,14 +380,14 @@ struct LoopContext {
 
 impl Compiler {
     pub fn new() -> Self {
-        Self { 
+        Self {
             code: Vec::new(),
             locals: Vec::new(),
             functions: Vec::new(),
             loop_stack: Vec::new(),
         }
     }
-    
+
     pub fn compile(mut self, program: &Program) -> Vec<OpCode> {
         for stmt in &program.statements {
             self.compile_stmt(stmt);
@@ -377,7 +395,7 @@ impl Compiler {
         self.code.push(OpCode::HALT);
         self.code
     }
-    
+
     fn resolve_local(&mut self, name: &str) -> usize {
         if let Some(idx) = self.locals.iter().position(|r| r == name) {
             idx
@@ -416,7 +434,7 @@ impl Compiler {
             }
         }
     }
-    
+
     fn compile_stmt(&mut self, stmt: &Statement) {
         match &stmt.node {
             StmtKind::Expr(expr) => {
@@ -429,7 +447,7 @@ impl Compiler {
                 // Actually RenderStmt has 'target' Ident. Access variable.
                 let idx = self.resolve_local(&stmt.target);
                 self.code.push(OpCode::LOAD(idx));
-                self.code.push(OpCode::PRINT); 
+                self.code.push(OpCode::PRINT);
             }
             StmtKind::Var(decl) => {
                 self.compile_expr(&decl.value);
@@ -444,25 +462,25 @@ impl Compiler {
             StmtKind::While(stmt) => {
                 // Label: Start
                 let start_ip = self.code.len();
-                
+
                 // Condition
                 self.compile_expr(&stmt.condition);
-                
+
                 // Jump if False placeholder
                 let jmp_false_idx = self.code.len();
                 self.code.push(OpCode::JMP_IF_FALSE(0));
-                
+
                 // Body
                 self.push_loop_context();
                 for s in &stmt.body.statements {
                     self.compile_stmt(s);
                 }
-                
+
                 // Jump back to Start
                 let end_ip = self.code.len();
                 let back_jump = (start_ip as isize) - (end_ip as isize) - 1; // -1 because IP increments after fetch
                 self.code.push(OpCode::JMP(back_jump));
-                
+
                 // Patch Jump If False
                 let patch_offset = (self.code.len() as isize) - (jmp_false_idx as isize) - 1;
                 self.code[jmp_false_idx] = OpCode::JMP_IF_FALSE(patch_offset);
@@ -471,35 +489,35 @@ impl Compiler {
             StmtKind::If(stmt) => {
                 // Condition
                 self.compile_expr(&stmt.condition);
-                
+
                 // JMP_IF_FALSE to Else or End
                 let jmp_false_idx = self.code.len();
                 self.code.push(OpCode::JMP_IF_FALSE(0));
-                
+
                 // Then Block
                 for s in &stmt.then_branch.statements {
                     self.compile_stmt(s);
                 }
-                
+
                 // If there's an Else block, we need a Jump over it at end of Then
                 let mut jmp_end_idx = None;
-                
+
                 if let Some(_else_branch) = &stmt.else_branch {
                     jmp_end_idx = Some(self.code.len());
                     self.code.push(OpCode::JMP(0));
                 }
-                
+
                 // Patch False Jump to here (start of Else or End)
                 let false_dest = self.code.len();
                 let patch_false = (false_dest as isize) - (jmp_false_idx as isize) - 1;
                 self.code[jmp_false_idx] = OpCode::JMP_IF_FALSE(patch_false);
-                
+
                 // Compile Else
                 if let Some(else_branch) = &stmt.else_branch {
                     for s in &else_branch.statements {
                         self.compile_stmt(s);
                     }
-                    
+
                     // Patch End Jump
                     if let Some(idx) = jmp_end_idx {
                         let end_dest = self.code.len();
@@ -634,16 +652,14 @@ impl Compiler {
             }
         }
     }
-    
+
     fn compile_expr(&mut self, expr: &Expr) {
         match &expr.node {
-            ExprKind::Literal(l) => {
-                 match l {
-                     Literal::Num(n) => self.code.push(OpCode::PUSH(*n)),
-                     Literal::Bool(b) => self.code.push(OpCode::PUSH_BOOL(*b)),
-                     _ => {},
-                 }
-            }
+            ExprKind::Literal(l) => match l {
+                Literal::Num(n) => self.code.push(OpCode::PUSH(*n)),
+                Literal::Bool(b) => self.code.push(OpCode::PUSH_BOOL(*b)),
+                _ => {}
+            },
             ExprKind::Ident(name) => {
                 let idx = self.resolve_local(name);
                 self.code.push(OpCode::LOAD(idx));
@@ -675,7 +691,10 @@ impl Compiler {
                 }
             }
             ExprKind::Call { name, args } => {
-                let function_idx = self.functions.iter().position(|function| function.name == *name);
+                let function_idx = self
+                    .functions
+                    .iter()
+                    .position(|function| function.name == *name);
                 if let Some(function_idx) = function_idx {
                     for arg in args {
                         if let crate::ast::CallArg::Positional(expr) = arg {
@@ -683,7 +702,8 @@ impl Compiler {
                         }
                     }
                     let function = &self.functions[function_idx];
-                    self.code.push(OpCode::CALL(function.target, function.arity));
+                    self.code
+                        .push(OpCode::CALL(function.target, function.arity));
                 }
             }
             _ => {}
@@ -718,10 +738,10 @@ mod tests {
             OpCode::ADD,
             OpCode::HALT,
         ];
-        
+
         vm.load_code(code);
         let res = vm.run().unwrap();
-        
+
         if let Value::Num(n) = res {
             assert_eq!(n, 11.0);
         } else {
@@ -731,7 +751,7 @@ mod tests {
 
     #[test]
     fn test_compiler_for_loop() {
-        use crate::ast::{VarDecl, ForStmt, Range, Number, Block, Span};
+        use crate::ast::{Block, ForStmt, Number, Range, Span, VarDecl};
 
         // for i in 0:3 { accum = accum + i }
         // Result should be 0+1+2 = 3.
@@ -745,7 +765,7 @@ mod tests {
                         name: "accum".to_string(),
                         value: Expr::new(ExprKind::Literal(Literal::Num(0.0)), Span::default()),
                     }),
-                    Span::default()
+                    Span::default(),
                 ),
                 // for i in 0:3
                 Statement::new(
@@ -764,26 +784,35 @@ mod tests {
                                         name: "accum".to_string(),
                                         value: Expr::new(
                                             ExprKind::BinaryOp(
-                                                Box::new(Expr::new(ExprKind::Ident("accum".to_string()), Span::default())),
+                                                Box::new(Expr::new(
+                                                    ExprKind::Ident("accum".to_string()),
+                                                    Span::default(),
+                                                )),
                                                 BinaryOp::Add,
-                                                Box::new(Expr::new(ExprKind::Ident("i".to_string()), Span::default()))
+                                                Box::new(Expr::new(
+                                                    ExprKind::Ident("i".to_string()),
+                                                    Span::default(),
+                                                )),
                                             ),
-                                            Span::default()
+                                            Span::default(),
                                         ),
                                     }),
-                                    Span::default()
-                                )
-                            ]
-                        }
+                                    Span::default(),
+                                ),
+                            ],
+                        },
                     }),
-                    Span::default()
+                    Span::default(),
                 ),
                 // Expr: accum (to leave result on stack)
                 Statement::new(
-                    StmtKind::Expr(Expr::new(ExprKind::Ident("accum".to_string()), Span::default())),
-                    Span::default()
-                )
-            ]
+                    StmtKind::Expr(Expr::new(
+                        ExprKind::Ident("accum".to_string()),
+                        Span::default(),
+                    )),
+                    Span::default(),
+                ),
+            ],
         };
 
         let compiler = Compiler::new();

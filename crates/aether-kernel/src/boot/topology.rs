@@ -7,7 +7,6 @@ use alloc::vec::Vec;
 // ═══════════════════════════════════════════════════════════════════════════════
 //
 
-
 /// Represents the I/O capabilities of the organism (hardware).
 #[derive(Debug, Clone, Copy, Default)]
 pub struct IoCaps {
@@ -53,14 +52,14 @@ impl HardwareTopology {
                 mem_total += region.end - region.start;
             }
         });
-        
+
         let mut caps = IoCaps::default();
         if boot_info.framebuffer().is_some() {
             caps.has_framebuffer = true;
         }
 
         Self {
-            cpu_cores: 1, // TODO: Parse MADT/ACPI for actual core count
+            cpu_cores: 1,  // TODO: Parse MADT/ACPI for actual core count
             numa_nodes: 1, // TODO: Parse SRAT
             total_memory: mem_total,
             io_capabilities: caps,
