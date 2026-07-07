@@ -195,15 +195,17 @@ impl Tensor {
     /// Element-wise addition
     pub fn add(&self, other: &Tensor) -> Tensor {
         assert_eq!(self.shape, other.shape, "Shape mismatch for add");
-        let total_size: usize = self.shape.iter().product();
-        let mut result_data = Vec::with_capacity(total_size);
 
         let data_a = self.data.borrow();
         let data_b = other.data.borrow();
 
-        for i in 0..total_size {
-            result_data.push(data_a[i] + data_b[i]);
-        }
+        // ⚡ Bolt: Iterators with .zip().map().collect() elide manual bounds checks
+        // and allow LLVM to auto-vectorize more effectively than indexed for loops.
+        let result_data: Vec<f64> = data_a
+            .iter()
+            .zip(data_b.iter())
+            .map(|(a, b)| a + b)
+            .collect();
 
         Self::new(&result_data, &self.shape)
     }
@@ -211,15 +213,17 @@ impl Tensor {
     /// Element-wise multiplication
     pub fn mul(&self, other: &Tensor) -> Tensor {
         assert_eq!(self.shape, other.shape, "Shape mismatch for mul");
-        let total_size: usize = self.shape.iter().product();
-        let mut result_data = Vec::with_capacity(total_size);
 
         let data_a = self.data.borrow();
         let data_b = other.data.borrow();
 
-        for i in 0..total_size {
-            result_data.push(data_a[i] * data_b[i]);
-        }
+        // ⚡ Bolt: Iterators with .zip().map().collect() elide manual bounds checks
+        // and allow LLVM to auto-vectorize more effectively than indexed for loops.
+        let result_data: Vec<f64> = data_a
+            .iter()
+            .zip(data_b.iter())
+            .map(|(a, b)| a * b)
+            .collect();
 
         Self::new(&result_data, &self.shape)
     }
@@ -266,15 +270,17 @@ impl Tensor {
     /// Element-wise subtraction
     pub fn sub(&self, other: &Tensor) -> Tensor {
         assert_eq!(self.shape, other.shape, "Shape mismatch for sub");
-        let total_size: usize = self.shape.iter().product();
-        let mut result_data = Vec::with_capacity(total_size);
 
         let data_a = self.data.borrow();
         let data_b = other.data.borrow();
 
-        for i in 0..total_size {
-            result_data.push(data_a[i] - data_b[i]);
-        }
+        // ⚡ Bolt: Iterators with .zip().map().collect() elide manual bounds checks
+        // and allow LLVM to auto-vectorize more effectively than indexed for loops.
+        let result_data: Vec<f64> = data_a
+            .iter()
+            .zip(data_b.iter())
+            .map(|(a, b)| a - b)
+            .collect();
 
         Self::new(&result_data, &self.shape)
     }
