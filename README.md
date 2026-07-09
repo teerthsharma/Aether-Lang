@@ -26,6 +26,8 @@ Rust crates:
 - `aether-kernel`: no_std sparse-event scheduler, loader, allocator, serial,
   boot, and hardware-topology scaffolding.
 - `aegis-core` and `aegis-cli`: compatibility crates retained in the workspace.
+- `aether-em-sim`: Faraday tensor electromagnetic coupling simulator with
+  topological field summaries.
 
 Active DSL behavior includes variable declarations, assignments, arithmetic,
 comparison and logical expressions, lists, `if`, `while`, `for`, `seal until`,
@@ -58,6 +60,32 @@ let intervals = topology.intervals(diagram)~
 
 `topology.ph` calls the bounded persistent-homology engine in `aether-core`.
 `topology.betti` returns `[beta_0, beta_1, beta_2]`.
+
+## Electromagnetic Field Data Simulator
+
+Aether Lang includes a topological electromagnetic coupling simulator for
+Faraday tensor exploration:
+
+| Surface | Path | Purpose |
+|---------|------|---------|
+| Rust core | `crates/aether-em-sim` | Reference Faraday tensor, invariants, coupling fields, topology proxy |
+| Python generator | `python/aether_em_sim` | Reproducible JSON datasets for classrooms and research fixtures |
+| React app | `web/em-simulator` | Interactive GitHub Pages visualization |
+
+The simulator builds antisymmetric Faraday tensors from `E` and `B`, reports
+`|B|^2 - |E|^2` and `E dot B`, computes Maxwell-style finite-difference
+residuals, and summarizes the active field graph with `beta0` and `beta1`
+proxies.
+
+```powershell
+cargo test -p aether-em-sim
+$env:PYTHONPATH="python"; python -m pytest tests/python/test_aether_em_sim.py
+cd web/em-simulator
+npm test
+npm run build
+```
+
+Full documentation: [docs/EM_FIELD_DATA_SIMULATOR.md](docs/EM_FIELD_DATA_SIMULATOR.md)
 
 ## Documentation
 
