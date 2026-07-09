@@ -1,36 +1,18 @@
-# ⚡ AETHER Performance Benchmarks
+# Benchmarks
 
-Comparisons between AETHER (Candle/Rust) and Python (Torch/Transformers).
+The benchmark policy is maintained at [benchmarks/index.md](benchmarks/index.md).
 
-## 1. Large Language Models (LLM)
+Legacy speedup tables have been removed from the active docs surface because
+they did not include raw artifacts, baselines, environment records, correctness
+metrics, or seeds.
 
-**Model:** `TinyLlama/TinyLlama-1.1B-Chat-v1.0`
-**Hardware:** Docker Container (CPU)
+Use local checks as smoke evidence:
 
-| Metric | Python (Transformers) | AETHER (Native) | Improvement |
-|--------|----------------------|----------------|-------------|
-| **Load Time** | TBD | TBD | TBD |
-| **Inference Speed** | TBD tokens/sec | TBD tokens/sec | TBD |
-| **Memory Usage** | TBD | TBD | TBD |
-
-> *Note: AETHER uses quantized models (GGUF/SafeTensors) optimized for edge deployment, resulting in significantly lower memory footprint and faster startup times.*
-
-## 2. Geometric Core
-
-**Task:** Escalating Regression (Sine Wave, 10k points)
-
-| Implementation | Execution Time |
-|----------------|----------------|
-| **Python (NumPy)** | 90.1 ms |
-| **AETHER (Manifold)** | **0.12 ms** |
-| **Speedup** | **~750x** |
-
-## 3. Topology
-
-**Task:** Betti Number Calculation (Persistent Homology)
-
-| Implementation | Execution Time |
-|----------------|----------------|
-| **GUDHI (Python)** | 50.0 ms |
-| **AETHER (Sparse)** | **0.005 ms** |
-| **Speedup** | **~10,000x** |
+```powershell
+cargo fmt --all -- --check
+cargo test -p aether-core
+cargo test -p aether-lang
+cargo test -p aether-cli
+cargo check -p aether-core --no-default-features
+python -m mkdocs build --strict
+```
