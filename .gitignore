@@ -13,6 +13,11 @@ test_output.txt
 *.log
 *.out
 /site/
+dist
+node_modules
+*.tsbuildinfo
+web/em-simulator/vite.config.d.ts
+web/em-simulator/vite.config.js
 
 # Editors
 .vscode

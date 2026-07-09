@@ -1,0 +1,343 @@
+:root {
+  color: #172026;
+  background: #eeeae2;
+  font-family:
+    Geist,
+    Inter,
+    ui-sans-serif,
+    system-ui,
+    -apple-system,
+    BlinkMacSystemFont,
+    "Segoe UI",
+    sans-serif;
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  min-width: 320px;
+  min-height: 100vh;
+}
+
+button,
+select,
+input {
+  font: inherit;
+}
+
+.shell {
+  min-height: 100vh;
+  padding: 24px;
+  background:
+    linear-gradient(180deg, rgba(247, 244, 238, 0.94), rgba(232, 237, 235, 0.96)),
+    #eeeae2;
+}
+
+.topbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 24px;
+  margin: 0 auto 20px;
+  max-width: 1500px;
+}
+
+.eyebrow {
+  margin: 0 0 6px;
+  color: #586268;
+  font-size: 0.78rem;
+  font-weight: 700;
+  letter-spacing: 0;
+  text-transform: uppercase;
+}
+
+h1 {
+  margin: 0;
+  color: #142229;
+  font-size: clamp(2rem, 4.5vw, 5.4rem);
+  line-height: 0.95;
+  letter-spacing: 0;
+}
+
+.topbarActions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.iconButton,
+.commandButton {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid #b9c0bc;
+  border-radius: 8px;
+  background: #ffffff;
+  color: #152229;
+  min-height: 42px;
+  cursor: pointer;
+  transition:
+    border-color 160ms ease,
+    transform 160ms ease;
+}
+
+.iconButton:hover,
+.commandButton:hover {
+  border-color: #2a6f75;
+  transform: translateY(-1px);
+}
+
+.iconButton {
+  width: 42px;
+}
+
+.commandButton {
+  gap: 8px;
+  padding: 0 14px;
+  font-weight: 700;
+}
+
+.workspace {
+  display: grid;
+  grid-template-columns: minmax(220px, 280px) minmax(420px, 1fr) minmax(280px, 360px);
+  gap: 16px;
+  max-width: 1500px;
+  margin: 0 auto;
+  align-items: start;
+}
+
+.controls,
+.analysisPanel {
+  display: grid;
+  gap: 12px;
+}
+
+.controls,
+.readout,
+.metric,
+.canvasWrap {
+  border: 1px solid rgba(49, 67, 73, 0.16);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.78);
+  box-shadow: 0 18px 50px rgba(33, 42, 45, 0.08);
+}
+
+.controls {
+  padding: 16px;
+  position: sticky;
+  top: 16px;
+}
+
+.controlGroup {
+  display: grid;
+  gap: 8px;
+}
+
+.controlGroup label,
+.labelRow {
+  color: #3e4b50;
+  font-size: 0.82rem;
+  font-weight: 800;
+}
+
+.labelRow {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+select {
+  min-height: 38px;
+  border: 1px solid #b7c2bd;
+  border-radius: 6px;
+  padding: 0 10px;
+  background: #fbfaf7;
+  color: #152229;
+}
+
+input[type="range"] {
+  width: 100%;
+  accent-color: #2a6f75;
+}
+
+.visualColumn {
+  display: grid;
+  gap: 14px;
+}
+
+.canvasWrap {
+  position: relative;
+  overflow: hidden;
+  min-height: 620px;
+}
+
+canvas {
+  width: 100%;
+  height: 620px;
+  display: block;
+}
+
+.canvasHud {
+  position: absolute;
+  right: 14px;
+  bottom: 14px;
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.canvasHud span {
+  border: 1px solid rgba(31, 45, 51, 0.16);
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.84);
+  padding: 8px 10px;
+  color: #26383e;
+  font-size: 0.82rem;
+  font-weight: 800;
+}
+
+.metricGrid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.metric {
+  min-height: 108px;
+  padding: 14px;
+  display: grid;
+  align-content: space-between;
+}
+
+.metricIcon {
+  color: #2a6f75;
+}
+
+.metric span {
+  color: #526168;
+  font-size: 0.76rem;
+  font-weight: 800;
+}
+
+.metric strong {
+  color: #132329;
+  font-size: 1.2rem;
+  line-height: 1.1;
+  overflow-wrap: anywhere;
+}
+
+.analysisPanel {
+  position: sticky;
+  top: 16px;
+}
+
+.readout {
+  padding: 16px;
+}
+
+.readoutTitle {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 12px;
+  color: #1d3036;
+  font-weight: 900;
+}
+
+.tensorGrid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 6px;
+}
+
+.tensorGrid span {
+  min-height: 38px;
+  border-radius: 6px;
+  background: #edf2ef;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #173238;
+  font-family:
+    "JetBrains Mono",
+    "SFMono-Regular",
+    Consolas,
+    monospace;
+  font-size: 0.8rem;
+}
+
+.tensorGrid .zeroCell {
+  color: #8b969a;
+  background: #f7f5f0;
+}
+
+.definitionList {
+  display: grid;
+  grid-template-columns: minmax(110px, 1fr) minmax(0, 1fr);
+  gap: 10px 12px;
+  margin: 0;
+}
+
+.definitionList dt {
+  color: #586268;
+  font-size: 0.82rem;
+  font-weight: 800;
+}
+
+.definitionList dd {
+  margin: 0;
+  color: #132329;
+  font-family:
+    "JetBrains Mono",
+    "SFMono-Regular",
+    Consolas,
+    monospace;
+  font-size: 0.86rem;
+  overflow-wrap: anywhere;
+}
+
+@media (max-width: 1180px) {
+  .workspace {
+    grid-template-columns: 240px minmax(0, 1fr);
+  }
+
+  .analysisPanel {
+    grid-column: 1 / -1;
+    position: static;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 820px) {
+  .shell {
+    padding: 14px;
+  }
+
+  .topbar {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .workspace,
+  .analysisPanel,
+  .metricGrid {
+    grid-template-columns: 1fr;
+  }
+
+  .controls {
+    position: static;
+  }
+
+  .canvasWrap {
+    min-height: 430px;
+  }
+
+  canvas {
+    height: 430px;
+  }
+}
