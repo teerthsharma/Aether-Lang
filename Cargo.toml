@@ -4,7 +4,6 @@ members = [
     "crates/aether-lang",
     "crates/aether-kernel",
     "crates/aether-cli",
-    "crates/aether-em-sim",
     "crates/aegis-core",
     "crates/aegis-cli",
 ]
