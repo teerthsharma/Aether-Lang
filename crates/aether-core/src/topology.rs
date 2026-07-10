@@ -268,23 +268,108 @@ pub fn verify_against_reference(
 ///
 /// # Returns
 /// `Ok(())` if all windows pass, `Err(offset)` at first failure
+fn compute_raw_betti_0(data: &[u8]) -> u32 {
+    let mut components = 0u32;
+    let mut in_component = false;
+    for window in data.windows(2) {
+        let dist = (window[0] as i16 - window[1] as i16).abs();
+        if dist > CLUSTER_THRESHOLD {
+            if !in_component {
+                components += 1;
+                in_component = true;
+            }
+        } else {
+            in_component = false;
+        }
+    }
+    components
+}
+
+#[inline(always)]
+fn is_gap(data: &[u8], idx: usize) -> bool {
+    let dist = (data[idx] as i16 - data[idx + 1] as i16).abs();
+    dist > CLUSTER_THRESHOLD
+}
+
+#[inline(always)]
+fn is_loop(data: &[u8], idx: usize) -> bool {
+    let a = data[idx] as i16;
+    let b = data[idx + 1] as i16;
+    let c = data[idx + 2] as i16;
+    let d = data[idx + 3] as i16;
+    let tolerance = 5i16;
+    if (a - d).abs() <= tolerance {
+        if (a - b).abs() > tolerance || (a - c).abs() > tolerance {
+            return true;
+        }
+    }
+    false
+}
+
 pub fn verify_sliding_window(data: &[u8], window_size: usize) -> Result<(), usize> {
     let size = if window_size == 0 {
         WINDOW_SIZE
     } else {
         window_size
     };
-
+    if size < 4 {
+        // Fallback to naive O(N*W) approach for window sizes < 4 to avoid out-of-bounds panics
+        if data.len() < size {
+            return if is_shape_valid(data) { Ok(()) } else { Err(0) };
+        }
+        for (offset, window) in data.windows(size).enumerate() {
+            if !is_shape_valid(window) {
+                return Err(offset);
+            }
+        }
+        return Ok(());
+    }
     if data.len() < size {
         return if is_shape_valid(data) { Ok(()) } else { Err(0) };
     }
 
-    for (offset, window) in data.windows(size).enumerate() {
-        if !is_shape_valid(window) {
-            return Err(offset);
+    let mut current_betti_0 = compute_raw_betti_0(&data[0..size]);
+    let mut current_betti_1 = compute_betti_1(&data[0..size]);
+
+    let check_shape = |b0: u32, b1: u32, offset: usize| -> Result<(), usize> {
+        let public_b0 = if b0 == 0 { 1 } else { b0 };
+        let shape = TopologicalShape::new(public_b0, b1, size);
+        if shape.density < DENSITY_MIN || shape.density > DENSITY_MAX || shape.betti_1 > MAX_BETTI_1
+        {
+            Err(offset)
+        } else {
+            Ok(())
         }
+    };
+
+    if let Err(e) = check_shape(current_betti_0, current_betti_1, 0) {
+        return Err(e);
     }
 
+    for offset in 1..=(data.len() - size) {
+        if is_loop(data, offset - 1) {
+            current_betti_1 -= 1;
+        }
+        if is_loop(data, offset + size - 4) {
+            current_betti_1 += 1;
+        }
+
+        let gap_start = is_gap(data, offset - 1);
+        let gap_start_plus_1 = is_gap(data, offset);
+        if gap_start && !gap_start_plus_1 {
+            current_betti_0 -= 1;
+        }
+
+        let gap_end_plus_1 = is_gap(data, offset + size - 2);
+        let gap_end = is_gap(data, offset + size - 3);
+        if gap_end_plus_1 && !gap_end {
+            current_betti_0 += 1;
+        }
+
+        if let Err(e) = check_shape(current_betti_0, current_betti_1, offset) {
+            return Err(e);
+        }
+    }
     Ok(())
 }
 
