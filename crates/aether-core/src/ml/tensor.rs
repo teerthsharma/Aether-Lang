@@ -92,14 +92,14 @@ impl Tensor {
     pub fn zeros(shape: &[usize]) -> Self {
         let total_size: usize = shape.iter().product();
         let data = vec![0.0; total_size];
-        Self::new(&data, shape)
+        Self::from_vec(data, shape.to_vec())
     }
 
     /// Create a tensor filled with ones
     pub fn ones(shape: &[usize]) -> Self {
         let total_size: usize = shape.iter().product();
         let data = vec![1.0; total_size];
-        Self::new(&data, shape)
+        Self::from_vec(data, shape.to_vec())
     }
 
     /// Create a tensor with Xavier initialization
@@ -118,7 +118,7 @@ impl Tensor {
             data.push(r * bound);
         }
 
-        Self::new(&data, shape)
+        Self::from_vec(data, shape.to_vec())
     }
 
     /// Get value at index (handles strides)
@@ -207,7 +207,7 @@ impl Tensor {
             .map(|(a, b)| a + b)
             .collect();
 
-        Self::new(&result_data, &self.shape)
+        Self::from_vec(result_data, self.shape.clone())
     }
 
     /// Element-wise multiplication
@@ -225,7 +225,7 @@ impl Tensor {
             .map(|(a, b)| a * b)
             .collect();
 
-        Self::new(&result_data, &self.shape)
+        Self::from_vec(result_data, self.shape.clone())
     }
 
     /// Scalar multiplication
@@ -238,7 +238,7 @@ impl Tensor {
             result_data.push(data[i] * s);
         }
 
-        Self::new(&result_data, &self.shape)
+        Self::from_vec(result_data, self.shape.clone())
     }
 
     /// Transpose (2D)
@@ -282,7 +282,7 @@ impl Tensor {
             .map(|(a, b)| a - b)
             .collect();
 
-        Self::new(&result_data, &self.shape)
+        Self::from_vec(result_data, self.shape.clone())
     }
 
     /// Element-wise mapping
@@ -298,6 +298,6 @@ impl Tensor {
             result_data.push(f(data[i]));
         }
 
-        Self::new(&result_data, &self.shape)
+        Self::from_vec(result_data, self.shape.clone())
     }
 }
