@@ -12,6 +12,7 @@ check_output*.txt
 test_output.txt
 *.log
 *.out
+/site/
 
 # Editors
 .vscode
@@ -28,3 +29,8 @@ __pycache__
 *.pyc
 .venv
 venv
+test_perf/
+
+# Agent scratch
+.jules/
+jules/

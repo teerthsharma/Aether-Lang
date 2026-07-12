@@ -199,6 +199,7 @@ impl<'a> Context<'a> {
         for op in self.tape.ops.iter().rev() {
             match op {
                 Op::Add { out, lhs, rhs } => {
+                    // Solves borrow checker by taking ownership of the Option
                     let grad_out = grads[out.index].take();
                     if let Some(grad) = grad_out {
                         // dL/d(lhs) += dL/dout * 1
