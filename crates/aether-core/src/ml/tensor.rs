@@ -92,14 +92,14 @@ impl Tensor {
     pub fn zeros(shape: &[usize]) -> Self {
         let total_size: usize = shape.iter().product();
         let data = vec![0.0; total_size];
-        Self::new(&data, shape)
+        Self::from_vec(data, shape.to_vec())
     }
 
     /// Create a tensor filled with ones
     pub fn ones(shape: &[usize]) -> Self {
         let total_size: usize = shape.iter().product();
         let data = vec![1.0; total_size];
-        Self::new(&data, shape)
+        Self::from_vec(data, shape.to_vec())
     }
 
     /// Create a tensor with Xavier initialization
@@ -118,7 +118,7 @@ impl Tensor {
             data.push(r * bound);
         }
 
-        Self::new(&data, shape)
+        Self::from_vec(data, shape.to_vec())
     }
 
     /// Get value at index (handles strides)
@@ -195,46 +195,51 @@ impl Tensor {
     /// Element-wise addition
     pub fn add(&self, other: &Tensor) -> Tensor {
         assert_eq!(self.shape, other.shape, "Shape mismatch for add");
-        let total_size: usize = self.shape.iter().product();
-        let mut result_data = Vec::with_capacity(total_size);
 
         let data_a = self.data.borrow();
         let data_b = other.data.borrow();
 
-        for i in 0..total_size {
-            result_data.push(data_a[i] + data_b[i]);
-        }
+        // ⚡ Bolt: Iterators with .zip().map().collect() elide manual bounds checks
+        // and allow LLVM to auto-vectorize more effectively than indexed for loops.
+        // Using from_vec avoids redundant O(N) slice allocations.
+        let result_data: Vec<f64> = data_a
+            .iter()
+            .zip(data_b.iter())
+            .map(|(a, b)| a + b)
+            .collect();
 
-        Self::new(&result_data, &self.shape)
+        Self::from_vec(result_data, self.shape.clone())
     }
 
     /// Element-wise multiplication
     pub fn mul(&self, other: &Tensor) -> Tensor {
         assert_eq!(self.shape, other.shape, "Shape mismatch for mul");
-        let total_size: usize = self.shape.iter().product();
-        let mut result_data = Vec::with_capacity(total_size);
 
         let data_a = self.data.borrow();
         let data_b = other.data.borrow();
 
-        for i in 0..total_size {
-            result_data.push(data_a[i] * data_b[i]);
-        }
+        // ⚡ Bolt: Iterators with .zip().map().collect() elide manual bounds checks
+        // and allow LLVM to auto-vectorize more effectively than indexed for loops.
+        // Using from_vec avoids redundant O(N) slice allocations.
+        let result_data: Vec<f64> = data_a
+            .iter()
+            .zip(data_b.iter())
+            .map(|(a, b)| a * b)
+            .collect();
 
-        Self::new(&result_data, &self.shape)
+        Self::from_vec(result_data, self.shape.clone())
     }
 
     /// Scalar multiplication
     pub fn scale(&self, s: f64) -> Tensor {
-        let total_size: usize = self.shape.iter().product();
-        let mut result_data = Vec::with_capacity(total_size);
         let data = self.data.borrow();
 
-        for i in 0..total_size {
-            result_data.push(data[i] * s);
-        }
+        // ⚡ Bolt: Iterators with .map().collect() elide manual bounds checks
+        // and allow LLVM to auto-vectorize more effectively than indexed for loops.
+        // Using from_vec avoids redundant O(N) slice allocations.
+        let result_data: Vec<f64> = data.iter().map(|&x| x * s).collect();
 
-        Self::new(&result_data, &self.shape)
+        Self::from_vec(result_data, self.shape.clone())
     }
 
     /// Transpose (2D)
@@ -266,17 +271,20 @@ impl Tensor {
     /// Element-wise subtraction
     pub fn sub(&self, other: &Tensor) -> Tensor {
         assert_eq!(self.shape, other.shape, "Shape mismatch for sub");
-        let total_size: usize = self.shape.iter().product();
-        let mut result_data = Vec::with_capacity(total_size);
 
         let data_a = self.data.borrow();
         let data_b = other.data.borrow();
 
-        for i in 0..total_size {
-            result_data.push(data_a[i] - data_b[i]);
-        }
+        // ⚡ Bolt: Iterators with .zip().map().collect() elide manual bounds checks
+        // and allow LLVM to auto-vectorize more effectively than indexed for loops.
+        // Using from_vec avoids redundant O(N) slice allocations.
+        let result_data: Vec<f64> = data_a
+            .iter()
+            .zip(data_b.iter())
+            .map(|(a, b)| a - b)
+            .collect();
 
-        Self::new(&result_data, &self.shape)
+        Self::from_vec(result_data, self.shape.clone())
     }
 
     /// Element-wise mapping
@@ -284,14 +292,13 @@ impl Tensor {
     where
         F: Fn(f64) -> f64,
     {
-        let total_size: usize = self.shape.iter().product();
-        let mut result_data = Vec::with_capacity(total_size);
         let data = self.data.borrow();
 
-        for i in 0..total_size {
-            result_data.push(f(data[i]));
-        }
+        // ⚡ Bolt: Iterators with .map().collect() elide manual bounds checks
+        // and allow LLVM to auto-vectorize more effectively than indexed for loops.
+        // Using from_vec avoids redundant O(N) slice allocations.
+        let result_data: Vec<f64> = data.iter().map(|&x| f(x)).collect();
 
-        Self::new(&result_data, &self.shape)
+        Self::from_vec(result_data, self.shape.clone())
     }
 }

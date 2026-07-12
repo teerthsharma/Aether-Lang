@@ -1,0 +1,72 @@
+site_name: Aether Lang
+site_description: Mechanical systems documentation for the Aether language runtime, topology core, ML primitives, and sparse-event kernel.
+site_url: https://teerthsharma.github.io/Aether-Lang/
+repo_url: https://github.com/teerthsharma/Aether-Lang
+theme:
+  name: material
+  features:
+    - navigation.sections
+    - navigation.tabs
+    - content.code.copy
+markdown_extensions:
+  - admonition
+  - attr_list
+  - md_in_html
+  - pymdownx.arithmatex:
+      generic: true
+  - pymdownx.superfences:
+      custom_fences:
+        - name: mermaid
+          class: mermaid
+          format: !!python/name:pymdownx.superfences.fence_code_format
+extra_javascript:
+  - https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js
+exclude_docs: |
+  superpowers/**
+nav:
+  - Home: index.md
+  - Concepts:
+      - Benefit Emergence: concepts/benefit-emergence.md
+      - Language Pipeline: concepts/language-pipeline.md
+      - Runtime Surface: concepts/runtime-surface.md
+  - Language:
+      - Syntax: language/syntax.md
+      - Execution Model: language/execution-model.md
+      - Module Contracts: language/modules.md
+  - Topology:
+      - Persistent Homology: topology/persistent-homology.md
+      - Derivations: topology/derivations.md
+      - Shape Gates: topology/shape-gates.md
+  - ML:
+      - Primitives: ml/primitives.md
+      - Topological Convergence: ml/topological-convergence.md
+  - Kernel:
+      - Sparse Events: kernel/sparse-events.md
+      - Hardware Boundary: kernel/hardware-boundary.md
+  - Benchmarks:
+      - Benchmark Policy: benchmarks/index.md
+      - Evidence Gates: benchmarks/evidence-gates.md
+  - Reference:
+      - API: reference/api.md
+      - Status Matrix: reference/status.md
+      - Contribution Standard: reference/contributing.md
+  - Compatibility:
+      - Getting Started: GETTING_STARTED.md
+      - Language: LANGUAGE.md
+      - Syntax: SYNTAX.md
+      - API: API.md
+      - Architecture: ARCHITECTURE.md
+      - Mathematics: MATHEMATICS.md
+      - Benchmarks: BENCHMARKS.md
+      - Examples: EXAMPLES.md
+      - FAQ: FAQ.md
+      - LLM Runtime Status: AEGIS_LLM_SPECS.md
+      - Bio Clock Status: BIO_CLOCK_PRD.md
+      - Formal Core: FORMAL_CORE.md
+      - Hardware Status: HARDWARE_SPEC.md
+      - Aether ML: ML_AETHER.md
+      - ML From Scratch: ML_FROM_SCRATCH.md
+      - ML Library: ML_LIBRARY.md
+      - ML Tasks: ML_TASKS.md
+      - OS Development: OS_DEVELOPMENT.md
+      - Tutorial: TUTORIAL.md
