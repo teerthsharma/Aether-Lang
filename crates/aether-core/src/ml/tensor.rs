@@ -201,6 +201,7 @@ impl Tensor {
 
         // ⚡ Bolt: Iterators with .zip().map().collect() elide manual bounds checks
         // and allow LLVM to auto-vectorize more effectively than indexed for loops.
+        // Using from_vec avoids redundant O(N) slice allocations.
         let result_data: Vec<f64> = data_a
             .iter()
             .zip(data_b.iter())
@@ -219,6 +220,7 @@ impl Tensor {
 
         // ⚡ Bolt: Iterators with .zip().map().collect() elide manual bounds checks
         // and allow LLVM to auto-vectorize more effectively than indexed for loops.
+        // Using from_vec avoids redundant O(N) slice allocations.
         let result_data: Vec<f64> = data_a
             .iter()
             .zip(data_b.iter())
@@ -230,13 +232,12 @@ impl Tensor {
 
     /// Scalar multiplication
     pub fn scale(&self, s: f64) -> Tensor {
-        let total_size: usize = self.shape.iter().product();
-        let mut result_data = Vec::with_capacity(total_size);
         let data = self.data.borrow();
 
-        for i in 0..total_size {
-            result_data.push(data[i] * s);
-        }
+        // ⚡ Bolt: Iterators with .map().collect() elide manual bounds checks
+        // and allow LLVM to auto-vectorize more effectively than indexed for loops.
+        // Using from_vec avoids redundant O(N) slice allocations.
+        let result_data: Vec<f64> = data.iter().map(|&x| x * s).collect();
 
         Self::from_vec(result_data, self.shape.clone())
     }
@@ -276,6 +277,7 @@ impl Tensor {
 
         // ⚡ Bolt: Iterators with .zip().map().collect() elide manual bounds checks
         // and allow LLVM to auto-vectorize more effectively than indexed for loops.
+        // Using from_vec avoids redundant O(N) slice allocations.
         let result_data: Vec<f64> = data_a
             .iter()
             .zip(data_b.iter())
@@ -290,13 +292,12 @@ impl Tensor {
     where
         F: Fn(f64) -> f64,
     {
-        let total_size: usize = self.shape.iter().product();
-        let mut result_data = Vec::with_capacity(total_size);
         let data = self.data.borrow();
 
-        for i in 0..total_size {
-            result_data.push(f(data[i]));
-        }
+        // ⚡ Bolt: Iterators with .map().collect() elide manual bounds checks
+        // and allow LLVM to auto-vectorize more effectively than indexed for loops.
+        // Using from_vec avoids redundant O(N) slice allocations.
+        let result_data: Vec<f64> = data.iter().map(|&x| f(x)).collect();
 
         Self::from_vec(result_data, self.shape.clone())
     }
