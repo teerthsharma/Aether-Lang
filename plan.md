@@ -1,0 +1,4 @@
+1. Read `.jules/bolt.md` (creating it if missing) and append a journal entry about avoiding tensor metadata clones during reverse-mode autograd passes by using `Option::take()` and value-based accumulation. Verify the creation/modification using `cat`.
+2. Modify `crates/aether-core/src/ml/autograd.rs` to change `accumulate_grad` signature to take `grad: Tensor` by value and update its implementation. Also, refactor `Context::backward` to use `grads[out.index].take()` for `grad_out` instead of `.clone()`, pass computed gradients by value to `accumulate_grad`, and re-insert `grad_out` into `grads[out.index]`. Verify the modification using `git diff`.
+3. Complete pre-commit steps to ensure proper testing, verification, review, and reflection are done.
+4. Run `cargo test -p aether-core` to verify everything works correctly. Submit a PR with title `⚡ Bolt: Optimize backward pass gradient accumulation` and include What, Why, Impact, and Measurement in the description.
