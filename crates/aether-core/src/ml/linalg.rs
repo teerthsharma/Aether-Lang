@@ -53,60 +53,66 @@ impl LossConfig {
 
     /// Compute derivative (gradient) w.r.t prediction
     pub fn derivative(&self, y_true: &Tensor, y_pred: &Tensor) -> Tensor {
+        assert_eq!(y_true.shape, y_pred.shape);
+        let true_data = y_true.data.borrow();
+        let pred_data = y_pred.data.borrow();
+        let n = true_data.len();
+        let n_f64 = n as f64;
+
+        // ⚡ Bolt: Iterators with .zip().map().collect() elide manual bounds checks
+        // and avoid redundant O(N) intermediate slice allocations caused by high-level
+        // tensor operations like .sub() or .scale(). Using from_vec takes ownership
+        // of the vector directly without internal copies.
         match self {
             LossConfig::MSE => {
-                let diff = y_pred.sub(y_true);
-                let n = y_true.shape.iter().product::<usize>() as f64;
-                diff.scale(2.0 / n)
+                let scale = 2.0 / n_f64;
+                let grad_data: Vec<f64> = pred_data
+                    .iter()
+                    .zip(true_data.iter())
+                    .map(|(p, y)| (p - y) * scale)
+                    .collect();
+                Tensor::from_vec(grad_data, y_pred.shape.clone())
             }
             LossConfig::MAE => {
-                let diff = y_pred.sub(y_true);
-                let n = y_true.shape.iter().product::<usize>() as f64;
-                diff.map(|x| {
-                    if x > 0.0 {
-                        1.0 / n
-                    } else if x < 0.0 {
-                        -1.0 / n
-                    } else {
-                        0.0
-                    }
-                })
+                let scale = 1.0 / n_f64;
+                let grad_data: Vec<f64> = pred_data
+                    .iter()
+                    .zip(true_data.iter())
+                    .map(|(p, y)| {
+                        let diff = p - y;
+                        if diff > 0.0 {
+                            scale
+                        } else if diff < 0.0 {
+                            -scale
+                        } else {
+                            0.0
+                        }
+                    })
+                    .collect();
+                Tensor::from_vec(grad_data, y_pred.shape.clone())
             }
             LossConfig::BinaryCrossEntropy => {
                 // dL/dp = (1-y)/(1-p) - y/p
-                let true_data = y_true.data.borrow();
-                let pred_data = y_pred.data.borrow();
-                let n = true_data.len();
-                let mut grad_data = Vec::with_capacity(n); // Fixed: using Vec instead of let mut
-
-                for i in 0..n {
-                    let y = true_data[i];
-                    let p = pred_data[i].clamp(1e-7, 1.0 - 1e-7); // Avoid div by zero
-
-                    let grad = -(y / p) + ((1.0 - y) / (1.0 - p));
-                    grad_data.push(grad / n as f64);
-                }
-                Tensor::new(&grad_data, &y_pred.shape)
+                let grad_data: Vec<f64> = pred_data
+                    .iter()
+                    .zip(true_data.iter())
+                    .map(|(p, y)| {
+                        let p_clamped = p.clamp(1e-7, 1.0 - 1e-7); // Avoid div by zero
+                        let grad = -(y / p_clamped) + ((1.0 - y) / (1.0 - p_clamped));
+                        grad / n_f64
+                    })
+                    .collect();
+                Tensor::from_vec(grad_data, y_pred.shape.clone())
             }
             LossConfig::Hinge => {
                 // L = max(0, 1 - y*p)
                 // dL/dp = -y if 1 - y*p > 0 else 0
-                let true_data = y_true.data.borrow();
-                let pred_data = y_pred.data.borrow();
-                let n = true_data.len();
-                let mut grad_data = Vec::with_capacity(n);
-
-                for i in 0..n {
-                    let y = true_data[i];
-                    let p = pred_data[i];
-
-                    if 1.0 - y * p > 0.0 {
-                        grad_data.push(-y / n as f64);
-                    } else {
-                        grad_data.push(0.0);
-                    }
-                }
-                Tensor::new(&grad_data, &y_pred.shape)
+                let grad_data: Vec<f64> = pred_data
+                    .iter()
+                    .zip(true_data.iter())
+                    .map(|(p, y)| if 1.0 - y * p > 0.0 { -y / n_f64 } else { 0.0 })
+                    .collect();
+                Tensor::from_vec(grad_data, y_pred.shape.clone())
             }
         }
     }
