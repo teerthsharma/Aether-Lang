@@ -66,7 +66,7 @@ Hosted documentation: [teerthsharma.github.io/Aether-Lang](https://teerthsharma.
 The documentation is organized as a MkDocs site:
 
 ```powershell
-python -m pip install mkdocs-material pymdown-extensions
+python -m pip install -r requirements-docs.txt
 python -m mkdocs serve
 ```
 
