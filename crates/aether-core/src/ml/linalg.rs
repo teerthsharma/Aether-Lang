@@ -53,62 +53,48 @@ impl LossConfig {
 
     /// Compute derivative (gradient) w.r.t prediction
     pub fn derivative(&self, y_true: &Tensor, y_pred: &Tensor) -> Tensor {
-        match self {
-            LossConfig::MSE => {
-                let diff = y_pred.sub(y_true);
-                let n = y_true.shape.iter().product::<usize>() as f64;
-                diff.scale(2.0 / n)
-            }
-            LossConfig::MAE => {
-                let diff = y_pred.sub(y_true);
-                let n = y_true.shape.iter().product::<usize>() as f64;
-                diff.map(|x| {
-                    if x > 0.0 {
+        assert_eq!(y_true.shape, y_pred.shape);
+        let true_data = y_true.data.borrow();
+        let pred_data = y_pred.data.borrow();
+        let n = true_data.len() as f64;
+
+        let grad_data: Vec<f64> = match self {
+            LossConfig::MSE => pred_data
+                .iter()
+                .zip(true_data.iter())
+                .map(|(p, y)| (p - y) * (2.0 / n))
+                .collect(),
+            LossConfig::MAE => pred_data
+                .iter()
+                .zip(true_data.iter())
+                .map(|(p, y)| {
+                    let diff = p - y;
+                    if diff > 0.0 {
                         1.0 / n
-                    } else if x < 0.0 {
+                    } else if diff < 0.0 {
                         -1.0 / n
                     } else {
                         0.0
                     }
                 })
-            }
-            LossConfig::BinaryCrossEntropy => {
-                // dL/dp = (1-y)/(1-p) - y/p
-                let true_data = y_true.data.borrow();
-                let pred_data = y_pred.data.borrow();
-                let n = true_data.len();
-                let mut grad_data = Vec::with_capacity(n); // Fixed: using Vec instead of let mut
-
-                for i in 0..n {
-                    let y = true_data[i];
-                    let p = pred_data[i].clamp(1e-7, 1.0 - 1e-7); // Avoid div by zero
-
+                .collect(),
+            LossConfig::BinaryCrossEntropy => pred_data
+                .iter()
+                .zip(true_data.iter())
+                .map(|(p_raw, y)| {
+                    let p = p_raw.clamp(1e-7, 1.0 - 1e-7); // Avoid div by zero
                     let grad = -(y / p) + ((1.0 - y) / (1.0 - p));
-                    grad_data.push(grad / n as f64);
-                }
-                Tensor::new(&grad_data, &y_pred.shape)
-            }
-            LossConfig::Hinge => {
-                // L = max(0, 1 - y*p)
-                // dL/dp = -y if 1 - y*p > 0 else 0
-                let true_data = y_true.data.borrow();
-                let pred_data = y_pred.data.borrow();
-                let n = true_data.len();
-                let mut grad_data = Vec::with_capacity(n);
+                    grad / n
+                })
+                .collect(),
+            LossConfig::Hinge => pred_data
+                .iter()
+                .zip(true_data.iter())
+                .map(|(p, y)| if 1.0 - y * p > 0.0 { -y / n } else { 0.0 })
+                .collect(),
+        };
 
-                for i in 0..n {
-                    let y = true_data[i];
-                    let p = pred_data[i];
-
-                    if 1.0 - y * p > 0.0 {
-                        grad_data.push(-y / n as f64);
-                    } else {
-                        grad_data.push(0.0);
-                    }
-                }
-                Tensor::new(&grad_data, &y_pred.shape)
-            }
-        }
+        Tensor::from_vec(grad_data, y_pred.shape.clone())
     }
 }
 
