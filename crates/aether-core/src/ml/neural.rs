@@ -408,8 +408,12 @@ impl MLP {
 
     /// Forward pass through all layers
     pub fn forward(&mut self, input: &Tensor) -> Tensor {
-        let mut current = input.clone();
-        for layer in &mut self.layers {
+        let mut layers_iter = self.layers.iter_mut();
+        let Some(first_layer) = layers_iter.next() else {
+            return input.clone();
+        };
+        let mut current = first_layer.forward(input);
+        for layer in layers_iter {
             current = layer.forward(&current);
         }
         current
