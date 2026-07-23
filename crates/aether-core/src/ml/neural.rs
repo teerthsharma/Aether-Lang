@@ -408,13 +408,16 @@ impl MLP {
 
     /// Forward pass through all layers
     pub fn forward(&mut self, input: &Tensor) -> Tensor {
-        let mut current = input.clone();
-        for layer in &mut self.layers {
+        let mut iter = self.layers.iter_mut();
+        let Some(first_layer) = iter.next() else {
+            return input.clone();
+        };
+        let mut current = first_layer.forward(input);
+        for layer in iter {
             current = layer.forward(&current);
         }
         current
     }
-
     /// Predict (Forward without mutating state if possible? No, dense layer caches input)
     pub fn predict(&mut self, input: &Tensor) -> Tensor {
         self.forward(input)

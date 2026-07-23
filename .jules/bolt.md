@@ -4,3 +4,6 @@
 ## 2026-07-14 - Optimizing Tensor allocations in linear algebra
 **Learning:** High-level tensor operations like `.sub()` and `.map()` during gradient calculations trigger costly intermediate heap allocations for both data and metadata.
 **Action:** Use single-pass iterators (`.iter().zip().map().collect()`) directly over the borrowed data arrays and consume the resulting vector with `Tensor::from_vec()` to avoid redundant O(N) slice allocations.
+## 2026-07-23 - Optimizing MLP forward pass allocations
+**Learning:** In the MLP forward pass, eagerly cloning the input tensor to initialize the `current` state before the loop triggers unnecessary heap allocations and redundant `Rc` increments.
+**Action:** Extract the first layer and pass the original `input` reference directly to its `forward` method, naturally consuming the input without a preliminary clone.
