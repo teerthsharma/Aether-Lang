@@ -408,8 +408,14 @@ impl MLP {
 
     /// Forward pass through all layers
     pub fn forward(&mut self, input: &Tensor) -> Tensor {
-        let mut current = input.clone();
-        for layer in &mut self.layers {
+        if self.layers.is_empty() {
+            return input.clone();
+        }
+        let mut layers_iter = self.layers.iter_mut();
+        // ⚡ Bolt: Pass initial input by reference to the first layer to avoid
+        // an initial clone of tensor metadata and an Rc increment.
+        let mut current = layers_iter.next().unwrap().forward(input);
+        for layer in layers_iter {
             current = layer.forward(&current);
         }
         current
