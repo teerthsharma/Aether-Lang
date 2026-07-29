@@ -7,3 +7,6 @@
 ## 2026-07-25 - Tensor metadata cloning in MLP forward passes
 **Learning:** In `aether-core::ml::neural`, cloning the `input` tensor in `MLP::forward` before passing its reference to the first layer's `forward` method triggers an unnecessary heap allocation for tensor metadata and an `Rc` increment.
 **Action:** Extract the first layer using `self.layers.iter_mut()` to pass the initial `input` as a `&Tensor` reference directly, as subsequent layers naturally consume the output of the previous layer.
+## 2026-07-29 - Avoid Tensor Cloning in Backpropagation
+**Learning:** In reverse-mode backpropagation, intermediate states like `last_z` and `last_input` are only read once per backward pass. Using `.as_ref().unwrap().clone()` incurs unnecessary allocations for tensor metadata.
+**Action:** Use `Option::take()` to consume the cached tensors, avoiding allocations while satisfying the borrow checker.

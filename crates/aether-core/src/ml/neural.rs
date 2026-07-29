@@ -260,16 +260,16 @@ impl DenseLayer {
 
     /// Backward pass
     pub fn backward(&mut self, grad_output: &Tensor, config: &OptimizerConfig) -> Tensor {
+        // ⚡ Bolt: Use .take() to consume cached tensors and avoid O(N) shape/stride
+        // metadata allocations, as they are only read once per backward pass.
         let last_z = self
             .last_z
-            .as_ref()
-            .expect("Forward must be called before backward")
-            .clone();
+            .take()
+            .expect("Forward must be called before backward");
         let last_input = self
             .last_input
-            .as_ref()
-            .expect("Forward must be called before backward")
-            .clone();
+            .take()
+            .expect("Forward must be called before backward");
 
         let act_deriv = self.activation.derivative(&last_z);
         let delta = grad_output.mul(&act_deriv);
