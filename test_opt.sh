@@ -1,2 +1,2 @@
-cargo check -p aether-core --offline
-cargo test -p aether-core --offline
+#!/bin/bash
+cargo test -p aether-core
