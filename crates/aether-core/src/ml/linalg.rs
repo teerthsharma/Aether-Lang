@@ -101,29 +101,33 @@ impl LossConfig {
 /// Mean Squared Error
 pub fn mse(y_true: &Tensor, y_pred: &Tensor) -> f64 {
     assert_eq!(y_true.shape, y_pred.shape);
-    let mut sum = 0.0;
     let true_data = y_true.data.borrow();
     let pred_data = y_pred.data.borrow();
     let n = true_data.len();
 
-    for i in 0..n {
-        let diff = true_data[i] - pred_data[i];
-        sum += diff * diff;
-    }
+    let sum: f64 = true_data
+        .iter()
+        .zip(pred_data.iter())
+        .map(|(&t, &p)| {
+            let diff = t - p;
+            diff * diff
+        })
+        .sum();
     sum / n as f64
 }
 
 /// Mean Absolute Error
 pub fn mae(y_true: &Tensor, y_pred: &Tensor) -> f64 {
     assert_eq!(y_true.shape, y_pred.shape);
-    let mut sum = 0.0;
     let true_data = y_true.data.borrow();
     let pred_data = y_pred.data.borrow();
     let n = true_data.len();
 
-    for i in 0..n {
-        sum += fabs(true_data[i] - pred_data[i]);
-    }
+    let sum: f64 = true_data
+        .iter()
+        .zip(pred_data.iter())
+        .map(|(&t, &p)| fabs(t - p))
+        .sum();
     sum / n as f64
 }
 
@@ -135,41 +139,49 @@ pub fn rmse(y_true: &Tensor, y_pred: &Tensor) -> f64 {
 /// Binary Cross-Entropy
 pub fn binary_cross_entropy(y_true: &Tensor, y_pred: &Tensor) -> f64 {
     assert_eq!(y_true.shape, y_pred.shape);
-    let mut sum = 0.0;
     let true_data = y_true.data.borrow();
     let pred_data = y_pred.data.borrow();
     let n = true_data.len();
 
-    for i in 0..n {
-        let p = pred_data[i].clamp(1e-7, 1.0 - 1e-7);
-        let y = true_data[i];
-
-        #[cfg(not(feature = "std"))]
-        {
-            sum -= y * log(p) + (1.0 - y) * log(1.0 - p);
-        }
-        #[cfg(feature = "std")]
-        {
-            sum -= y * p.ln() + (1.0 - y) * (1.0 - p).ln();
-        }
-    }
+    let sum: f64 = true_data
+        .iter()
+        .zip(pred_data.iter())
+        .map(|(&y, &p_raw)| {
+            let p = p_raw.clamp(1e-7, 1.0 - 1e-7);
+            let mut term = 0.0;
+            #[cfg(not(feature = "std"))]
+            {
+                term = -(y * log(p) + (1.0 - y) * log(1.0 - p));
+            }
+            #[cfg(feature = "std")]
+            {
+                term = -(y * p.ln() + (1.0 - y) * (1.0 - p).ln());
+            }
+            term
+        })
+        .sum();
     sum / n as f64
 }
 
 /// Hinge Loss (for SVM)
 pub fn hinge_loss(y_true: &Tensor, y_pred: &Tensor) -> f64 {
     assert_eq!(y_true.shape, y_pred.shape);
-    let mut sum = 0.0;
     let true_data = y_true.data.borrow();
     let pred_data = y_pred.data.borrow();
     let n = true_data.len();
 
-    for i in 0..n {
-        let margin = 1.0 - true_data[i] * pred_data[i];
-        if margin > 0.0 {
-            sum += margin;
-        }
-    }
+    let sum: f64 = true_data
+        .iter()
+        .zip(pred_data.iter())
+        .map(|(&y, &p)| {
+            let margin = 1.0 - y * p;
+            if margin > 0.0 {
+                margin
+            } else {
+                0.0
+            }
+        })
+        .sum();
     sum / n as f64
 }
 
@@ -224,57 +236,68 @@ where
 /// Euclidean distance
 pub fn euclidean_distance(a: &Tensor, b: &Tensor) -> f64 {
     assert_eq!(a.shape, b.shape);
-    let mut sum = 0.0;
     let a_data = a.data.borrow();
     let b_data = b.data.borrow();
 
-    for i in 0..a_data.len() {
-        let diff = a_data[i] - b_data[i];
-        sum += diff * diff;
-    }
+    let sum: f64 = a_data
+        .iter()
+        .zip(b_data.iter())
+        .map(|(&a_val, &b_val)| {
+            let diff = a_val - b_val;
+            diff * diff
+        })
+        .sum();
     sqrt(sum)
 }
 
 /// Manhattan distance (L1)
 pub fn manhattan_distance(a: &Tensor, b: &Tensor) -> f64 {
     assert_eq!(a.shape, b.shape);
-    let mut sum = 0.0;
     let a_data = a.data.borrow();
     let b_data = b.data.borrow();
 
-    for i in 0..a_data.len() {
-        sum += fabs(a_data[i] - b_data[i]);
-    }
+    let sum: f64 = a_data
+        .iter()
+        .zip(b_data.iter())
+        .map(|(&a_val, &b_val)| fabs(a_val - b_val))
+        .sum();
     sum
 }
 
 /// Chebyshev distance (L∞)
 pub fn chebyshev_distance(a: &Tensor, b: &Tensor) -> f64 {
     assert_eq!(a.shape, b.shape);
-    let mut max = 0.0;
     let a_data = a.data.borrow();
     let b_data = b.data.borrow();
 
-    for i in 0..a_data.len() {
-        let abs_val = fabs(a_data[i] - b_data[i]);
-        if abs_val > max {
-            max = abs_val;
-        }
-    }
+    let max: f64 = a_data
+        .iter()
+        .zip(b_data.iter())
+        .fold(0.0, |max_val, (&a_val, &b_val)| {
+            let abs_val = fabs(a_val - b_val);
+            if abs_val > max_val {
+                abs_val
+            } else {
+                max_val
+            }
+        });
     max
 }
 
 /// RBF kernel value
 pub fn rbf_kernel(a: &Tensor, b: &Tensor, gamma: f64) -> f64 {
     assert_eq!(a.shape, b.shape);
-    let mut sum = 0.0;
     let a_data = a.data.borrow();
     let b_data = b.data.borrow();
 
-    for i in 0..a_data.len() {
-        let diff = a_data[i] - b_data[i];
-        sum += diff * diff;
-    }
+    let sum: f64 = a_data
+        .iter()
+        .zip(b_data.iter())
+        .map(|(&a_val, &b_val)| {
+            let diff = a_val - b_val;
+            diff * diff
+        })
+        .sum();
     exp(-gamma * sum)
 }
 
