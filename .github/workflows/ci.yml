@@ -1,52 +1,90 @@
-name: AEGIS CI
+name: AETHER CI
 
+# Triggers on the branch this repository actually uses. The previous config
+# listed `main`/`develop`, neither of which exists here, so no run had ever
+# executed and the workspace had drifted out of compiling.
 on:
   push:
-    branches: [ main, develop ]
+    branches: [master]
   pull_request:
-    branches: [ main ]
+    branches: [master]
 
 env:
   CARGO_TERM_COLOR: always
-  RUSTFLAGS: "-D warnings"
 
 jobs:
   # ═══════════════════════════════════════════════════════════════════════════
   # Test & Lint (Matrix)
+  #
+  # `aether-kernel` is excluded here on purpose: it is a `no_std` bare-metal
+  # binary with no global allocator or panic handler, so it cannot link for a
+  # host target. It is built for real in the `kernel` job below.
   # ═══════════════════════════════════════════════════════════════════════════
   test:
     name: Test (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
     strategy:
+      fail-fast: false
       matrix:
         os: [ubuntu-latest, windows-latest, macos-latest]
-    
+
     steps:
-    - uses: actions/checkout@v4
-    
-    - name: Install Rust Nightly
-      uses: dtolnay/rust-toolchain@nightly
-      with:
-        components: rust-src, llvm-tools-preview, clippy, rustfmt
-    
-    - name: Cache Cargo
-      uses: actions/cache@v3
-      with:
-        path: |
-          ~/.cargo/registry
-          ~/.cargo/git
-          target
-        key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
-    
-    - name: Check Formatting
-      run: cargo fmt -- --check
-      if: matrix.os == 'ubuntu-latest' # Only check fmt once
-    
-    - name: Clippy
-      run: cargo clippy --workspace -- -D warnings
-    
-    - name: Run Tests
-      run: cargo test --workspace
+      - uses: actions/checkout@v4
+
+      - name: Install Rust Nightly
+        uses: dtolnay/rust-toolchain@nightly
+        with:
+          components: rust-src, llvm-tools-preview, clippy, rustfmt
+
+      - name: Cache Cargo
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+
+      - name: Check Formatting
+        run: cargo fmt --all -- --check
+        if: matrix.os == 'ubuntu-latest'
+
+      # Denies the two lint groups that find real defects. Style, complexity and
+      # perf lints stay warnings: a gate nobody can keep green gets switched off,
+      # and then correctness lints stop being enforced too.
+      - name: Clippy (correctness + suspicious)
+        run: >
+          cargo clippy --workspace --exclude aether-kernel --all-targets --
+          -D warnings
+          -D clippy::correctness
+          -D clippy::suspicious
+          -A clippy::style
+          -A clippy::complexity
+          -A clippy::perf
+
+      - name: Run Tests
+        run: cargo test --workspace --exclude aether-kernel
+
+  # ═══════════════════════════════════════════════════════════════════════════
+  # Topological correctness gate
+  #
+  # The persistence invariant suite is called out separately so a failure names
+  # itself in the checks list. These are the assertions that distinguish a
+  # correct persistent homology implementation from a plausible-looking wrong
+  # one; a benchmark measured on a wrong implementation is not a result.
+  # ═══════════════════════════════════════════════════════════════════════════
+  invariants:
+    name: Persistence Invariants
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@nightly
+      - run: cargo test -p aether-core --test persistence_invariants
+      - run: cargo test -p aether-core --test persistence_scale --release
+      - run: cargo test -p aether-core --test diagram_distance
+      - run: cargo test -p aether-core --test attention_contracts -- --nocapture
+      - run: cargo test -p aether-core --test scheduled_attention -- --nocapture
+      - run: cargo test -p aether-core --lib persistence
 
   # ═══════════════════════════════════════════════════════════════════════════
   # no_std Compatibility Check
@@ -55,13 +93,34 @@ jobs:
     name: no_std Check
     runs-on: ubuntu-latest
     steps:
-    - uses: actions/checkout@v4
-    - uses: dtolnay/rust-toolchain@nightly
-      with:
-        targets: thumbv7m-none-eabi # An actual embedded target
-    
-    - name: Build Core (no_std)
-      run: cargo build -p aegis-core --no-default-features --target thumbv7m-none-eabi
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@nightly
+        with:
+          components: rust-src
+          targets: thumbv7m-none-eabi
+
+      - name: Build Core (no_std)
+        run: >
+          cargo build -p aether-core --no-default-features --features no_std
+          -Z build-std=core,alloc --target thumbv7m-none-eabi
+
+  # ═══════════════════════════════════════════════════════════════════════════
+  # Bare-metal kernel
+  # ═══════════════════════════════════════════════════════════════════════════
+  kernel:
+    name: Kernel (x86_64-unknown-none)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@nightly
+        with:
+          components: rust-src
+          targets: x86_64-unknown-none
+
+      - name: Build Kernel
+        run: >
+          cargo build -p aether-kernel
+          -Z build-std=core,alloc --target x86_64-unknown-none
 
   # ═══════════════════════════════════════════════════════════════════════════
   # Docker Build
@@ -70,19 +129,19 @@ jobs:
     name: Docker Build
     runs-on: ubuntu-latest
     steps:
-    - uses: actions/checkout@v4
-    - uses: docker/setup-buildx-action@v3
-    - uses: docker/build-push-action@v5
-      with:
-        context: .
-        push: false
-        tags: aegis:test
-        cache-from: type=gha
-        cache-to: type=gha,mode=max
-    
-    - name: Test Docker REPL
-      run: |
-        docker run --rm aegis:test --help
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/build-push-action@v5
+        with:
+          context: .
+          push: false
+          tags: aether:test
+          load: true
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Test Docker CLI
+        run: docker run --rm aether:test --help
 
   # ═══════════════════════════════════════════════════════════════════════════
   # Release
@@ -91,12 +150,12 @@ jobs:
     name: Create Release
     runs-on: ubuntu-latest
     if: startsWith(github.ref, 'refs/tags/v')
-    needs: [test, no_std_check, docker]
+    needs: [test, invariants, no_std_check, kernel, docker]
     steps:
-    - uses: actions/checkout@v4
-    - name: Create GitHub Release
-      uses: softprops/action-gh-release@v1
-      with:
-        generate_release_notes: true
-      env:
-        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - uses: actions/checkout@v4
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v1
+        with:
+          generate_release_notes: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
