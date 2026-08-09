@@ -17,9 +17,6 @@
 // ═══════════════════════════════════════════════════════════════════════════════
 //
 
-#[cfg(feature = "std")]
-use std::thread;
-
 use core::cell::UnsafeCell;
 use core::marker::PhantomData;
 use core::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
@@ -43,6 +40,12 @@ impl<T> Slot<T> {
             data: UnsafeCell::new(None),
             energy: AtomicBool::new(false), // Starts cold
         }
+    }
+}
+
+impl<T> Default for Slot<T> {
+    fn default() -> Self {
+        Self::new()
     }
 }
 
@@ -73,7 +76,7 @@ impl<T, const SIZE: usize> TitanClock<T, SIZE> {
     pub fn new() -> Self {
         // Assert SIZE is divisible by SHARDS for simplicity
         assert!(
-            SIZE % SHARDS == 0,
+            SIZE.is_multiple_of(SHARDS),
             "Manifold SIZE must be divisible by 32 (SHARDS)"
         );
 
@@ -181,6 +184,12 @@ impl<T, const SIZE: usize> TitanClock<T, SIZE> {
     }
 }
 
+impl<T, const SIZE: usize> Default for TitanClock<T, SIZE> {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 // ═══════════════════════════════════════════════════════════════════════════════
 // Tests: The Crucible
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -188,8 +197,6 @@ impl<T, const SIZE: usize> TitanClock<T, SIZE> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::sync::Arc;
-    use std::thread;
 
     #[test]
     fn test_titan_genesis() {
