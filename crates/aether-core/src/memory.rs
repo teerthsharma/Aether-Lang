@@ -26,12 +26,10 @@ use alloc::boxed::Box;
 #[cfg(not(feature = "std"))]
 use alloc::vec::Vec;
 #[cfg(feature = "std")]
-use std::boxed::Box;
-#[cfg(feature = "std")]
 use std::vec::Vec;
 
 use core::marker::PhantomData;
-use libm::{fabs, sqrt};
+use libm::sqrt;
 
 /// A Geometric Cell (Gc) handle.
 /// Represents a reference to an object in the ManifoldHeap.
@@ -383,6 +381,12 @@ impl<T> ManifoldHeap<T> {
     }
 }
 
+impl<T> Default for ManifoldHeap<T> {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 /// Chebyshev Guard logic.
 pub struct ChebyshevGuard {
     mean: f64,
@@ -484,10 +488,8 @@ impl<T> ManifoldHeap<T> {
                     if is_marked {
                         block.liveness[s_idx] += 0.1;
                         should_prune = false;
-                    } else if is_safe {
-                        should_prune = false;
                     } else {
-                        should_prune = true;
+                        should_prune = !is_safe;
                     }
                 } else {
                     should_prune = false;

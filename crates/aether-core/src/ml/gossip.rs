@@ -25,8 +25,6 @@
 
 #![allow(dead_code)]
 
-use crate::ml::clustering::{KMeans, KMeansResult};
-
 /// Maximum dimension for the manifold points
 const MAX_DIM: usize = 3;
 
@@ -196,6 +194,12 @@ impl GossipRing {
         }
 
         true
+    }
+}
+
+impl Default for GossipRing {
+    fn default() -> Self {
+        Self::new()
     }
 }
 

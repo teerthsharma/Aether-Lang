@@ -1,14 +1,20 @@
-use core::iter::Iterator;
-
 // ═══════════════════════════════════════════════════════════════════════════════
 // Aether-Lang — invented by Teerth Sharma
 // https://github.com/teerthsharma/Aether-Lang
 // Copyright (c) 2026 Teerth Sharma. All Rights Reserved.
 // ═══════════════════════════════════════════════════════════════════════════════
 //
+//! Multiboot2 boot information, decoded into the kernel's own vocabulary.
+//!
+//! The kernel owns these types rather than borrowing `aether_core::os`, because
+//! `aether_core` is the platform-agnostic math layer and must not grow a
+//! dependency on a boot protocol.
 
-use aether_core::PhysAddr;
 use multiboot2::{BootInformation, BootInformationHeader};
+
+/// A physical address. Bare `u64` because every multiboot2 accessor hands back
+/// one and the kernel does raw pointer arithmetic on it.
+pub type PhysAddr = u64;
 
 /// A region of physical memory.
 #[derive(Debug, Clone, Copy)]
@@ -38,22 +44,6 @@ pub struct Framebuffer {
     pub bpp: u8,
 }
 
-/// The interface that the BIOS/Bootloader must satisfy.
-/// Acts as the "DNA transcription" layer.
-pub trait BiosInterface {
-    // Get the raw memory map iterator.
-    // We use a simplified return type here as returning `impl Iterator` in traits is tricky in no_std without GATs/TAITs fully stabilized or boxing.
-    // Ideally we'd return a custom iterator struct.
-    // For simplicity, we'll let the caller get the raw iter via a method or just handle it here.
-    // Changed: simplified to a function that processes regions or returns a specific iterator type.
-    // BUT since we can't return `impl Iterator` easily in stable traits, let's use a callback or just return a concrete iterator if possible, or just panic if not implemented.
-    // Wait, we can define the Iterator type in the impl.
-    // Let's refine the trait to be more practical for this step.
-    // We will just expose a method to get the info we need.
-
-    // For this step, I'll modify the trait to be simpler or implement it directly on the struct.
-}
-
 /// BootInfo passed from the bootloader.
 pub struct BootInfo {
     multiboot_start: PhysAddr,
@@ -63,14 +53,19 @@ impl BootInfo {
     /// Create a new BootInfo from the physical address of the multiboot2 structure.
     ///
     /// # Safety
-    /// The caller must ensure that `multiboot_start` points to a valid Multiboot2 information structure.
+    /// The caller must ensure that `multiboot_start` points to a valid Multiboot2
+    /// information structure, 8-byte aligned as the spec requires, and that it
+    /// stays mapped for the lifetime of the kernel.
     pub unsafe fn new(multiboot_start: PhysAddr) -> Self {
         Self { multiboot_start }
     }
 
     /// Access the raw multiboot information.
-    fn raw(&self) -> Option<BootInformation> {
-        unsafe { multiboot2::load(self.multiboot_start as usize).ok() }
+    ///
+    /// The `'static` lifetime is sound only because `new` requires the structure
+    /// to remain mapped forever, which is true for the bootloader-provided MBI.
+    fn raw(&self) -> Option<BootInformation<'static>> {
+        unsafe { BootInformation::load(self.multiboot_start as *const BootInformationHeader).ok() }
     }
 
     /// Iterate over the memory map using a callback.
@@ -79,30 +74,33 @@ impl BootInfo {
     where
         F: FnMut(MemoryRegion),
     {
-        if let Some(info) = self.raw() {
-            if let Some(tag) = info.memory_map_tag() {
-                for area in tag.memory_areas() {
-                    f(MemoryRegion {
-                        start: area.start_address(),
-                        end: area.end_address(),
-                        kind: match multiboot2::MemoryAreaType::from(area.typ()) {
-                            multiboot2::MemoryAreaType::Available => MemoryRegionKind::Usable,
-                            multiboot2::MemoryAreaType::Reserved => MemoryRegionKind::Reserved,
-                            multiboot2::MemoryAreaType::AcpiAvailable => MemoryRegionKind::Acpi,
-                            multiboot2::MemoryAreaType::ReservedHibernate => {
-                                MemoryRegionKind::Reserved
-                            }
-                            _ => MemoryRegionKind::Unknown,
-                        },
-                    });
-                }
-            }
+        let Some(info) = self.raw() else {
+            return;
+        };
+        let Some(tag) = info.memory_map_tag() else {
+            return;
+        };
+
+        for area in tag.memory_areas() {
+            f(MemoryRegion {
+                start: area.start_address(),
+                end: area.end_address(),
+                kind: match multiboot2::MemoryAreaType::from(area.typ()) {
+                    multiboot2::MemoryAreaType::Available => MemoryRegionKind::Usable,
+                    multiboot2::MemoryAreaType::Reserved => MemoryRegionKind::Reserved,
+                    multiboot2::MemoryAreaType::AcpiAvailable => MemoryRegionKind::Acpi,
+                    multiboot2::MemoryAreaType::ReservedHibernate => MemoryRegionKind::Reserved,
+                    _ => MemoryRegionKind::Unknown,
+                },
+            });
         }
     }
 
     pub fn framebuffer(&self) -> Option<Framebuffer> {
         let info = self.raw()?;
-        let tag = info.framebuffer_tag().ok()?; // Unwrap result
+        // `framebuffer_tag` is Option<Result<..>>: absent tag vs. present-but-
+        // unrecognised type are different failures. Both mean "no framebuffer".
+        let tag = info.framebuffer_tag()?.ok()?;
 
         Some(Framebuffer {
             address: tag.address(),
@@ -113,22 +111,17 @@ impl BootInfo {
         })
     }
 
+    /// Physical address of the ACPI root table: XSDT when the bootloader supplied
+    /// an ACPI 2.0+ RSDP, otherwise the 32-bit RSDT.
     pub fn config_root(&self) -> Option<PhysAddr> {
         let info = self.raw()?;
 
-        // Try RSDP (new ACPI)
         if let Some(tag) = info.rsdp_v2_tag() {
-            // Fix: signature() returns Result<&str, ...>, need to unwrap or handle
-            return Some(tag.signature().ok()?.as_ptr() as u64);
+            return Some(tag.xsdt_address() as PhysAddr);
         }
-
-        // Try RSDP (old ACPI)
         if let Some(tag) = info.rsdp_v1_tag() {
-            // Similarly.
-            return None; // Placeholder
+            return Some(tag.rsdt_address() as PhysAddr);
         }
-
-        // DTB not standard in multiboot2 usually (it's MBI), but we can look for it.
         None
     }
 }

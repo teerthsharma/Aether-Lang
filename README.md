@@ -96,6 +96,7 @@ cargo fmt --all -- --check
 cargo test -p aether-core
 cargo test -p aether-lang
 cargo test -p aether-cli
-cargo check -p aether-core --no-default-features
+cargo build -p aether-kernel -Z build-std=core,alloc --target x86_64-unknown-none
+cargo build -p aether-core --no-default-features --features no_std -Z build-std=core,alloc --target thumbv7m-none-eabi
 python -m mkdocs build --strict
 ```

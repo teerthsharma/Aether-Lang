@@ -315,7 +315,7 @@ impl<const D: usize> SparseAttentionGraph<D> {
     /// for a limited depth, effectively partitioning the manifold geodesically.
     pub fn geodesic_partition_centroid(
         &self,
-        target: ManifoldPoint<D>,
+        _target: ManifoldPoint<D>,
     ) -> Option<ManifoldPoint<D>> {
         if self.point_count == 0 {
             return None;
@@ -359,7 +359,7 @@ impl<const D: usize> SparseAttentionGraph<D> {
             // Expand neighbors if depth limit not reached
             if current_depth < max_depth {
                 // Adjacency bitmask iteration
-                let adjacency = self.adjacency[u];
+                let _adjacency = self.adjacency[u];
                 // Note: Adjacency is symmetric but stored sparsely?
                 // In our `add_point`, we set bits for i < 64.
                 // Let's assume simpler iteration for this limited embedded interaction.

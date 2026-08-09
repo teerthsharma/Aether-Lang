@@ -5,7 +5,7 @@ build-backend = "maturin"
 [project]
 name = "aether-lang"
 version = "0.1.0"
-description = "Current World's Fastest Agentic AI Language"
+description = "A topological DSL for machine learning: bounded persistent homology, manifold embeddings, and a sparse-event runtime"
 authors = [
     { name = "AETHER Research Team", email = "teerths57@gmail.com" },
 ]
