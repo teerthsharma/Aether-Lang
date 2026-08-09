@@ -1,24 +1,29 @@
 # ═══════════════════════════════════════════════════════════════════════════════
-# AEGIS Cargo Configuration
+# AETHER Cargo Configuration
+#
+# build-std is NOT enabled globally: it breaks std-using crates like aether-cli.
+# The kernel and no_std aliases pass it on the command line instead.
+#
+# The previous aliases named crates (aegis-kernel, aegis-lang) that do not exist
+# in this workspace, so `cargo kernel` and `cargo lang` both failed.
 # ═══════════════════════════════════════════════════════════════════════════════
-#
-# This configuration applies to the entire workspace.
-# The aegis-kernel crate requires special build-std flags passed via command line.
-#
-# For kernel builds (bare-metal):
-#   cargo build -p aegis-kernel -Z build-std=core,alloc --target x86_64-unknown-none
-#
-# For CLI builds (native platform):
-#   cargo build -p aegis-cli --release
-#
-# ═══════════════════════════════════════════════════════════════════════════════
-
-# NOTE: build-std is NOT enabled globally - it breaks std-using crates like aegis-cli
-# Use the command-line flag for aegis-kernel only.
 
 [alias]
-# Convenience aliases for building
-kernel = "build -p aegis-kernel -Z build-std=core,alloc --target x86_64-unknown-none"
-cli = "build -p aegis-cli --release"
-lang = "build -p aegis-lang"
-core = "build -p aegis-core"
+# Bare-metal kernel
+kernel = "build -p aether-kernel -Z build-std=core,alloc --target x86_64-unknown-none"
+
+# Native CLI
+cli = "build -p aether-cli --release"
+
+# Library crates on the host
+lang = "build -p aether-lang"
+core = "build -p aether-core"
+
+# The full gate, matching .github/workflows/ci.yml. Run this before pushing.
+gate = "test --workspace --exclude aether-kernel"
+
+# The topological correctness suite on its own.
+invariants = "test -p aether-core --test persistence_invariants"
+
+# no_std check on a real embedded target
+embedded = "build -p aether-core --no-default-features --features no_std -Z build-std=core,alloc --target thumbv7m-none-eabi"
