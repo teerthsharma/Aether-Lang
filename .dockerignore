@@ -9,7 +9,8 @@ target/
 *.iso.lock
 
 # Cargo
-Cargo.lock
+# Cargo.lock is deliberately NOT ignored: the image must build from the
+# same locked dependency set as CI.
 .cargo/
 **/*.rs.bk
 
