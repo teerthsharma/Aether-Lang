@@ -30,6 +30,8 @@ use alloc::string::String;
 #[cfg(not(feature = "std"))]
 use alloc::string::ToString;
 #[cfg(not(feature = "std"))]
+use alloc::vec::Vec;
+#[cfg(not(feature = "std"))]
 use alloc::{format, vec};
 
 #[cfg(not(feature = "std"))]
@@ -60,10 +62,6 @@ use libm::{fabs, sqrt};
 
 #[cfg(not(feature = "std"))]
 use alloc::sync::Arc;
-#[cfg(feature = "std")]
-use safetensors::SafeTensors;
-#[cfg(feature = "std")]
-use std::sync::Arc;
 
 #[cfg(feature = "ml")]
 use candle_core::{Device, Tensor as CandleTensor};

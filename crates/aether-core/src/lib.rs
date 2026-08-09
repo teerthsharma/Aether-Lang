@@ -30,17 +30,23 @@ extern crate alloc;
 // ═══════════════════════════════════════════════════════════════════════════════
 
 pub mod aether;
+pub mod attention;
+pub mod diagram;
 pub mod governor;
 pub mod manifold;
 pub mod memory;
 pub mod ml;
-pub mod os;
 pub mod persistence;
+pub mod scheduled;
 pub mod state;
 pub mod topology;
 
 // Re-export key types for convenience
 pub use aether::{BlockMetadata, DriftDetector, HierarchicalBlockTree};
+pub use diagram::{
+    bottleneck_distance, landscape_norm, persistence_image, persistence_landscape,
+    persistent_entropy, total_persistence, wasserstein_distance, ImageConfig, LandscapeConfig,
+};
 pub use manifold::{ManifoldPoint, SparseAttentionGraph, TimeDelayEmbedder, TopologicalPipeline};
 pub use persistence::{
     persistent_homology, time_delay_persistence, BettiNumbers3, ComplexKind, PersistenceConfig,
