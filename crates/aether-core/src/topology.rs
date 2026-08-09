@@ -298,10 +298,8 @@ fn is_loop(data: &[u8], idx: usize) -> bool {
     let c = data[idx + 2] as i16;
     let d = data[idx + 3] as i16;
     let tolerance = 5i16;
-    if (a - d).abs() <= tolerance {
-        if (a - b).abs() > tolerance || (a - c).abs() > tolerance {
-            return true;
-        }
+    if (a - d).abs() <= tolerance && ((a - b).abs() > tolerance || (a - c).abs() > tolerance) {
+        return true;
     }
     false
 }
@@ -342,9 +340,7 @@ pub fn verify_sliding_window(data: &[u8], window_size: usize) -> Result<(), usiz
         }
     };
 
-    if let Err(e) = check_shape(current_betti_0, current_betti_1, 0) {
-        return Err(e);
-    }
+    check_shape(current_betti_0, current_betti_1, 0)?;
 
     for offset in 1..=(data.len() - size) {
         if is_loop(data, offset - 1) {
@@ -366,9 +362,7 @@ pub fn verify_sliding_window(data: &[u8], window_size: usize) -> Result<(), usiz
             current_betti_0 += 1;
         }
 
-        if let Err(e) = check_shape(current_betti_0, current_betti_1, offset) {
-            return Err(e);
-        }
+        check_shape(current_betti_0, current_betti_1, offset)?;
     }
     Ok(())
 }
@@ -423,9 +417,6 @@ mod tests {
         // Verify returns a result (may pass or fail based on heuristics)
         let result = verify_shape(&prologue);
         // Just ensure it doesn't panic
-        match result {
-            VerifyResult::Pass => {}
-            _ => {}
-        }
+        if let VerifyResult::Pass = result {}
     }
 }
