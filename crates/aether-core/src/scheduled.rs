@@ -589,6 +589,139 @@ pub fn dense_masked_attention(
     ))
 }
 
+/// Gradients of a scheduled-attention output with respect to its inputs.
+#[derive(Debug, Clone, PartialEq)]
+pub struct AttentionGradients {
+    /// `[seq, head_dim]`, same shape as `q`.
+    pub dq: Vec<f64>,
+    /// `[seq, head_dim]`, same shape as `k`.
+    pub dk: Vec<f64>,
+    /// `[seq, head_dim]`, same shape as `v`.
+    pub dv: Vec<f64>,
+}
+
+/// Reverse mode through [`scheduled_attention`], holding the schedule fixed.
+///
+/// The schedule is combinatorial and derived from the keys by a procedure with
+/// no useful derivative — a block is selected or it is not. Treating it as a
+/// constant is the same choice the forward kernel's design already makes, and it
+/// is what makes this a well-defined function to differentiate rather than a
+/// relaxation of one.
+///
+/// Which means a gradient here cannot teach the model to schedule differently.
+/// It can teach the model to make better use of the blocks it was given, which is
+/// the experiment `aether-gpu/examples/recall_training.rs` explicitly could not
+/// run: that file freezes attention and trains only a head, and records the
+/// inability to train through the kernel as its narrowest assumption.
+///
+/// # Recomputation rather than saved state
+///
+/// The forward kernel is a flash-style online softmax that never materialises
+/// the score matrix, so there is nothing stored to reuse. This recomputes the
+/// scores for each row's scheduled blocks. That is the same trade flash attention
+/// makes in reverse — arithmetic in exchange for never holding a `seq x seq`
+/// array — and it keeps the working set proportional to a single row.
+///
+/// The softmax weights are recomputed in one pass here rather than by the
+/// forward's running-maximum rescale. Both produce identical weights: the online
+/// form exists to keep intermediates in range, not to change the result, which is
+/// the property a mutant already confirmed by surviving every test until one used
+/// inputs large enough for the difference to matter.
+pub fn scheduled_attention_backward(
+    q: &[f64],
+    k: &[f64],
+    v: &[f64],
+    seq: usize,
+    head_dim: usize,
+    schedule: &BlockSchedule,
+    block_size: usize,
+    d_out: &[f64],
+) -> Result<AttentionGradients, ScheduleError> {
+    let num_blocks = validate_launch(q, k, v, seq, head_dim, schedule, block_size)?;
+    if d_out.len() != seq * head_dim {
+        return Err(ScheduleError::ShapeMismatch);
+    }
+    let _ = num_blocks;
+
+    let scale = 1.0 / sqrt(head_dim as f64);
+    let mut dq = vec![0.0f64; seq * head_dim];
+    let mut dk = vec![0.0f64; seq * head_dim];
+    let mut dv = vec![0.0f64; seq * head_dim];
+
+    // Scratch for one query row: the columns it sees and their weights. Sized
+    // once at the widest a row can be, so the loop allocates nothing.
+    let mut columns: Vec<usize> = Vec::with_capacity(seq);
+    let mut weights: Vec<f64> = Vec::with_capacity(seq);
+
+    for row in 0..seq {
+        let q_block = row / block_size;
+
+        columns.clear();
+        weights.clear();
+
+        let mut max_score = f64::NEG_INFINITY;
+        for &k_block in schedule.row(q_block) {
+            for local in 0..block_size {
+                let col = k_block * block_size + local;
+                if col > row {
+                    continue;
+                }
+                let mut dot = 0.0;
+                for d in 0..head_dim {
+                    dot += q[row * head_dim + d] * k[col * head_dim + d];
+                }
+                let score = dot * scale;
+                if score > max_score {
+                    max_score = score;
+                }
+                columns.push(col);
+                weights.push(score);
+            }
+        }
+
+        // A causal schedule always contains the diagonal block, and a row always
+        // sees at least itself, so this is never empty. The forward kernel relies
+        // on the same fact to divide by its denominator.
+        let mut denominator = 0.0;
+        for weight in weights.iter_mut() {
+            *weight = exp(*weight - max_score);
+            denominator += *weight;
+        }
+        for weight in weights.iter_mut() {
+            *weight /= denominator;
+        }
+
+        // D_i = sum_j p_ij (dOut_i . V_j), the term that makes the softmax
+        // Jacobian a rank-one correction rather than a full matrix.
+        let mut delta = 0.0;
+        for (idx, &col) in columns.iter().enumerate() {
+            let mut dp = 0.0;
+            for d in 0..head_dim {
+                dp += d_out[row * head_dim + d] * v[col * head_dim + d];
+            }
+            delta += weights[idx] * dp;
+        }
+
+        for (idx, &col) in columns.iter().enumerate() {
+            let p = weights[idx];
+
+            let mut dp = 0.0;
+            for d in 0..head_dim {
+                dp += d_out[row * head_dim + d] * v[col * head_dim + d];
+                dv[col * head_dim + d] += p * d_out[row * head_dim + d];
+            }
+
+            let ds = p * (dp - delta) * scale;
+            for d in 0..head_dim {
+                dq[row * head_dim + d] += ds * k[col * head_dim + d];
+                dk[col * head_dim + d] += ds * q[row * head_dim + d];
+            }
+        }
+    }
+
+    Ok(AttentionGradients { dq, dk, dv })
+}
+
 // ═══════════════════════════════════════════════════════════════════════════════
 // Same-budget baselines
 //
