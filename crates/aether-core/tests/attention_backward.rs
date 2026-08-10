@@ -65,16 +65,8 @@ impl Case {
     /// single finite difference comparable to a single entry of the analytic
     /// gradient, without needing to form a Jacobian.
     fn loss(&self, q: &[f64], k: &[f64], v: &[f64], schedule: &BlockSchedule) -> f64 {
-        let out = scheduled_attention(
-            q,
-            k,
-            v,
-            self.seq,
-            self.head_dim,
-            schedule,
-            self.block_size,
-        )
-        .expect("valid launch");
+        let out = scheduled_attention(q, k, v, self.seq, self.head_dim, schedule, self.block_size)
+            .expect("valid launch");
         out.iter().zip(&self.d_out).map(|(a, b)| a * b).sum()
     }
 
