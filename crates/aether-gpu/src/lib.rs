@@ -206,7 +206,19 @@ impl GpuContext {
     }
 
     async fn new_async() -> Result<Self, GpuError> {
-        let instance = wgpu::Instance::new(&wgpu::InstanceDescriptor::default());
+        // Honour WGPU_BACKEND so a caller can pin Vulkan, DX12, Metal or GL.
+        //
+        // `InstanceDescriptor::default()` does not read it, which is worth
+        // knowing: setting the variable and assuming it took effect gives a
+        // measurement of whatever backend was chosen anyway. Backend selection
+        // matters here because the teardown fault in FEATURES.md needs to be
+        // characterised as backend-specific or not before it is worth reporting
+        // upstream.
+        let backends = wgpu::Backends::from_env().unwrap_or_default();
+        let instance = wgpu::Instance::new(&wgpu::InstanceDescriptor {
+            backends,
+            ..Default::default()
+        });
 
         let adapter = instance
             .request_adapter(&wgpu::RequestAdapterOptions {

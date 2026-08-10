@@ -22,6 +22,14 @@ fn fill(n: usize) -> Vec<f32> {
 fn main() {
     let pattern = std::env::args().nth(1).unwrap_or_else(|| "drop".into());
 
+    // Buffer edge length. The result matrix is n*n f32, so n=2048 is 16 MB and
+    // n=512 is 1 MB. Parameterised because size dependence is one of the two
+    // questions a wgpu maintainer would ask first, and it was unmeasured.
+    let n: usize = std::env::args()
+        .nth(2)
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(2048);
+
     let ctx = match GpuContext::new() {
         Ok(c) => c,
         Err(e) => {
@@ -30,7 +38,17 @@ fn main() {
         }
     };
 
-    let n = 2048;
+    // Printed so a run recorded from a harness carries its own backend. The
+    // other question a maintainer asks first is whether this is
+    // backend-specific, and `WGPU_BACKEND` selects it.
+    if std::env::var("REPRO_QUIET").is_err() {
+        let info = ctx.adapter_info();
+        eprintln!(
+            "adapter {} | {} | n={n} | pattern={pattern}",
+            info.name, info.backend
+        );
+    }
+
     let pts = fill(n * 3);
     let g = ctx.upload(&pts, n, 3).expect("upload");
 
