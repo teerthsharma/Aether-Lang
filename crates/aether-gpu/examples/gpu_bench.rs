@@ -238,6 +238,61 @@ fn main() {
         );
     }
 
+    // ── The rule that explains every result above ─────────────────────────────
+    //
+    // Whether an operation pays on a GPU with a CPU consumer is decided by the
+    // ratio of its arithmetic to the bytes that have to come back, not by how
+    // good the kernel is.
+    //
+    //   matmul            O(n^3) work over O(n^2) bytes   ratio grows as n
+    //   pairwise distance O(n^2 d) work over O(n^2) bytes ratio is fixed at d
+    //
+    // So matmul must cross over at some size and stay crossed, and pairwise
+    // distance at d=3 must never cross, however fast the kernel is. Both halves
+    // are measured rather than argued: a crossing that failed to appear, or one
+    // that appeared for distance, would falsify the rule.
+    println!();
+    println!("  Crossover: round-trip GPU against the CPU reference");
+    println!(
+        "  {:>6}  {:>12}  {:>12}  {:>8}   {:>12}  {:>12}  {:>8}",
+        "n", "mm CPU ms", "mm GPU ms", "ratio", "dist CPU ms", "dist GPU ms", "ratio"
+    );
+    println!(
+        "  {:->6}  {:->12}  {:->12}  {:->8}   {:->12}  {:->12}  {:->8}",
+        "", "", "", "", "", "", ""
+    );
+
+    for n in [32usize, 64, 96, 128, 192, 256] {
+        let a = fill(n * n, 11);
+        let b = fill(n * n, 12);
+        let mm_cpu = median_ms(5, || {
+            let _ = cpu_matmul(&a, &b, n, n, n);
+        });
+        let _ = ctx.matmul(&a, &b, n, n, n).expect("warmup");
+        let mm_gpu = median_ms(20, || {
+            let _ = ctx.matmul(&a, &b, n, n, n).expect("mm");
+        });
+
+        let pts = fill(n * 3, 13);
+        let d_cpu = median_ms(5, || {
+            let _ = cpu_pairwise_sqdist(&pts, n, 3);
+        });
+        let gp = ctx.upload(&pts, n, 3).expect("upload");
+        let _ = ctx
+            .read(&ctx.pairwise_sqdist_resident(&gp).expect("w"))
+            .expect("w");
+        let d_gpu = median_ms(20, || {
+            let m = ctx.pairwise_sqdist_resident(&gp).expect("sqdist");
+            let _ = ctx.read(&m).expect("read");
+        });
+
+        println!(
+            "  {n:>6}  {mm_cpu:>12.3}  {mm_gpu:>12.3}  {:>7.2}x   {d_cpu:>12.3}  {d_gpu:>12.3}  {:>7.2}x",
+            mm_cpu / mm_gpu,
+            d_cpu / d_gpu
+        );
+    }
+
     println!();
     println!("═══════════════════════════════════════════════════════════════════════");
     println!("  CPU columns are the naive single-threaded reference this crate ships");
