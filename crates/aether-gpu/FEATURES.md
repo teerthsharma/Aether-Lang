@@ -22,7 +22,7 @@ or `aether-lang` calls it.
 
 | candidate | verdict | why |
 |---|---|---|
-| `Tensor::matmul` | **done** — `tensor_matmul` | 38× at n=512 with f64↔f32 conversion counted. Opt-in per call site rather than a change to `Tensor`, so the f32 question is asked by the caller who knows what the result feeds |
+| `Tensor::matmul` | **done** — `tensor_matmul` | **36× at n=512**, measured on the shipped bridge with conversion and stride gather counted. Crossover n=128. Opt-in per call site rather than a change to `Tensor`, so the f32 question is asked by the caller who knows what the result feeds |
 | `pairwise_sqdist` | **not worth doing at any size** | 90–100% of its time is transfer, and the persistence reduction is CPU-side so the matrix must come back |
 
 **One rule predicts both**, and is the single most portable thing here: with a
@@ -55,7 +55,7 @@ that was true in August unless the document says which is which.
 | gradient agreement, 7,732 entries | **bounded** — tolerances asserted per fixture | `cargo test -p aether-gpu --features gpu --test gradcheck` |
 | Betti numbers unchanged under f32 | **checked** — asserted, not reported | `cargo test -p aether-gpu --features gpu --test f32_topology` |
 | every timing, every ratio | **snapshot** | `cargo run -p aether-gpu --example gpu_bench --release` |
-| crossover n=128, 38× at n=512 | **snapshot** | `cargo run -p aether-gpu --example tensor_crossover --release` |
+| crossover n=128, 36× at n=512 | **snapshot** | `cargo run -p aether-gpu --example tensor_crossover --release` |
 | crash rates (8/60, 0/180) | **snapshot** | `crates/aether-gpu/examples/teardown_repro.rs`, 30 runs a variant |
 
 The snapshots cannot be bound and it is not a gap in the tooling. A timing
