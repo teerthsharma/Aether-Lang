@@ -17,6 +17,10 @@
 #![allow(dead_code)]
 
 #[cfg(feature = "alloc")]
+use alloc::boxed::Box;
+#[cfg(feature = "alloc")]
+use alloc::vec;
+#[cfg(feature = "alloc")]
 use alloc::vec::Vec;
 
 #[cfg(not(feature = "std"))]
@@ -404,16 +408,11 @@ impl MLP {
 
     /// Forward pass through all layers
     pub fn forward(&mut self, input: &Tensor) -> Tensor {
-        let mut iter = self.layers.iter_mut();
-        if let Some(first) = iter.next() {
-            let mut current = first.forward(input);
-            for layer in iter {
-                current = layer.forward(&current);
-            }
-            current
-        } else {
-            input.clone()
+        let mut current = input.clone();
+        for layer in &mut self.layers {
+            current = layer.forward(&current);
         }
+        current
     }
 
     /// Predict (Forward without mutating state if possible? No, dense layer caches input)
