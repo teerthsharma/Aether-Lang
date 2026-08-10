@@ -42,10 +42,20 @@ enum Head {
     Softmax,
 }
 
+/// See the note in `gpu_parity.rs`: without `AETHER_REQUIRE_GPU`, a missing
+/// adapter makes every hardware test return early, and an early return is a
+/// pass. The variable turns that into a failure so a run can prove the
+/// hardware path was exercised rather than skipped.
 fn context() -> Option<GpuContext> {
     match GpuContext::new() {
         Ok(c) => Some(c),
         Err(e) => {
+            if std::env::var("AETHER_REQUIRE_GPU").is_ok() {
+                panic!(
+                    "AETHER_REQUIRE_GPU is set but no usable GPU adapter was found ({e}). \
+                     This test would otherwise have skipped and reported success."
+                );
+            }
             eprintln!("SKIP: no usable GPU adapter ({e})");
             None
         }

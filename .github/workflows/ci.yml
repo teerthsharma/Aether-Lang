@@ -62,6 +62,20 @@ jobs:
           -A clippy::complexity
           -A clippy::perf
 
+      # These runners have no GPU, so every test in `aether-gpu` that needs an
+      # adapter returns early — and an early return is a pass. This job
+      # therefore reports the GPU suites green while running none of them.
+      #
+      # `AETHER_REQUIRE_GPU=1` turns a missing adapter into a failure. It is
+      # deliberately NOT set here, because it would fail every run on hardware
+      # that cannot satisfy it. Set it on a GPU-equipped runner, or locally, to
+      # assert that the hardware path was actually exercised:
+      #
+      #   AETHER_REQUIRE_GPU=1 cargo test -p aether-gpu --release
+      #
+      # Until such a runner exists, the GPU rows in the README's status
+      # dashboard are marked as verified on developer hardware rather than in
+      # CI, which is a weaker claim than the other rows carry.
       - name: Run Tests
         run: cargo test --workspace --exclude aether-kernel
 
