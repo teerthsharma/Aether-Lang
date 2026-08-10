@@ -192,12 +192,29 @@ agreement and the one the measurement supports.
 
 The GPU backward took 623 s against 216 s for the CPU one, on the same tree and
 back to back. Unlike the ratios elsewhere in this file that figure is not fragile
-— each run aggregates roughly 36,000 backward calls, so per-call variance
-averages out — and the cause is structural rather than mysterious: every call
-uploads its operands, runs four dispatches, and reads the row statistics back to
-re-upload them, because the shared four-binding layout has nowhere to leave them.
-That download is the `ponytail:` marker in `scheduled_attention_backward_resident`
-and is the first thing to remove if this path ever needs to be fast.
+— each run aggregates roughly 36,000 backward calls, so per-call variance averages
+out.
+
+Most of the gap was a round trip in the middle of the backward pass. The
+statistics kernel wrote its output to its own tensor, that tensor was downloaded,
+concatenated onto the operands and re-uploaded, once per call, on the reasoning
+that the shared four-binding layout had no free binding to leave it in. The
+premise was true and the conclusion did not follow: a `read_write` binding is
+*readable*, so the kernel can take the packed operand buffer as its output, read
+q, k, v and dOut out of it, and fill a reserved tail in place. The gradient
+kernels then bind that same buffer as `a` and find everything already there. No
+second layout, no concatenation kernel, and the `ponytail:` marker is gone.
+
+**623 s to 493 s, with all sixteen figures unchanged.** The remaining gap to the
+CPU's 216 s is the per-call operand upload and four dispatches, which is what the
+shape of this API costs rather than an oversight.
+
+The mutation harness caught its own staleness on this change. Moving the write to
+`c[s_base + row * 3u + 2u]` left one mutant's pattern matching nothing, and the
+run reported `SKIPPED <- pattern did not match` and counted it as an escape. That
+is the behaviour the script documents and the reason it counts that way: a stale
+pattern is not coverage, and scoring it as a pass would have reported a mutant
+that never ran as a mutant that died. Corrected, 0 of 20 escape.
 
 #### f32 gradient error grows about linearly with the sequence
 

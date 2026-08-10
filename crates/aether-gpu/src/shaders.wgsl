@@ -577,6 +577,22 @@ fn scheduled_attention(@builtin(global_invocation_id) gid: vec3<u32>) {
 // Delta is what makes the softmax Jacobian a rank-one correction rather than a
 // dense matrix. It is a per-row scalar, so computing it once here is what lets
 // three kernels share it.
+//
+// **This kernel reads and writes the same buffer, and that is the point.** It
+// takes the packed operands as `c` rather than `a`, reads q, k, v and dOut from
+// the front of it, and writes the statistics into the tail that the upload left
+// reserved. The three gradient kernels then bind that identical buffer as `a`
+// and find everything already in place.
+//
+// The alternative, and what this replaces, was writing the statistics to their
+// own output, reading them back to the host, and re-uploading them concatenated
+// onto the operands -- a full round trip in the middle of a backward pass, purely
+// because the shared four-binding layout has no free binding to leave them in.
+// A `read_write` binding is readable, so the round trip was never necessary.
+//
+// The aliasing is safe because each invocation owns one row: it reads only the
+// operand region, which nothing writes, and writes only its own three floats in
+// the tail, which nothing reads until the next dispatch.
 @compute @workgroup_size(64, 1, 1)
 fn attention_row_stats(@builtin(global_invocation_id) gid: vec3<u32>) {
     let row = gid.x;
@@ -592,6 +608,7 @@ fn attention_row_stats(@builtin(global_invocation_id) gid: vec3<u32>) {
     let k_base = seq * head_dim;
     let v_base = 2u * seq * head_dim;
     let d_base = 3u * seq * head_dim;
+    let s_base = 4u * seq * head_dim;
     let idx_base = num_blocks + 1u;
 
     let q_block = row / block_size;
@@ -609,7 +626,7 @@ fn attention_row_stats(@builtin(global_invocation_id) gid: vec3<u32>) {
             }
             var dot = 0.0;
             for (var d = 0u; d < head_dim; d = d + 1u) {
-                dot = dot + a[row * head_dim + d] * a[k_base + col * head_dim + d];
+                dot = dot + c[row * head_dim + d] * c[k_base + col * head_dim + d];
             }
             let s = dot * scale;
             if (s > mx) {
@@ -630,8 +647,8 @@ fn attention_row_stats(@builtin(global_invocation_id) gid: vec3<u32>) {
             var dot = 0.0;
             var dp = 0.0;
             for (var d = 0u; d < head_dim; d = d + 1u) {
-                dot = dot + a[row * head_dim + d] * a[k_base + col * head_dim + d];
-                dp = dp + a[d_base + row * head_dim + d] * a[v_base + col * head_dim + d];
+                dot = dot + c[row * head_dim + d] * c[k_base + col * head_dim + d];
+                dp = dp + c[d_base + row * head_dim + d] * c[v_base + col * head_dim + d];
             }
             let w = exp(dot * scale - mx);
             denom = denom + w;
@@ -639,9 +656,9 @@ fn attention_row_stats(@builtin(global_invocation_id) gid: vec3<u32>) {
         }
     }
 
-    c[row * 3u + 0u] = mx;
-    c[row * 3u + 1u] = mx + log(denom);
-    c[row * 3u + 2u] = weighted / denom;
+    c[s_base + row * 3u + 0u] = mx;
+    c[s_base + row * 3u + 1u] = mx + log(denom);
+    c[s_base + row * 3u + 2u] = weighted / denom;
 }
 
 // dQ_i = sum_j p_ij (dOut_i . V_j - delta_i) * scale * K_j

@@ -80,7 +80,7 @@ mutants=(
 "attention_dq: softmax rank-one correction dropped|s/let ds = p \* \(dp - delta\) \* scale;/let ds = p * dp * scale;/"
 "attention_dk: accumulates the key instead of the query|s/acc\[d\] = acc\[d\] \+ ds \* a\[row \* head_dim \+ d\];/acc[d] = acc[d] + ds * a[k_base + col * head_dim + d];/"
 "attention_dv: cotangent accumulated unweighted|s/acc\[d\] = acc\[d\] \+ p \* a\[d_base \+ row \* head_dim \+ d\];/acc[d] = acc[d] + a[d_base + row * head_dim + d];/"
-"attention_row_stats: delta left unnormalised|s/c\[row \* 3u \+ 2u\] = weighted \/ denom;/c[row * 3u + 2u] = weighted;/"
+"attention_row_stats: delta left unnormalised|s/c\[s_base \+ row \* 3u \+ 2u\] = weighted \/ denom;/c[s_base + row * 3u + 2u] = weighted;/"
 "attention_dk: membership test always succeeds|s/if \(u32\(b\[idx_base \+ e\]\) == k_block\) \{/if (true) {/"
 )
 
