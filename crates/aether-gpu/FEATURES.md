@@ -22,7 +22,7 @@ or `aether-lang` calls it.
 
 | candidate | verdict | why |
 |---|---|---|
-| `Tensor::matmul` | **done** — `tensor_matmul` | **36× at n=512**, measured on the shipped bridge with conversion and stride gather counted. Crossover n=128. Opt-in per call site rather than a change to `Tensor`, so the f32 question is asked by the caller who knows what the result feeds |
+| `Tensor::matmul` | **done** — `tensor_matmul` | **crossover n=128**, which is stable across runs. Magnitude is tens of times at n=512, and no tighter — the ratio's run-to-run spread is 96%. Opt-in per call site rather than a change to `Tensor`, so the f32 question is asked by the caller who knows what the result feeds |
 | `pairwise_sqdist` | **not worth doing at any size** | 90–100% of its time is transfer, and the persistence reduction is CPU-side so the matrix must come back |
 
 **One rule predicts both**, and is the single most portable thing here: with a
@@ -55,7 +55,7 @@ that was true in August unless the document says which is which.
 | gradient agreement, 7,732 entries | **bounded** — tolerances asserted per fixture | `cargo test -p aether-gpu --features gpu --test gradcheck` |
 | Betti numbers unchanged under f32 | **checked** — asserted, not reported | `cargo test -p aether-gpu --features gpu --test f32_topology` |
 | every timing, every ratio | **snapshot** | `cargo run -p aether-gpu --example gpu_bench --release` |
-| crossover n=128, 36× at n=512 | **snapshot** | `cargo run -p aether-gpu --example tensor_crossover --release` |
+| crossover n=128 (stable); magnitude tens of × (spread 96%) | **snapshot** | `cargo run -p aether-gpu --example tensor_crossover --release` |
 | crash rates (8/60, 0/180) | **snapshot** | `crates/aether-gpu/examples/teardown_repro.rs`, 30 runs a variant |
 
 The snapshots cannot be bound and it is not a gap in the tooling. A timing
@@ -63,6 +63,40 @@ depends on the adapter, the driver, the thermal state and what else the machine
 was doing; asserting one would produce a test that fails for reasons unrelated
 to the code, which is worse than a number carrying a date. What they can carry
 is the command that reproduces them, and every row above has one.
+
+### How unstable the snapshots actually are
+
+Reported to three decimals throughout this file, which overstates them. Measured
+by re-running an unchanged binary:
+
+| quantity at n=512 | observed range | spread |
+|---|---|---:|
+| bridge time | 5.034 – 5.696 ms | 12% |
+| `Tensor::matmul` time | 197.9 – 321.8 ms | 43% |
+| **their ratio** | **18.5× – 61.0×** | **96%** |
+
+**The ratio is less stable than either term, not more.** An earlier note in this
+file claimed the opposite — that both columns move together so the comparison
+survives what the absolutes do not — and that was asserted rather than measured.
+It is wrong: the two terms drift independently, so dividing them compounds the
+error instead of cancelling it.
+
+Raising the CPU repetitions from 3 to 9 made the spread *worse*, which rules out
+sampling as the cause and points at the machine: these were taken on a laptop
+that had been running GPU benchmarks continuously for hours, so thermal state
+and contention dominate.
+
+What this means for the figures quoted here:
+
+- **The crossover, n=128, is trustworthy.** It is a threshold — whether a ratio
+  sits above or below 1 — and it came out at 128 in every run.
+- **The magnitude is not.** "36× at n=512" is one draw from a distribution
+  spanning at least 18× to 61×. The defensible claim is *tens of times faster at
+  n=512 on this hardware*, and any tighter figure in this document should be
+  read as illustrative of a single run.
+
+The correct fix is measuring on an idle machine with pinned clocks, which is not
+what produced any number here.
 
 The bounded rows are the middle case: the *value* moves between runs, but the
 *claim* — that it stays inside a stated range — is asserted. That is the
@@ -82,6 +116,7 @@ Listed here so a reader is not misled by encountering them mid-file:
 | "f32 is viable for the filtration" | **narrowed** — true in practice, not guaranteed past n≈32 |
 | "The GPU kernel's output needs symmetrising" | **withdrawn** — it is bitwise symmetric by construction |
 | "The suite never reports success for work that did not happen" | **withdrawn** — it did exactly that for twenty-odd commits |
+| "Ratios are more stable than the timings they divide" | **withdrawn** — measured at 96% spread against 43% and 12% for the terms |
 
 ## Shipped
 
