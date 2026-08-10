@@ -299,12 +299,23 @@ Dispatch and allocation dominate below roughly 128×128.
   parity baseline, not a tuned BLAS. Ratios compare this crate's own two paths.
 - f32 only. `aether-core` computes in f64 on the CPU path, and nothing in
   `aether-core` routes through this crate yet.
-- Gradcheck covers both output heads, sigmoid/BCE and softmax/cross-entropy,
-  both depths (one hidden layer per head plus the two-layer stack the training
-  examples run), and both size regimes. The tile-crossing fixture is 33x17x48 —
-  `2*16+1`, `16+1`, `3*16` — so every gradient matmul spans several tiles and
-  leaves a partial tail. 913 gradient entries, worst relative error 6.9e-5
-  against a 1e-3 tolerance.
+- Gradcheck runs a depth × head × size matrix against one generic reference.
+  Six configurations, 7,732 gradient entries, worst relative error 1.985e-4:
+
+  | configuration | stage 1 | stage 2 entries | worst rel. error |
+  |---|---:|---:|---:|
+  | 1-layer sigmoid 5×3×4 | 21 / 21 | 21 | 3.179e-7 |
+  | 2-layer sigmoid 5×3×4×4 | 41 / 41 | 41 | 4.954e-7 |
+  | 1-layer softmax 5×3×4×3 | 31 / 31 | 31 | 3.594e-5 |
+  | 1-layer sigmoid 33×17×48 | 32 / 913 | 913 | 9.127e-5 |
+  | 2-layer sigmoid 33×17×48×48 | 32 / 3,265 | 3,265 | 1.985e-4 |
+  | 2-layer softmax 33×17×48×48×5 | 32 / 3,461 | 3,461 | 1.692e-4 |
+
+  The tile-crossing dimensions are `2*16+1`, `16+1`, `3*16`, so every gradient
+  matmul spans several of the kernel's 16-wide tiles and leaves a partial tail.
+  Stage 1 sweeps every parameter on the small fixtures and samples on a fixed
+  stride on the large ones, where a full sweep is affordable in release and not
+  in debug.
 - 0.8220 is what 100 full-batch epochs at lr=0.5 buys on this task. It is a
   fixed budget, not a tuned result, and not the architecture's ceiling.
 
