@@ -493,8 +493,13 @@ pub fn select_mask(
 /// the clustering invariant to per-point rescaling. That is the property the
 /// routed selector needs and the nearest-neighbour selector lacks.
 ///
-/// ponytail: O(n^2) edge enumeration plus a sort. Fine at the sequence lengths
-/// this reference kernel targets; a real router would use a neighbour graph.
+/// ponytail: O(n^2) edge enumeration plus a sort. This is not the binding term —
+/// `sparse_attention` takes a dense `[seq, seq]` mask, so the kernel around this
+/// call is already Theta(seq^2) in both time and memory, and a neighbour graph
+/// here would save nothing. Trigger: revisit when the mask stops being
+/// materialised dense (a block or index list instead of `[seq, seq]` bools), at
+/// which point the quadratic edge scan becomes the ceiling and a k-NN graph over
+/// `prepared` is the upgrade.
 pub fn single_linkage_clusters(
     points: &[f64],
     count: usize,
