@@ -846,6 +846,96 @@ fn the_backward_kernels_write_no_gradient_outside_the_schedule() {
     }
 }
 
+/// f32 gradient error must stay bounded as the sequence grows.
+///
+/// Every other backward test here runs at 32 or 48 positions, where a softmax
+/// sums few enough terms that f32 accumulation is not under pressure. The
+/// ablation in `selector_ablation` runs at 512, and this crate has already
+/// recorded "verified at small sizes" as insufficient once — the forward kernel
+/// needed a fixture with large logits before a mutant that survived everything
+/// else would die.
+///
+/// The concern is specific. `attention_row_stats` sums a denominator over every
+/// scheduled column, and `dk` and `dv` sum over every query row that sees a
+/// column. Both grow linearly in the sequence, and a naive f32 sum accumulates
+/// error as roughly the square root of the term count under random signs and
+/// linearly in the worst case. Whether that matters at 512 is a measurement, not
+/// a deduction.
+///
+/// The assertion is deliberately generous. What would be a finding is error
+/// growing faster than the sequence — the number to watch is the ratio between
+/// consecutive rows, not the absolute value.
+#[test]
+#[cfg_attr(not(feature = "gpu"), ignore)]
+fn backward_error_stays_bounded_as_the_sequence_grows() {
+    let ctx = require_context();
+    let block_size = 8;
+    let head_dim = 16;
+
+    let mut worst_by_seq = Vec::new();
+
+    for seq in [64usize, 128, 256, 512] {
+        let fixture = Fixture::new(seq, head_dim, 101 + seq as u64);
+        let d_out = deterministic_fill(seq * head_dim, 211 + seq as u64);
+        let schedule = dense_causal_block_schedule(seq / block_size);
+
+        let (dq, dk, dv) = ctx
+            .scheduled_attention_backward_resident(
+                &to_f32(&fixture.q),
+                &to_f32(&fixture.k),
+                &to_f32(&fixture.v),
+                seq,
+                head_dim,
+                &schedule,
+                block_size,
+                &to_f32(&d_out),
+            )
+            .expect("backward dispatch");
+
+        let reference = scheduled_attention_backward(
+            &fixture.q, &fixture.k, &fixture.v, seq, head_dim, &schedule, block_size, &d_out,
+        )
+        .expect("valid launch");
+
+        let mut worst = 0.0f64;
+        for (resident, expected) in [
+            (&dq, &reference.dq),
+            (&dk, &reference.dk),
+            (&dv, &reference.dv),
+        ] {
+            let got = ctx.read(resident).expect("read");
+            for (&g, &r) in got.iter().zip(expected) {
+                assert!(g.is_finite(), "seq={seq}: non-finite gradient {g}");
+                worst = worst.max((g as f64 - r).abs());
+            }
+        }
+
+        println!("  seq {seq:>4}  worst |gpu - cpu| across dq, dk, dv: {worst:.3e}");
+        worst_by_seq.push((seq, worst));
+
+        assert!(
+            worst <= TOL,
+            "seq={seq}: worst gradient disagreement {worst:.3e} exceeds {TOL:.0e}"
+        );
+    }
+
+    // Growth, not magnitude, is the property worth pinning. Eight times the
+    // sequence must not cost more than sixty-four times the error: that permits
+    // quadratic growth and rules out anything worse, which is the regime where
+    // f32 would stop being usable at longer sequences than these.
+    let (first_seq, first) = worst_by_seq[0];
+    let (last_seq, last) = worst_by_seq[worst_by_seq.len() - 1];
+    let length_ratio = last_seq as f64 / first_seq as f64;
+    let error_ratio = last / first.max(f64::MIN_POSITIVE);
+
+    assert!(
+        error_ratio <= length_ratio * length_ratio,
+        "error grew {error_ratio:.1}x over a {length_ratio:.0}x longer sequence, \
+         which is faster than quadratic; f32 accumulation is the limit here \
+         rather than a fixed tolerance"
+    );
+}
+
 /// The host's ceilings must equal the shader's.
 ///
 /// They are declared twice because WGSL cannot import a Rust constant. If they
