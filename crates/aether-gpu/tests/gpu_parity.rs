@@ -613,6 +613,57 @@ fn adam_normalises_away_the_gradient_scale() {
     );
 }
 
+/// Epsilon must be added to `sqrt(vhat)`, not folded inside the root.
+///
+/// At ordinary gradient magnitudes the two forms are indistinguishable: with
+/// `vhat` around 1e-4 they differ by roughly 5e-5 relative, which sits inside
+/// any tolerance the other Adam tests can justify, and a mutation run confirmed
+/// `sqrt(vhat + eps)` escaped every suite.
+///
+/// The difference is only visible where `vhat` is comparable to epsilon. With a
+/// gradient of 1e-6 the corrected second moment is 1e-12, so `sqrt(vhat)` is
+/// 1e-6 and epsilon is a one percent correction outside the root -- while
+/// inside it, `sqrt(1e-12 + 1e-8)` is about 1e-4, a hundredfold larger
+/// denominator and a hundredfold smaller step.
+///
+/// This is the general shape of an epsilon-placement bug: invisible in the
+/// regime the code normally runs in, decisive in the regime epsilon exists for.
+#[test]
+fn adams_epsilon_sits_outside_the_square_root() {
+    let Some(ctx) = context() else { return };
+
+    let n = 8;
+    let lr = 0.1f32;
+    let g = 1e-6f32;
+
+    let gp = ctx.upload(&vec![0.0f32; n], 1, n).expect("params");
+    let gg = ctx.upload(&vec![g; n], 1, n).expect("grad");
+    let mut state = ctx.adam_state(&gp).expect("state");
+
+    let out = ctx
+        .adam_update_resident(&gp, &gg, &mut state, lr)
+        .expect("adam");
+    let got = ctx.read(&out).expect("read");
+
+    // Step 1, bias-corrected: mhat = g, vhat = g^2, so sqrt(vhat) = g.
+    let correct = -(lr as f64) * (g as f64) / (g as f64 + 1e-8);
+    let inside = -(lr as f64) * (g as f64) / ((g as f64).powi(2) + 1e-8).sqrt();
+
+    for (i, v) in got.iter().enumerate() {
+        let d_correct = ((*v as f64) - correct).abs();
+        let d_inside = ((*v as f64) - inside).abs();
+        assert!(
+            d_correct < d_inside,
+            "index {i}: step {v} is closer to the epsilon-inside-root value \
+             {inside:.6e} than to the correct {correct:.6e}"
+        );
+        assert!(
+            d_correct / correct.abs() < 1e-3,
+            "index {i}: step {v} differs from the expected {correct:.6e}"
+        );
+    }
+}
+
 #[test]
 fn adam_rejects_state_sized_for_a_different_parameter_count() {
     let Some(ctx) = context() else { return };
