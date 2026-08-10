@@ -146,13 +146,32 @@ for entry in "${mutants[@]}"; do
 
     # A mutant that fails to compile is caught: the change is not a silent
     # behaviour difference, which is the class this harness is looking for.
+    #
+    # Reported as failing/total rather than as a verdict. "CAUGHT" answers
+    # whether a defect is detected; the fraction answers how much of the suite
+    # notices, which is what the README's per-mutant counts claim and what a bare
+    # pass/fail cannot check. A defect caught by one test of twelve is one
+    # rewrite away from being caught by none, and reads identically to a defect
+    # caught by all twelve until the fraction is printed.
     any_caught=0
     printf '%-58s' "$name"
     for suite in "${suites[@]}"; do
-        if cargo test -p aether-core --test "$suite" >/dev/null 2>&1; then
+        out="$(cargo test -p aether-core --test "$suite" 2>&1)"
+        if printf '%s' "$out" | grep -q "test result: ok"; then
             printf ' %-12s' "survives"
         else
-            printf ' %-12s' "CAUGHT"
+            # `N passed; M failed` is absent when the mutant does not compile,
+            # which is a real distinction: a build failure is caught by the type
+            # system rather than by any assertion.
+            counts="$(printf '%s' "$out" | grep -oE '[0-9]+ passed; [0-9]+ failed' | head -1)"
+            if [ -z "$counts" ]; then
+                printf ' %-12s' "build"
+            else
+                passed="${counts%% passed;*}"
+                failed="${counts##*; }"
+                failed="${failed%% failed}"
+                printf ' %-12s' "$failed/$((passed + failed))"
+            fi
             any_caught=1
         fi
     done

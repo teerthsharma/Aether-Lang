@@ -1769,20 +1769,37 @@ The prior six example tests missed two of three defects **entirely**. That is th
 > injects all three, alongside nineteen covering the schedule, the salience
 > mechanism and the attention backward pass, and reports which suites catch each.
 >
-> Re-running them found one of the three had stopped being caught. An absolute
-> `+0.001` on the filtration's admission test survived **every suite in the
-> workspace**. The cap was not untested — `a_scaled_radius_cap_selects_the_same_complex`
-> exercises it at 1.2 and at 1.2 × 6, and an absolute epsilon breaks exactly the
-> proportionality that test asserts. It survived because on a twelve-point circle
-> no pairwise distance falls in the thousandth of a unit above either cap. The
-> property was right and the fixture never put it under load.
+> The harness reports how many tests in each suite fail, not just whether one
+> does, so the fractions above are checkable rather than remembered. Two of the
+> three reproduce exactly — the suite has since gained a test, so the
+> denominators moved:
 >
-> That is this section's own lesson arriving late and pointed at itself: *test
-> fixtures chosen for convenience rather than for discrimination produce suites
-> that pass and prove nothing.* `an_edge_just_beyond_the_radius_cap_is_excluded`
-> places one distance exactly on the cap and one 5×10⁻⁴ above it, so the boundary
-> is the only thing the answer depends on, and carries a control that raises the
-> cap to confirm the merge does happen. With it, **0 of 22 mutants escape**.
+> | Injected defect | claimed | measured now |
+> |---|---|---|
+> | Triangle filtration drops one of three edges | 4 / 11 | **4 / 12** |
+> | Column reduction terminates after one operation | 7 / 11 | **7 / 12** |
+> | Hardcoded `+0.001` absolute epsilon in the filtration | 4 / 11 | **1 / 12** |
+>
+> The third had stopped being caught entirely. Before the test named below it
+> survived **every suite in the workspace**, and the single test catching it now
+> is that one.
+>
+> The cause is not a weak assertion. Ten of the twelve tests build their config
+> from a shared helper that sets `max_radius: f64::INFINITY`, and
+> `INFINITY + 0.001 == INFINITY` — for those ten the mutant is not merely
+> undetected, it is *not a mutation at all*. Only two tests set a finite cap, and
+> the older one, `a_scaled_radius_cap_selects_the_same_complex`, exercises it at
+> 1.2 and 1.2 × 6 where no pairwise distance on a twelve-point circle falls in the
+> thousandth of a unit above either. A defect that four tests once caught is now
+> unreachable for ten of them, and that happened without any assertion being
+> weakened — the default config drifted underneath them.
+>
+> This section's own lesson, arriving late and pointed at itself: *test fixtures
+> chosen for convenience rather than for discrimination produce suites that pass
+> and prove nothing.* `an_edge_just_beyond_the_radius_cap_is_excluded` places one
+> distance exactly on the cap and one 5×10⁻⁴ above it, so the boundary is the only
+> thing the answer depends on, with a control raising the cap to confirm the merge
+> does happen. With it, **0 of 22 mutants escape**.
 
 **Diagram metrics** — 5 defects, and this is the part I did not enjoy:
 
