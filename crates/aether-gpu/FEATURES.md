@@ -81,10 +81,27 @@ survives what the absolutes do not — and that was asserted rather than measure
 It is wrong: the two terms drift independently, so dividing them compounds the
 error instead of cancelling it.
 
-Raising the CPU repetitions from 3 to 9 made the spread *worse*, which rules out
-sampling as the cause and points at the machine: these were taken on a laptop
-that had been running GPU benchmarks continuously for hours, so thermal state
-and contention dominate.
+Three attempts to stabilise it, none of which worked:
+
+| attempt | rationale | ratio spread |
+|---|---|---:|
+| baseline, 3 CPU reps | — | 96% |
+| 9 CPU reps | a median of three is a poor estimator | worse |
+| paired, interleaved | each pair sees the same thermal state, so dividing within a pair cancels drift | **130%** |
+
+Pairing is the statistically correct design for a ratio and it made things
+worse, which is the informative part: **if the noise were slow thermal drift,
+pairing would have cancelled it.** It did not, so the variance lives at a
+shorter timescale than a single measurement pair — GPU scheduling, driver
+behaviour, or the OS moving the process between cores.
+
+The interleaved measurement is kept anyway. It is the right design, and the
+reason to hold it is that it is correct, not that it is faster; reverting to a
+method known to be worse because a better one did not help here would be
+optimising the number rather than the measurement.
+
+The practical conclusion is that this machine cannot produce a trustworthy
+magnitude, and no amount of method fixes that from inside the benchmark.
 
 What this means for the figures quoted here:
 
