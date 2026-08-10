@@ -666,6 +666,270 @@ fn the_gpu_two_layer_backward_matches_the_reference_gradients() {
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
+// Tile boundaries inside the gradient path
+//
+// Every check above runs batch 5, input 3, hidden 4 -- all below the kernel's
+// 16-wide tile, so no gradient matmul ever spans more than one tile and no
+// dimension has a partial tail tile.
+//
+// That is a demonstrated blind spot rather than a hypothetical one. A mutation
+// run found `matmul_tiled` missing its second barrier passed every test while
+// the largest case was 64x64x64, and failed once the case grew to 128x512x128.
+// A suite whose sizes are all small does not test less; it reports a clean pass
+// on a kernel that computes the wrong thing.
+//
+// These sizes are chosen so every matmul in both passes spans several tiles and
+// leaves a partial tail: 33 = 2*16+1, 17 = 16+1, 48 = 3*16.
+// ═══════════════════════════════════════════════════════════════════════════════
+
+const BIG_BATCH: usize = 33;
+const BIG_IN: usize = 17;
+const BIG_HID: usize = 48;
+
+/// One hidden layer with runtime dimensions, so the same reference can be run
+/// at a size that crosses tile boundaries.
+struct RefDyn {
+    rows: usize,
+    ins: usize,
+    hid: usize,
+    w1: Vec<f64>,
+    b1: Vec<f64>,
+    w2: Vec<f64>,
+    b2: Vec<f64>,
+}
+
+impl RefDyn {
+    fn forward(&self, x: &[f64]) -> (Vec<f64>, Vec<f64>, Vec<f64>) {
+        let mut z1 = vec![0.0; self.rows * self.hid];
+        for i in 0..self.rows {
+            for j in 0..self.hid {
+                let mut s = self.b1[j];
+                for k in 0..self.ins {
+                    s += x[i * self.ins + k] * self.w1[k * self.hid + j];
+                }
+                z1[i * self.hid + j] = s;
+            }
+        }
+        let a1: Vec<f64> = z1.iter().map(|v| v.max(0.0)).collect();
+
+        let mut p = vec![0.0; self.rows];
+        for i in 0..self.rows {
+            let mut s = self.b2[0];
+            for j in 0..self.hid {
+                s += a1[i * self.hid + j] * self.w2[j];
+            }
+            p[i] = 1.0 / (1.0 + (-s).exp());
+        }
+        (z1, a1, p)
+    }
+
+    fn loss(&self, x: &[f64], y: &[f64]) -> f64 {
+        let (_, _, p) = self.forward(x);
+        p.iter()
+            .zip(y)
+            .map(|(p, t)| {
+                let p = p.clamp(1e-12, 1.0 - 1e-12);
+                -(t * p.ln() + (1.0 - t) * (1.0 - p).ln())
+            })
+            .sum::<f64>()
+            / self.rows as f64
+    }
+
+    fn grads(&self, x: &[f64], y: &[f64]) -> (Vec<f64>, Vec<f64>, Vec<f64>, Vec<f64>) {
+        let (z1, a1, p) = self.forward(x);
+
+        let dz2: Vec<f64> = p
+            .iter()
+            .zip(y)
+            .map(|(p, t)| (p - t) / self.rows as f64)
+            .collect();
+
+        let mut dw2 = vec![0.0; self.hid];
+        for j in 0..self.hid {
+            for i in 0..self.rows {
+                dw2[j] += a1[i * self.hid + j] * dz2[i];
+            }
+        }
+        let db2 = vec![dz2.iter().sum::<f64>()];
+
+        let mut dz1 = vec![0.0; self.rows * self.hid];
+        for i in 0..self.rows {
+            for j in 0..self.hid {
+                let gate = if z1[i * self.hid + j] > 0.0 { 1.0 } else { 0.0 };
+                dz1[i * self.hid + j] = dz2[i] * self.w2[j] * gate;
+            }
+        }
+
+        let mut dw1 = vec![0.0; self.ins * self.hid];
+        for k in 0..self.ins {
+            for j in 0..self.hid {
+                for i in 0..self.rows {
+                    dw1[k * self.hid + j] += x[i * self.ins + k] * dz1[i * self.hid + j];
+                }
+            }
+        }
+        let mut db1 = vec![0.0; self.hid];
+        for j in 0..self.hid {
+            for i in 0..self.rows {
+                db1[j] += dz1[i * self.hid + j];
+            }
+        }
+
+        (dw1, db1, dw2, db2)
+    }
+}
+
+fn big_fixture() -> (RefDyn, Vec<f64>, Vec<f64>) {
+    let x = fill(BIG_BATCH * BIG_IN, 121);
+    let y: Vec<f64> = (0..BIG_BATCH).map(|i| (i % 2) as f64).collect();
+    let net = RefDyn {
+        rows: BIG_BATCH,
+        ins: BIG_IN,
+        hid: BIG_HID,
+        w1: fill(BIG_IN * BIG_HID, 122),
+        b1: fill(BIG_HID, 123),
+        w2: fill(BIG_HID, 124),
+        b2: fill(1, 125),
+    };
+    (net, x, y)
+}
+
+/// Stage 1 at tile-crossing size, on a sampled subset.
+///
+/// The full sweep is 865 parameters and two forward passes each. Every one is
+/// affordable in release and none of them is in debug, where these tests
+/// normally run, so a fixed stride samples the space instead. The stride is
+/// deterministic, and it covers each parameter group.
+#[test]
+fn the_reference_gradient_holds_at_tile_crossing_sizes() {
+    let (mut net, x, y) = big_fixture();
+    let (dw1, db1, dw2, db2) = net.grads(&x, &y);
+
+    let (z1, _, _) = net.forward(&x);
+    assert!(
+        z1.iter().all(|z| z.abs() > 1e-4),
+        "a pre-activation sits on the ReLU kink at the large size"
+    );
+
+    let h = 1e-6;
+    let mut checked = 0;
+
+    for (which, analytic) in [(0usize, &dw1), (1, &db1), (2, &dw2), (3, &db2)] {
+        let stride = (analytic.len() / 8).max(1);
+        for idx in (0..analytic.len()).step_by(stride) {
+            let a = analytic[idx];
+            let orig = match which {
+                0 => net.w1[idx],
+                1 => net.b1[idx],
+                2 => net.w2[idx],
+                _ => net.b2[idx],
+            };
+            let set = |v: f64, n: &mut RefDyn| match which {
+                0 => n.w1[idx] = v,
+                1 => n.b1[idx] = v,
+                2 => n.w2[idx] = v,
+                _ => n.b2[idx] = v,
+            };
+
+            set(orig + h, &mut net);
+            let up = net.loss(&x, &y);
+            set(orig - h, &mut net);
+            let down = net.loss(&x, &y);
+            set(orig, &mut net);
+
+            let fd = (up - down) / (2.0 * h);
+            let denom = a.abs().max(fd.abs()).max(1e-8);
+            let rel = (a - fd).abs() / denom;
+
+            assert!(
+                rel < 1e-5,
+                "group {which} index {idx}: analytic {a:.12e} vs finite diff {fd:.12e}, \
+                 relative error {rel:.3e}"
+            );
+            checked += 1;
+        }
+    }
+
+    assert!(checked >= 20, "sampled only {checked} parameters");
+    println!("stage 1 (tile-crossing): {checked} sampled parameters matched");
+}
+
+/// Stage 2 at tile-crossing size: the full gradient, every entry.
+///
+/// This is the case the small fixtures cannot produce. Each matmul in the
+/// backward pass now spans several tiles with a partial tail, which is where a
+/// tiling defect lives.
+#[test]
+fn the_gpu_gradient_matches_the_reference_at_tile_crossing_sizes() {
+    let Some(ctx) = context() else { return };
+
+    let (net, x64, y64) = big_fixture();
+    let (r_dw1, r_db1, r_dw2, r_db2) = net.grads(&x64, &y64);
+
+    let f32v = |v: &[f64]| -> Vec<f32> { v.iter().map(|x| *x as f32).collect() };
+
+    let gx = ctx.upload(&f32v(&x64), BIG_BATCH, BIG_IN).expect("x");
+    let gy = ctx.upload(&f32v(&y64), BIG_BATCH, 1).expect("y");
+    let gw1 = ctx.upload(&f32v(&net.w1), BIG_IN, BIG_HID).expect("w1");
+    let gb1 = ctx.upload(&f32v(&net.b1), 1, BIG_HID).expect("b1");
+    let gw2 = ctx.upload(&f32v(&net.w2), BIG_HID, 1).expect("w2");
+    let gb2 = ctx.upload(&f32v(&net.b2), 1, 1).expect("b2");
+
+    let z1 = ctx.matmul_resident(&gx, &gw1).expect("z1");
+    let z1 = ctx.add_bias_resident(&z1, &gb1).expect("z1b");
+    let a1 = ctx.relu_resident(&z1).expect("a1");
+    let z2 = ctx.matmul_resident(&a1, &gw2).expect("z2");
+    let z2 = ctx.add_bias_resident(&z2, &gb2).expect("z2b");
+
+    let dz2 = ctx.sigmoid_bce_grad_resident(&z2, &gy).expect("dz2");
+    let a1t = ctx.transpose_resident(&a1).expect("a1t");
+    let dw2 = ctx.matmul_resident(&a1t, &dz2).expect("dw2");
+    let db2 = ctx.column_sums_resident(&dz2).expect("db2");
+
+    let w2t = ctx.transpose_resident(&gw2).expect("w2t");
+    let da1 = ctx.matmul_resident(&dz2, &w2t).expect("da1");
+    let dz1 = ctx.relu_backward_resident(&z1, &da1).expect("dz1");
+
+    let xt = ctx.transpose_resident(&gx).expect("xt");
+    let dw1 = ctx.matmul_resident(&xt, &dz1).expect("dw1");
+    let db1 = ctx.column_sums_resident(&dz1).expect("db1");
+
+    // Looser than the small fixtures because the reduction is now 33 terms deep
+    // instead of 5, so f32 accumulation drifts further from the f64 reference.
+    //
+    // Set from the observed worst case of 6.9e-5 with roughly an order of
+    // magnitude of headroom, not picked for comfort. The first draft used 1e-2,
+    // which is 145 times the observed error and would have accepted a gradient
+    // wrong by more than a percent -- a tolerance that loose is not a check,
+    // it is a formality that passes.
+    let tol = 1e-3;
+
+    let cmp = |name: &str, got: &GpuTensor, want: &[f64]| {
+        let g = ctx.read(got).expect("readback");
+        assert_eq!(g.len(), want.len(), "{name}: length");
+        let mut worst = 0.0f64;
+        for (i, (a, b)) in g.iter().zip(want).enumerate() {
+            let denom = (*b).abs().max(1e-5);
+            let rel = ((*a as f64) - b).abs() / denom;
+            worst = worst.max(rel);
+            assert!(
+                rel < tol,
+                "{name}[{i}]: gpu {a:.8e} vs reference {b:.8e}, relative error {rel:.3e}"
+            );
+        }
+        println!(
+            "{name}: {} entries, worst relative error {worst:.3e}",
+            g.len()
+        );
+    };
+
+    cmp("dw1", &dw1, &r_dw1);
+    cmp("db1", &db1, &r_db1);
+    cmp("dw2", &dw2, &r_dw2);
+    cmp("db2", &db2, &r_db2);
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
 // Softmax and categorical cross-entropy
 //
 // The binary path above shares no code with this one past the matmuls: a

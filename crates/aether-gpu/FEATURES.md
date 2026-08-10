@@ -299,10 +299,12 @@ Dispatch and allocation dominate below roughly 128×128.
   parity baseline, not a tuned BLAS. Ratios compare this crate's own two paths.
 - f32 only. `aether-core` computes in f64 on the CPU path, and nothing in
   `aether-core` routes through this crate yet.
-- Gradcheck covers both output heads, sigmoid/BCE and softmax/cross-entropy, and
-  both depths: one hidden layer for each head, plus the two-hidden-layer stack
-  the training examples actually run. 41 parameters through the stacked network,
-  matched against central differences and then against the GPU kernels.
+- Gradcheck covers both output heads, sigmoid/BCE and softmax/cross-entropy,
+  both depths (one hidden layer per head plus the two-layer stack the training
+  examples run), and both size regimes. The tile-crossing fixture is 33x17x48 —
+  `2*16+1`, `16+1`, `3*16` — so every gradient matmul spans several tiles and
+  leaves a partial tail. 913 gradient entries, worst relative error 6.9e-5
+  against a 1e-3 tolerance.
 - 0.8220 is what 100 full-batch epochs at lr=0.5 buys on this task. It is a
   fixed budget, not a tuned result, and not the architecture's ceiling.
 
