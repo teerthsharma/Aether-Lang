@@ -437,6 +437,55 @@ fn tensor_matmul_matches_the_cpu_path() {
     }
 }
 
+/// A non-contiguous tensor must read the same through the bridge as through
+/// `Tensor::matmul`.
+///
+/// Nothing in `aether-core` produces one today — `transpose` copies into a
+/// fresh contiguous tensor — so this fixture builds one by hand, swapping the
+/// strides to describe a column-major view of the same buffer.
+///
+/// The test exists because the failure it guards is silent. `Tensor::matmul`
+/// indexes through strides; a bridge that read the backing vector in order
+/// would return a different answer for the same input, and the only symptom
+/// would be a wrong number. Reading flat passes every contiguous test in this
+/// file.
+#[test]
+#[cfg_attr(not(feature = "gpu"), ignore = "needs a GPU adapter: --features gpu")]
+fn the_tensor_bridge_reads_through_strides_not_the_flat_buffer() {
+    use aether_core::ml::tensor::Tensor;
+
+    let ctx = require_context();
+
+    // A 2x3 laid out column-major: the buffer holds columns, and the strides
+    // say so. Reading it flat would transpose the operand.
+    let mut a = Tensor::new(&[1.0, 4.0, 2.0, 5.0, 3.0, 6.0], &[2, 3]);
+    a.strides = vec![1, 2];
+
+    let b = Tensor::new(&[1.0, 0.0, 0.0, 1.0, 0.0, 0.0], &[3, 2]);
+
+    let cpu = a.matmul(&b);
+    let gpu = tensor_matmul(&ctx, &a, &b).expect("bridge");
+
+    let c = cpu.data.borrow();
+    let g = gpu.data.borrow();
+
+    for (i, (x, y)) in g.iter().zip(c.iter()).enumerate() {
+        assert!(
+            (x - y).abs() < 1e-6,
+            "index {i}: bridge {x} vs Tensor::matmul {y}. The bridge is reading \
+             the buffer flat and ignoring the strides."
+        );
+    }
+
+    // And confirm the fixture is actually strided, so a future change to
+    // `Tensor::new` cannot quietly make this test contiguous and vacuous.
+    assert_ne!(
+        a.strides,
+        vec![3, 1],
+        "the fixture is contiguous; it no longer tests what it was written for"
+    );
+}
+
 /// Shapes the bridge cannot honour must be rejected, not silently reshaped.
 #[test]
 #[cfg_attr(not(feature = "gpu"), ignore = "needs a GPU adapter: --features gpu")]
