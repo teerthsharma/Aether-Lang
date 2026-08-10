@@ -40,6 +40,21 @@ restore() {
     touch "$shader"
 }
 
+# Restoring means `git checkout`, which discards uncommitted work in the shader.
+#
+# This is not hypothetical. Running the harness while a new kernel was written
+# but not yet committed deleted it: every mutation pattern then failed to match
+# because the code it targeted was gone, and the final clean-tree check failed
+# because the Rust side still referenced pipelines the shader no longer defined.
+# Nothing in the output said "your work was deleted"; it said the patterns did
+# not match, which reads as a harness bug rather than as data loss.
+if ! git diff --quiet -- "$shader" || ! git diff --cached --quiet -- "$shader"; then
+    echo "$shader has uncommitted changes." >&2
+    echo "This harness restores by 'git checkout', which would discard them." >&2
+    echo "Commit or stash the shader first." >&2
+    exit 101
+fi
+
 trap restore EXIT
 
 # name | perl expression applied to the whole file
@@ -52,6 +67,8 @@ mutants=(
 "sgd_update: ascends instead of descending|s/c\[idx\] = a\[idx\] - bitcast<f32>/c[idx] = a[idx] + bitcast<f32>/"
 "softmax_rows: max subtraction removed|s/let e = exp\(a\[base \+ j\] - mx\);/let e = exp(a[base + j]);/"
 "relu_backward: gates on the gradient not the pre-activation|s/if \(a\[idx\] > 0\.0\) \{/if (b[idx] > 0.0) {/"
+"adam_update: bias correction dropped|s/let mhat = b\[idx\] \/ \(1\.0 - pow\(ADAM_B1, t\)\);/let mhat = b[idx];/"
+"adam_update: epsilon inside the square root|s/sqrt\(vhat\) \+ ADAM_EPS/sqrt(vhat + ADAM_EPS)/"
 )
 
 # Without a GPU every test in both suites skips and returns success, so every

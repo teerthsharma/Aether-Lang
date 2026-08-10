@@ -477,6 +477,155 @@ fn sgd_rejects_a_gradient_of_the_wrong_length() {
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
+// Adam
+//
+// Checked against a CPU implementation of the same update rather than only for
+// plausible behaviour. Adam's characteristic defects -- a missing bias
+// correction, epsilon inside the square root instead of outside, a step counter
+// that does not advance -- all still train. They produce a different optimiser
+// that converges somewhere slightly worse, which no smoke test distinguishes
+// from an unlucky seed.
+// ═══════════════════════════════════════════════════════════════════════════════
+
+const B1: f64 = 0.9;
+const B2: f64 = 0.999;
+const EPS: f64 = 1e-8;
+
+/// The reference update, in f64, matching the kernel exactly.
+fn adam_cpu(params: &mut [f64], grads: &[f64], m: &mut [f64], v: &mut [f64], t: u32, lr: f64) {
+    for i in 0..params.len() {
+        m[i] = B1 * m[i] + (1.0 - B1) * grads[i];
+        v[i] = B2 * v[i] + (1.0 - B2) * grads[i] * grads[i];
+
+        let mhat = m[i] / (1.0 - B1.powi(t as i32));
+        let vhat = v[i] / (1.0 - B2.powi(t as i32));
+
+        params[i] -= lr * mhat / (vhat.sqrt() + EPS);
+    }
+}
+
+#[test]
+fn adam_matches_a_cpu_reference_over_many_steps() {
+    let Some(ctx) = context() else { return };
+
+    let n = 40;
+    let p0 = fill(n, 201);
+    let grads: Vec<Vec<f32>> = (0..12).map(|s| fill(n, 300 + s)).collect();
+    let lr = 0.01f32;
+
+    let mut gp = ctx.upload(&p0, 1, n).expect("params");
+    let mut state = ctx.adam_state(&gp).expect("state");
+
+    let mut cp: Vec<f64> = p0.iter().map(|v| *v as f64).collect();
+    let mut cm = vec![0.0f64; n];
+    let mut cv = vec![0.0f64; n];
+
+    for (step, g) in grads.iter().enumerate() {
+        let gg = ctx.upload(g, 1, n).expect("grad");
+        gp = ctx
+            .adam_update_resident(&gp, &gg, &mut state, lr)
+            .expect("adam");
+
+        let g64: Vec<f64> = g.iter().map(|v| *v as f64).collect();
+        adam_cpu(&mut cp, &g64, &mut cm, &mut cv, step as u32 + 1, lr as f64);
+
+        assert_eq!(state.step(), step as u32 + 1, "step counter must advance");
+    }
+
+    let got = ctx.read(&gp).expect("read");
+    let mut worst = 0.0f64;
+    for i in 0..n {
+        let rel = ((got[i] as f64) - cp[i]).abs() / cp[i].abs().max(1e-4);
+        worst = worst.max(rel);
+    }
+
+    assert!(
+        worst < 5e-3,
+        "worst relative divergence from the CPU reference after 12 steps: {worst:e}"
+    );
+    println!("adam: 12 steps, worst relative divergence {worst:.3e}");
+}
+
+/// The first step is where bias correction is visible and nowhere else.
+///
+/// With both moments at zero, the uncorrected first moment is `0.1 * g` and the
+/// uncorrected second is `0.001 * g^2`, so an implementation without correction
+/// takes a first step roughly `sqrt(0.001)/0.1` times the right size. The
+/// correction decays as `t` grows, so a comparison after many steps cannot see
+/// whether it is there.
+#[test]
+fn the_first_adam_step_applies_bias_correction() {
+    let Some(ctx) = context() else { return };
+
+    let n = 8;
+    let params = vec![0.0f32; n];
+    let grads = vec![1.0f32; n];
+
+    let gp = ctx.upload(&params, 1, n).expect("params");
+    let gg = ctx.upload(&grads, 1, n).expect("grad");
+    let mut state = ctx.adam_state(&gp).expect("state");
+
+    let updated = ctx
+        .adam_update_resident(&gp, &gg, &mut state, 0.1)
+        .expect("adam");
+    let got = ctx.read(&updated).expect("read");
+
+    // With correction, mhat = g and vhat = g^2, so the step is exactly lr for a
+    // unit gradient. Without it the step would be about 0.0316 * lr.
+    for (i, v) in got.iter().enumerate() {
+        assert!(
+            (v + 0.1).abs() < 1e-4,
+            "index {i}: first step gave {v}, expected -0.1. A step near -0.00316 \
+             means the bias correction is missing."
+        );
+    }
+}
+
+/// Adam's step size is nearly independent of gradient magnitude, which is the
+/// property that distinguishes it from SGD. Scaling every gradient by 100 must
+/// not scale the step by 100.
+#[test]
+fn adam_normalises_away_the_gradient_scale() {
+    let Some(ctx) = context() else { return };
+
+    let n = 16;
+    let small = vec![0.01f32; n];
+    let large = vec![1.0f32; n];
+
+    let step_for = |g: &Vec<f32>| -> f32 {
+        let gp = ctx.upload(&vec![0.0f32; n], 1, n).expect("params");
+        let gg = ctx.upload(g, 1, n).expect("grad");
+        let mut state = ctx.adam_state(&gp).expect("state");
+        let out = ctx
+            .adam_update_resident(&gp, &gg, &mut state, 0.1)
+            .expect("adam");
+        ctx.read(&out).expect("read")[0]
+    };
+
+    let s_small = step_for(&small);
+    let s_large = step_for(&large);
+
+    // A hundredfold change in gradient must move the step by well under 2x.
+    let ratio = (s_small / s_large).abs();
+    assert!(
+        (0.5..2.0).contains(&ratio),
+        "gradients differing by 100x gave steps {s_small} and {s_large}, ratio {ratio}"
+    );
+}
+
+#[test]
+fn adam_rejects_state_sized_for_a_different_parameter_count() {
+    let Some(ctx) = context() else { return };
+
+    let p = ctx.upload(&fill(10, 211), 1, 10).expect("params");
+    let other = ctx.upload(&fill(4, 212), 1, 4).expect("other");
+    let g = ctx.upload(&fill(10, 213), 1, 10).expect("grad");
+
+    let mut state = ctx.adam_state(&other).expect("state");
+    assert!(ctx.adam_update_resident(&p, &g, &mut state, 0.01).is_err());
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
 // Softmax and categorical cross-entropy
 // ═══════════════════════════════════════════════════════════════════════════════
 

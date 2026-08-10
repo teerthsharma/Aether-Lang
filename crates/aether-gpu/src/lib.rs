@@ -136,8 +136,28 @@ pub struct GpuContext {
     sigmoid_bce_grad: wgpu::ComputePipeline,
     softmax_rows: wgpu::ComputePipeline,
     softmax_xent_grad: wgpu::ComputePipeline,
+    adam_moments: wgpu::ComputePipeline,
+    adam_update: wgpu::ComputePipeline,
     layout: wgpu::BindGroupLayout,
     pending: RefCell<Pending>,
+}
+
+/// Adam's per-parameter state: both moment estimates in one tensor.
+///
+/// Packed rather than held as two tensors because the bind group carries three
+/// storage buffers, and Adam touches parameters, gradients and both moments.
+/// First moment occupies `[0, n)`, second `[n, 2n)`.
+pub struct AdamState {
+    moments: GpuTensor,
+    step: u32,
+}
+
+impl AdamState {
+    /// How many updates have been applied. Bias correction depends on it, so it
+    /// is exposed rather than hidden.
+    pub fn step(&self) -> u32 {
+        self.step
+    }
 }
 
 /// A tensor that lives in GPU memory across operations.
@@ -269,6 +289,8 @@ impl GpuContext {
             sigmoid_bce_grad: build("sigmoid_bce_grad"),
             softmax_rows: build("softmax_rows"),
             softmax_xent_grad: build("softmax_xent_grad"),
+            adam_moments: build("adam_moments"),
+            adam_update: build("adam_update"),
             device,
             queue,
             info,
@@ -667,6 +689,82 @@ impl GpuContext {
             self.dims_of(logits),
             (logits.rows.div_ceil(64).max(1) as u32, 1, 1),
         );
+        Ok(out)
+    }
+
+    /// Zeroed Adam state sized for `param`.
+    ///
+    /// Both moments start at zero, which is what makes the bias correction
+    /// necessary: at step 1 the first moment is only `(1 - b1)` of the
+    /// gradient.
+    pub fn adam_state(&self, param: &GpuTensor) -> Result<AdamState, GpuError> {
+        let zeros = vec![0.0f32; param.len() * 2];
+        Ok(AdamState {
+            moments: self.upload(&zeros, 1, param.len() * 2)?,
+            step: 0,
+        })
+    }
+
+    /// One Adam step. Returns the updated parameters; `state` is advanced.
+    ///
+    /// Two dispatches: the moment update, then the parameter update. Both are
+    /// recorded into the open batch like any other resident operation.
+    pub fn adam_update_resident(
+        &self,
+        param: &GpuTensor,
+        grad: &GpuTensor,
+        state: &mut AdamState,
+        lr: f32,
+    ) -> Result<GpuTensor, GpuError> {
+        let n = param.len();
+
+        if grad.len() != n {
+            return Err(GpuError::ShapeMismatch(format!(
+                "param has {n} elements, grad has {}",
+                grad.len()
+            )));
+        }
+        if state.moments.len() != n * 2 {
+            return Err(GpuError::ShapeMismatch(format!(
+                "state holds {} elements, expected 2*{n} = {}",
+                state.moments.len(),
+                n * 2
+            )));
+        }
+
+        state.step += 1;
+
+        let next_moments = self.alloc(1, n * 2);
+        self.dispatch_resident(
+            &self.adam_moments,
+            &state.moments.buffer,
+            &grad.buffer,
+            &next_moments.buffer,
+            Dims {
+                m: 1,
+                k: state.step,
+                n: n as u32,
+                _pad: lr.to_bits(),
+            },
+            (n.div_ceil(256).max(1) as u32, 1, 1),
+        );
+
+        let out = self.alloc(param.rows, param.cols);
+        self.dispatch_resident(
+            &self.adam_update,
+            &param.buffer,
+            &next_moments.buffer,
+            &out.buffer,
+            Dims {
+                m: 1,
+                k: state.step,
+                n: n as u32,
+                _pad: lr.to_bits(),
+            },
+            (n.div_ceil(256).max(1) as u32, 1, 1),
+        );
+
+        state.moments = next_moments;
         Ok(out)
     }
 
