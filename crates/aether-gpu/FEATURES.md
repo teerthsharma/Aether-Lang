@@ -101,6 +101,38 @@ Square matmul, median of 20:
 | 512 | 71.191 | 3.286 | 2.496 | 1.929 |
 | 1024 | 3714.298 | 20.234 | 15.401 | 11.031 |
 
+## Mutation testing
+
+A suite nobody has mutated is a suite of unknown strength. Two defects injected
+into `shaders.wgsl`, one at a time, rebuilt, and run against both suites.
+
+| Injected defect | `gradcheck` | `gpu_parity` |
+|---|---|---|
+| `sigmoid_bce_grad` drops the `1/batch` scaling | **caught** — `dw1[0]` relative error 4.0 | survives |
+| `relu_backward` boundary `> 0.0` becomes `>= 0.0` | survives | **caught** — `relu_backward_is_zero_at_exactly_zero` |
+
+**Neither suite alone is sufficient**, and the reason is structural rather than
+accidental. Gradcheck samples random parameters, so a pre-activation never lands
+exactly on zero and the ReLU kink is never probed; the boundary case has to be
+asserted directly. Conversely the boundary test uses three hand-picked values
+and cannot detect a scaling error that multiplies every gradient uniformly.
+
+### A methodology trap worth recording
+
+The first attempt at the second mutant reported "survives" in both suites, and
+then a test failed *after the mutant was reverted* — which is not a coherent
+result and was the signal that the measurement, not the code, was wrong.
+
+Cause: the revert was `Copy-Item` from a backup taken before the mutation, which
+restores the backup's original modification time. That timestamp was older than
+the compiled artifact, so Cargo saw no reason to rebuild and the test binary
+still contained the mutant. The shader is pulled in with `include_str!`, so the
+staleness was invisible in `git diff`, which reported the working tree clean.
+
+Any mutation run on a file consumed through `include_str!` has to force the
+modification time forward, or verify the mutant is present in the built
+artifact rather than only in the source.
+
 ## Negative results
 
 **The distance kernel does not currently help the persistence engine.**
