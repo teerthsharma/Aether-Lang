@@ -127,9 +127,12 @@ pub fn bottleneck_distance(
 /// The optimal assignment is solved exactly by the Hungarian algorithm on the
 /// same `(n + m)` square cost matrix, so this is O((n + m)^3).
 ///
-/// ponytail: Hungarian is cubic. Fine for the diagram sizes this engine's caps
-/// admit (hundreds of bars). If diagrams reach thousands of bars, swap in an
-/// auction or Sinkhorn solver — the tests here pin the answer either way.
+/// ponytail: Hungarian is cubic. Bar count is bounded by `PersistenceConfig`'s
+/// `max_points`, which `persistence.rs` rejects past — 512 in the widest preset
+/// (`h0_only`), 128 in `h1_dense` — so `(n + m)` stays in the hundreds. Trigger:
+/// any preset's `max_points` raised past 2048, or a caller assembling diagrams
+/// outside those caps. Then swap in an auction or Sinkhorn solver — the tests
+/// here pin the answer either way.
 pub fn wasserstein_distance(
     left: &PersistenceDiagram,
     right: &PersistenceDiagram,
