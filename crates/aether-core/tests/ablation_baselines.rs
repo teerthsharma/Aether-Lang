@@ -16,9 +16,9 @@
 //! computed from either is meaningless.
 
 use aether_core::scheduled::{
-    block_mass_recovered, dense_causal_block_schedule, oracle_block_schedule,
-    random_block_schedule, schedule_budget, topology_block_schedule, BlockSchedule,
-    TopologyScheduleConfig,
+    block_mass_recovered, block_salience, dense_causal_block_schedule,
+    inverted_topology_block_schedule, oracle_block_schedule, random_block_schedule,
+    schedule_budget, topology_block_schedule, BlockSchedule, TopologyScheduleConfig,
 };
 
 fn fill(n: usize, seed: u64) -> Vec<f64> {
@@ -151,6 +151,57 @@ fn no_schedule_recovers_more_mass_than_the_oracle() {
             topo_recovered <= matched_ceiling + 1e-12,
             "seq={seq}: the topological schedule recovered {topo_recovered}, \
              above the oracle's {matched_ceiling} at its own budget"
+        );
+    }
+}
+
+/// The inverted selector must not select the block with no finite death.
+///
+/// `block_salience` marks exactly one block with 0: the component that survives
+/// to the end and never records a merge distance. Under the original ranking
+/// that sentinel sorts last and is never chosen, so it costs nothing. Reversed,
+/// 0 becomes the minimum and the block would be picked ahead of every real
+/// candidate — reading a marker for "undefined" as "least isolated".
+///
+/// The block is still reachable through the local window or a sink, so this
+/// checks that it is not selected *as salient*: it must be absent from rows that
+/// neither the window nor the sinks would have given it to.
+#[test]
+fn the_inverted_selector_ignores_the_block_with_no_finite_death() {
+    let seq = 64;
+    let head_dim = 8;
+    let block_size = 4;
+    let num_blocks = seq / block_size;
+    let keys = fill(seq * head_dim, 51);
+
+    let salience = block_salience(&keys, seq, head_dim, block_size).expect("valid blocking");
+    let survivor = (0..num_blocks)
+        .find(|&b| salience[b] == 0.0)
+        .expect("exactly one block never merges, and it scores 0");
+
+    let config = TopologyScheduleConfig {
+        block_size,
+        local_radius_blocks: 1,
+        sink_blocks: 1,
+        topk_topology_blocks: 3,
+    };
+    let inverted =
+        inverted_topology_block_schedule(&keys, seq, head_dim, config).expect("valid config");
+
+    for q_block in 0..num_blocks {
+        // Rows the fixed structure would hand the survivor to regardless of
+        // salience. Only the others say anything about the ranking.
+        let from_sink = survivor < config.sink_blocks;
+        let from_window = survivor + config.local_radius_blocks >= q_block && survivor <= q_block;
+        if from_sink || from_window {
+            continue;
+        }
+
+        assert!(
+            !inverted.row(q_block).contains(&survivor),
+            "row {q_block} selected block {survivor}, which has no finite death \
+             time. Its salience of 0 is a sentinel, and the inverted ranking has \
+             read it as the smallest real score."
         );
     }
 }
