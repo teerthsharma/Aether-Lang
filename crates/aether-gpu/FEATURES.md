@@ -159,6 +159,41 @@ rather than a generic mismatch, which is worth reading off the failure message:
 a relative error near 2 means the direction is wrong, near `batch - 1` means the
 scale is.
 
+### The remaining kernels
+
+Seven more defects, one per previously-unmutated kernel, run through a harness
+that patches the shader, forces the modification time forward, runs each suite
+separately, and restores from git.
+
+| Injected defect | `gpu_parity` | `gradcheck` |
+|---|---|---|
+| `transpose` output index swapped | survives | **caught** |
+| `column_sums` skips the first row | survives | **caught** |
+| `matmul` reads A transposed | **caught** | survives |
+| `matmul_tiled` second barrier removed | **caught** | survives |
+| `pairwise_sqdist` distance not squared | **caught** | survives |
+| `sgd_update` ascends instead of descending | **caught** | survives |
+| `softmax_rows` max subtraction removed | **caught** | survives |
+
+**Every defect is now caught by at least one suite. Two were not, before this
+run added tests for them.**
+
+**`sgd_update` ascending escaped everything.** No test asserted the direction of
+a parameter update, and both gradient checks stop at the gradients without ever
+applying one. The optimizer could have been performing gradient ascent and
+thirty tests would have reported success; only the training examples would have
+diverged, and nothing under `cargo test` runs those. Five tests now cover it:
+the exact arithmetic, a direction property over 64 random pairs, `lr = 0` as a
+no-op, linear scaling in the rate, and length mismatch rejection.
+
+**`matmul_tiled` without its second barrier escaped at 64x64x64 and fails at
+128x512x128.** The size is the whole finding. At 32 tile iterations across 64
+concurrent workgroups the race surfaces; below that the suite reported a clean
+pass on a kernel with a data race in it. A suite whose largest case is small
+does not test less, it reports the wrong answer. Catching it at all is a
+property of this adapter's scheduling — a missing barrier stays undefined
+behaviour whether or not a given GPU exposes it.
+
 **Neither suite alone is sufficient**, and the reason is structural rather than
 accidental. Gradcheck samples random parameters, so a pre-activation never lands
 exactly on zero and the ReLU kink is never probed; the boundary case has to be

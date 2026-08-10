@@ -248,6 +248,59 @@ fn the_tiled_kernel_matches_the_cpu_reference() {
     }
 }
 
+/// Many tile iterations over many workgroups.
+///
+/// The tiled kernel writes into workgroup memory, reads it, then overwrites it
+/// on the next iteration. The barrier after the read is what stops the next
+/// iteration's writes from racing the current reads. A mutation run showed that
+/// removing it escaped every suite when the largest case was 64x64x64. This
+/// test raises the work until the race surfaces: k=512 is 32 tile iterations
+/// and a 128x128 output is 64 concurrent workgroups, and at that size the
+/// barrier-free kernel fails here.
+///
+/// The size is the point. The same defect is invisible at 64x64x64, so a suite
+/// whose largest case is small does not merely test less -- it reports a clean
+/// pass on a kernel with a data race in it. That the race is caught at all is a
+/// property of this adapter and this scheduling; a missing barrier remains
+/// undefined behaviour, and this test is evidence of the defect, not a licence
+/// to rely on the omission being detectable everywhere.
+#[test]
+fn the_tiled_kernel_is_correct_across_many_tile_iterations() {
+    let Some(ctx) = context() else { return };
+
+    // k = 512 is 32 tile iterations; 128x128 output is 64 concurrent workgroups.
+    let (m, k, n) = (128, 512, 128);
+    let a = fill(m * k, 81);
+    let b = fill(k * n, 82);
+
+    let ga = ctx.upload(&a, m, k).expect("upload");
+    let gb = ctx.upload(&b, k, n).expect("upload");
+    let gpu = ctx
+        .read(&ctx.matmul_resident(&ga, &gb).expect("tiled"))
+        .expect("read");
+
+    let cpu = cpu_matmul(&a, &b, m, k, n);
+    let tol = tolerance(k);
+    let worst = gpu
+        .iter()
+        .zip(&cpu)
+        .map(|(g, c)| (g - c).abs())
+        .fold(0.0f32, f32::max);
+
+    assert!(worst <= tol, "{m}x{k}x{n}: worst {worst:e} > tol {tol:e}");
+
+    // Repeat: a race is probabilistic, and one clean pass is weak evidence.
+    for run in 0..4 {
+        let again = ctx
+            .read(&ctx.matmul_resident(&ga, &gb).expect("tiled"))
+            .expect("read");
+        assert_eq!(
+            gpu, again,
+            "run {run} diverged, which would indicate a race"
+        );
+    }
+}
+
 /// A chain of resident operations must equal the same chain done through the
 /// upload-and-read-back API. This is what licenses the training loop to keep
 /// intermediates on the device.
@@ -297,6 +350,130 @@ fn a_resident_matmul_rejects_disagreeing_inner_dimensions() {
         ctx.matmul_resident(&a, &b).is_err(),
         "2x3 by 4x2 has no valid product and must be an error"
     );
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// The optimizer
+//
+// A mutation run found that flipping `sgd_update` from descent to ascent
+// escaped every suite: no test asserted the direction of the parameter update,
+// and both gradient checks stop at the gradients without ever applying one.
+// The training examples would have diverged, but nothing under `cargo test`
+// would have said so.
+// ═══════════════════════════════════════════════════════════════════════════════
+
+#[test]
+fn sgd_subtracts_the_scaled_gradient() {
+    let Some(ctx) = context() else { return };
+
+    let params = ctx.upload(&[1.0, 2.0, 3.0, -1.0], 1, 4).expect("params");
+    let grads = ctx.upload(&[0.5, -1.0, 2.0, 0.0], 1, 4).expect("grads");
+
+    let updated = ctx
+        .sgd_update_resident(&params, &grads, 0.1)
+        .expect("update");
+    let got = ctx.read(&updated).expect("read");
+
+    // p - lr*g, elementwise, by hand.
+    let want = [
+        1.0 - 0.1 * 0.5,  // 0.95
+        2.0 - 0.1 * -1.0, // 2.10
+        3.0 - 0.1 * 2.0,  // 2.80
+        -1.0 - 0.1 * 0.0, // -1.00
+    ];
+
+    for (i, (g, w)) in got.iter().zip(&want).enumerate() {
+        assert!(
+            (g - w).abs() < 1e-6,
+            "index {i}: got {g}, expected {w}. A sign here is the difference \
+             between gradient descent and gradient ascent."
+        );
+    }
+}
+
+/// The update must move against the gradient, for any gradient. Stated as a
+/// property rather than a fixture so it holds beyond the four values above.
+#[test]
+fn sgd_moves_every_parameter_against_its_gradient() {
+    let Some(ctx) = context() else { return };
+
+    let p_host = fill(64, 71);
+    let g_host = fill(64, 72);
+
+    let params = ctx.upload(&p_host, 8, 8).expect("params");
+    let grads = ctx.upload(&g_host, 8, 8).expect("grads");
+
+    let updated = ctx
+        .sgd_update_resident(&params, &grads, 0.25)
+        .expect("update");
+    let got = ctx.read(&updated).expect("read");
+
+    for i in 0..64 {
+        let delta = got[i] - p_host[i];
+        if g_host[i].abs() < 1e-6 {
+            continue;
+        }
+        assert!(
+            delta * g_host[i] < 0.0,
+            "index {i}: gradient {} and step {delta} share a sign, which is ascent",
+            g_host[i]
+        );
+    }
+}
+
+/// A zero learning rate must be a no-op. Catches a rate that is ignored or
+/// hardcoded, which a single non-zero rate cannot distinguish from correct.
+#[test]
+fn a_zero_learning_rate_leaves_parameters_untouched() {
+    let Some(ctx) = context() else { return };
+
+    let p_host = fill(32, 73);
+    let params = ctx.upload(&p_host, 4, 8).expect("params");
+    let grads = ctx.upload(&fill(32, 74), 4, 8).expect("grads");
+
+    let updated = ctx
+        .sgd_update_resident(&params, &grads, 0.0)
+        .expect("update");
+    let got = ctx.read(&updated).expect("read");
+
+    assert_eq!(got, p_host, "lr=0 must leave every parameter unchanged");
+}
+
+/// Doubling the rate must double the step. Catches a rate applied at the wrong
+/// magnitude, which the direction property above cannot see.
+#[test]
+fn the_step_scales_linearly_with_the_learning_rate() {
+    let Some(ctx) = context() else { return };
+
+    let p_host = fill(16, 75);
+    let params = ctx.upload(&p_host, 4, 4).expect("params");
+    let grads = ctx.upload(&fill(16, 76), 4, 4).expect("grads");
+
+    let one = ctx
+        .read(&ctx.sgd_update_resident(&params, &grads, 0.1).expect("u1"))
+        .expect("r1");
+    let two = ctx
+        .read(&ctx.sgd_update_resident(&params, &grads, 0.2).expect("u2"))
+        .expect("r2");
+
+    for i in 0..16 {
+        let step_one = one[i] - p_host[i];
+        let step_two = two[i] - p_host[i];
+        assert!(
+            (step_two - 2.0 * step_one).abs() < 1e-5,
+            "index {i}: doubling the rate gave {step_two} against {step_one} doubled"
+        );
+    }
+}
+
+#[test]
+fn sgd_rejects_a_gradient_of_the_wrong_length() {
+    let Some(ctx) = context() else { return };
+
+    let params = ctx.upload(&fill(12, 77), 3, 4).expect("params");
+    let grads = ctx.upload(&fill(8, 78), 2, 4).expect("grads");
+
+    assert!(ctx.sgd_update_resident(&params, &grads, 0.1).is_err());
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
