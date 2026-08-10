@@ -36,6 +36,57 @@ fn median_ms(reps: usize, mut f: impl FnMut()) -> f64 {
     t[t.len() / 2]
 }
 
+/// Median of per-pair ratios, alternating the two measurements.
+///
+/// Measuring every repetition of A and then every repetition of B puts any
+/// drift between the two blocks straight into the ratio. On a machine whose
+/// clocks move — a laptop under load, which is what produced every figure in
+/// this file — that is most of the noise, and it is a flaw in the measurement
+/// rather than in the thing measured.
+///
+/// **This did not work, and that is the useful part.** It was written expecting
+/// the interleaving to cancel drift within each pair. Measured across five runs
+/// at n=512, the paired ratio spread 130% against the unpaired 96% — worse, not
+/// better.
+///
+/// Pairing cancels noise that is slow relative to a pair. That it did not help
+/// rules that out: the variance lives at a shorter timescale than a single
+/// measurement, so GPU scheduling, driver behaviour or the OS moving the process
+/// between cores, none of which alternating touches.
+///
+/// Kept regardless. It is the correct design for estimating a ratio, and the
+/// reason to hold it is that it is right rather than that it helped here;
+/// reverting to a method known to be worse because a better one showed no gain
+/// would be tuning the number rather than the measurement.
+///
+/// Returns `(median ratio, median a, median b)`.
+fn paired_ratio(reps: usize, mut a: impl FnMut(), mut b: impl FnMut()) -> (f64, f64, f64) {
+    let mut ratios = Vec::with_capacity(reps);
+    let mut a_times = Vec::with_capacity(reps);
+    let mut b_times = Vec::with_capacity(reps);
+
+    for _ in 0..reps {
+        let t0 = Instant::now();
+        a();
+        let ta = t0.elapsed().as_secs_f64() * 1000.0;
+
+        let t1 = Instant::now();
+        b();
+        let tb = t1.elapsed().as_secs_f64() * 1000.0;
+
+        ratios.push(ta / tb);
+        a_times.push(ta);
+        b_times.push(tb);
+    }
+
+    let med = |v: &mut Vec<f64>| {
+        v.sort_by(f64::total_cmp);
+        v[v.len() / 2]
+    };
+
+    (med(&mut ratios), med(&mut a_times), med(&mut b_times))
+}
+
 fn fill64(n: usize, seed: u64) -> Vec<f64> {
     let mut s = seed.wrapping_mul(6364136223846793005).wrapping_add(1);
     (0..n)
@@ -113,17 +164,18 @@ fn main() {
             let _back: Vec<f64> = out.iter().map(|v| *v as f64).collect();
         });
 
-        // The shipped bridge, which is what a caller actually runs. It differs
-        // from `with_conv` above by gathering through the tensor's strides
-        // rather than reading its buffer flat -- necessary for correctness on a
-        // non-contiguous tensor, and a scalar loop on the contiguous path this
-        // will almost always take. Whether that cost matters is the question
-        // this column answers.
-        let bridge = median_ms(reps.max(10), || {
-            let _ = tensor_matmul(&ctx, &ta, &tb).expect("bridge");
-        });
-
-        let ratio_bridge = cpu / bridge;
+        // Paired: alternate the CPU and the bridge so each pair sees the same
+        // thermal state, and take the median of the per-pair ratios. This is
+        // the figure the recommendation rests on.
+        let (ratio_bridge, _, bridge) = paired_ratio(
+            reps,
+            || {
+                let _ = ta.matmul(&tb);
+            },
+            || {
+                let _ = tensor_matmul(&ctx, &ta, &tb).expect("bridge");
+            },
+        );
         if honest_crossover.is_none() && ratio_bridge > 1.0 {
             honest_crossover = Some(n);
         }
