@@ -15,14 +15,14 @@ wrong answer is worth keeping — but it means the current state has to be
 reconstructed from a sequence of corrections. This section is the state.
 
 **The backend works and nothing uses it.** 13 WGSL kernels, resident tensors,
-batched submission, 67 tests, 0 of 10 mutants escaping. No line of `aether-core`
+batched submission, 69 tests, 0 of 10 mutants escaping. No line of `aether-core`
 or `aether-lang` calls it.
 
 **Both integrations are measured; neither is made.**
 
 | candidate | verdict | why |
 |---|---|---|
-| `Tensor::matmul` | **worth doing above n=128** | 38× at n=512 with f64↔f32 conversion counted. Blocked on a semantic decision, not a measurement: may `ml::Tensor` drop to f32? |
+| `Tensor::matmul` | **done** — `tensor_matmul` | 38× at n=512 with f64↔f32 conversion counted. Opt-in per call site rather than a change to `Tensor`, so the f32 question is asked by the caller who knows what the result feeds |
 | `pairwise_sqdist` | **not worth doing at any size** | 90–100% of its time is transfer, and the persistence reduction is CPU-side so the matrix must come back |
 
 **One rule predicts both**, and is the single most portable thing here: with a

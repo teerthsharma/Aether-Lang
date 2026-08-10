@@ -1203,6 +1203,74 @@ fn storage_entry(binding: u32, read_only: bool) -> wgpu::BindGroupLayoutEntry {
 /// thing the GPU result is checked against, and a reference with its own
 /// optimisations is a reference that can be wrong in the same direction as the
 /// kernel it validates.
+/// `aether_core::ml::Tensor` matmul, computed on the GPU.
+///
+/// # Why this is a free function and not a change to `Tensor`
+///
+/// The measured case for a GPU path is strong — crossover at n=128, 38× at
+/// n=512 with the f64↔f32 conversion counted — and FEATURES.md recorded it as
+/// "blocked on a semantic decision: may `ml::Tensor` drop to f32?".
+///
+/// That framing was wrong. `aether-gpu` already depends on `aether-core`, so
+/// nothing about `Tensor` has to change: a caller who wants the GPU calls this,
+/// and a caller who does not keeps `Tensor::matmul` exactly as it is. The
+/// precision question does not need answering globally, because it is now asked
+/// per call site by whoever knows what the result feeds.
+///
+/// Making `Tensor::matmul` dispatch internally is the version that would have
+/// needed the decision, and would have imposed f32 on the persistence engine's
+/// consumers along with everyone else's.
+///
+/// # Precision
+///
+/// The product is computed in f32 and returned as f64. Relative error is about
+/// 5e-7 at n=256, growing as the square root of the reduction depth. Fine for
+/// training, clustering and anything that thresholds; not fine for a caller
+/// asserting at 1e-9, which includes parts of this workspace.
+///
+/// # When it pays
+///
+/// Above roughly n=128. Below that the transfers dominate and `Tensor::matmul`
+/// is faster. This function does not check the size and fall back, because a
+/// silent fallback makes a benchmark unreproducible: the caller asked for the
+/// GPU and should get it, or an error.
+pub fn tensor_matmul(
+    ctx: &GpuContext,
+    a: &aether_core::ml::tensor::Tensor,
+    b: &aether_core::ml::tensor::Tensor,
+) -> Result<aether_core::ml::tensor::Tensor, GpuError> {
+    if a.shape.len() != 2 || b.shape.len() != 2 {
+        return Err(GpuError::ShapeMismatch(format!(
+            "matmul needs two 2-D tensors, got {:?} and {:?}",
+            a.shape, b.shape
+        )));
+    }
+    if a.shape[1] != b.shape[0] {
+        return Err(GpuError::ShapeMismatch(format!(
+            "inner dimensions disagree: {:?} by {:?}",
+            a.shape, b.shape
+        )));
+    }
+
+    let (m, k, n) = (a.shape[0], a.shape[1], b.shape[1]);
+
+    // Borrow, convert, release. The borrows end before the dispatch so a caller
+    // can hold other references to the same tensors meanwhile.
+    let a32: Vec<f32> = {
+        let d = a.data.borrow();
+        d.iter().map(|v| *v as f32).collect()
+    };
+    let b32: Vec<f32> = {
+        let d = b.data.borrow();
+        d.iter().map(|v| *v as f32).collect()
+    };
+
+    let out = ctx.matmul(&a32, &b32, m, k, n)?;
+    let out64: Vec<f64> = out.iter().map(|v| *v as f64).collect();
+
+    Ok(aether_core::ml::tensor::Tensor::new(&out64, &[m, n]))
+}
+
 /// Squared Euclidean distance matrix on the CPU, the parity reference for
 /// [`GpuContext::pairwise_sqdist_resident`].
 pub fn cpu_pairwise_sqdist(points: &[f32], n: usize, d: usize) -> Vec<f32> {
