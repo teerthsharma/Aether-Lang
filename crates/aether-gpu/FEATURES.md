@@ -134,6 +134,22 @@ costs real power there: topological against local+sink scores 6.90 at 600 and
 38.29 at 2,400, so it is declined at the smaller size despite being a genuine
 effect. Losing a true positive is the price of not publishing a false one.
 
+Holm's step-down replaced Bonferroni to recover some of that cost. It holds the
+same family-wise rate while relaxing the bar as comparisons are consumed — 7.88
+on the strongest row down to 5.73 by the eighth — and is never stricter, so it
+dominates Bonferroni by construction.
+
+**On this data it changes nothing.** At 2,400 samples both procedures resolve the
+same seven comparisons and leave the same three unresolved. At 600 the effect
+Bonferroni gave away is `topological vs local+sink` at chi² 6.90, and Holm judges
+it at 6.96 — short by 0.06, so it is declined under both. The false positive that
+motivated the correction, `topological vs random` at 4.72, faces a relaxed bar of
+6.24 under Holm and is still declined.
+
+That the two corrections agree everywhere is worth more than the power Holm was
+adopted to recover: the finding does not depend on which multiple-comparison
+procedure is used, which was an open question and is now a measured one.
+
 The first configuration was worse than uninformative. With the planted query
 scaled at 6, the target key drew about 5% of the softmax against 127 distractors,
 dense scored 56.7%, and every arm sat near chance for a reason having nothing to
