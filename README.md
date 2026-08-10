@@ -167,7 +167,7 @@ That last row is the important one and it is deliberately in the table. External
 
 ## Abstract
 
-Aether-Lang is a research programming language in which persistent homology is a first-class primitive rather than a library call. The core insight is that many iterative numerical procedures have a *structural* fixed point that arrives before, and is more stable than, their scalar one: the Betti numbers of the residual point cloud stop changing while the loss is still fluctuating. Aether-Lang exposes that as control flow — a `seal until convergence(ε)` loop terminates on a topological invariant. The implementation is a bounded exact 𝔽₂ persistence engine over Vietoris–Rips and lazy-witness complexes, supporting H₀ through H₂, written in `no_std` Rust with `libm` as its only mathematical dependency, so the same code runs under a CLI on Windows and inside a bare-metal x86_64 kernel with no operating system beneath it. On top of the engine sit the standard diagram metrics (exact bottleneck via threshold-graph matching, exact p-Wasserstein via Hungarian assignment) and vectorizations (landscapes, images, persistent entropy). The engine is validated by 11 property tests encoding the Cohen-Steiner–Edelsbrunner–Harer stability theorem and six other invariants, mutation-tested against 8 injected defects, and checked against a closed-form ground truth it reproduces to 1e-12. Indexing the simplex-face lookup reduced the scale test suite from 29.07 s to 1.10 s, a 26× improvement on identical assertions. A port of the topology-derived sparse attention kernel merged as `triton-lang/kernels#22` reproduces its CSR block schedules exactly and achieves 58.8% block reduction at test scale.
+Aether-Lang is a research programming language in which persistent homology is a first-class primitive rather than a library call. The core insight is that many iterative numerical procedures have a *structural* fixed point that arrives before, and is more stable than, their scalar one: the Betti numbers of the residual point cloud stop changing while the loss is still fluctuating. Aether-Lang exposes that as control flow — a `seal until convergence(ε)` loop terminates on a topological invariant. The implementation is a bounded exact 𝔽₂ persistence engine over Vietoris–Rips and lazy-witness complexes, supporting H₀ through H₂, written in `no_std` Rust with `libm` as its only mathematical dependency, so the same code runs under a CLI on Windows and inside a bare-metal x86_64 kernel with no operating system beneath it. On top of the engine sit the standard diagram metrics (exact bottleneck via threshold-graph matching, exact p-Wasserstein via Hungarian assignment) and vectorizations (landscapes, images, persistent entropy). The engine is validated by 11 property tests encoding the Cohen-Steiner–Edelsbrunner–Harer stability theorem and six other invariants, mutation-tested against 8 injected defects, and checked against a closed-form ground truth it reproduces to 1e-12. Indexing the simplex-face lookup reduced the scale test suite from 29.07 s to 1.10 s, a 26× improvement on identical assertions. A port of the topology-derived sparse attention kernel merged as `triton-lang/kernels#22` reproduces its CSR block schedules exactly and achieves 58.8% block reduction at test scale — and a same-budget ablation against random and oracle selection finds that the schedule's *cost* reduction is real while its *selection* is not: the topological ranking recovers less attention mass than choosing blocks at random, the deficit widens as more budget is given to it, and inverting the ranking beats random by a margin that grows instead.
 
 ---
 
@@ -1722,6 +1722,29 @@ The port keeps the original's split, which is what makes each half checkable alo
 
 The upstream PR measured 56.6% at seq 1024 and 80.9% at seq 4096 on an RTX 4060, with 1.04×–3.48× sparse-vs-dense-CSR wall-clock. **Those timings are not reproduced here and are not claimed here.** This port is a scalar CPU kernel with no SIMD, no threading, no GPU. It reproduces the *answer* and the *block reduction*, not the *speed*.
 
+#### Whether the selection is any good — measured, and it is not
+
+Everything above is a statement about *cost*. A 58.8% block reduction says the schedule visits fewer blocks; it says nothing about whether the blocks it visits are the right ones. A schedule choosing blocks uniformly at random is also 58.8% cheaper, and a model trained on either still converges. Cost is evidence about sparsity and not about topology.
+
+The question that separates them is how much of the true attention mass each schedule keeps at an identical per-row budget, bracketed by random selection below and by an oracle that reads the dense scores above. Recovered mass, budget matched per row, `cargo run -p aether-gpu --example selector_ablation --release`:
+
+| seq | density | random | topological | oracle | placement |
+|---:|---:|---:|---:|---:|---:|
+| 64 | 72.2% | 0.8151 | 0.8475 | 0.9483 | 24.3% |
+| 128 | 36.8% | 0.4976 | 0.5674 | 0.6799 | 38.3% |
+| 256 | 20.8% | 0.3208 | 0.3711 | 0.4728 | 33.1% |
+| 512 | 12.0% | 0.2281 | 0.2337 | 0.3272 | **5.6%** |
+
+Placement is `(topological − random) / (oracle − random)` — the statistic every ablation here is reported against, defined in [Theory §12](#12-the-placement-statistic): the share of the achievable gain the selector captures. It collapses as the sequence lengthens, which is the regime sparse attention exists for. Holding seq at 512 and raising only `topk_topology_blocks` drives it **negative**, to −109% at top-k 32, where the selector recovers 0.7446 against random's 0.8643. Spending more budget on topology makes the schedule worse, and the same holds on i.i.d. keys, the control for a fixture that merely rewards locality.
+
+**The signal is real and its sign is reversed.** `block_salience` scores a block by H₀ death time under single-linkage merging, which measures how *isolated* it is. Attention mass concentrates where a key resembles the query, and a block unlike everything else is unlike the typical query too — the two rankings are anti-correlated by construction. Selecting the *lowest*-salience blocks at an identical budget beats random by a margin that grows with budget (26.9% at top-k 2, rising to 44.7% at 16), which is what an informative signal looks like.
+
+`topology_block_schedule` is left as it is. Flipping the ranking changes what the method is, and that belongs to whoever is making the claim rather than to the ablation that found it; `inverted_topology_block_schedule` sits beside it so the choice is explicit.
+
+Training does not rescue it either. With a query projection learned *through* the attention kernel — the concern being that a model could reshape its queries to suit whatever schedule it was handed — dense reaches 86% on an associative-recall task while every sparse arm plateaus between 56% and 61%, and the three sparse arms stay indistinguishable from one another. A model learns a great deal from blocks it can see and cannot learn its way to blocks it never sees.
+
+Full tables, controls and the failures behind them are in [`crates/aether-gpu/FEATURES.md`](crates/aether-gpu/FEATURES.md).
+
 ---
 
 ## Mutation Testing, Or How I Learned To Stop Trusting Green Checkmarks
@@ -2417,6 +2440,8 @@ reduction is CPU-side, so the matrix must come back. See
 **Attention results are synthetic.** Every ablation number above is measured on synthetic keys. Whether real attention key distributions carry H₀ structure is unmeasured, and it decides whether the routing result transfers at all.
 
 **The Triton port reproduces answers, not timings.** Scalar CPU, no SIMD, no threading, no GPU. The upstream 1.04×–3.48× figures were measured on an RTX 4060 this workspace cannot reach.
+
+**The block schedule's cost reduction is real and its selection is not.** At an identical per-row budget the topological ranking recovers less attention mass than choosing blocks at random, the deficit widens as more budget is given to it, and inverting the ranking beats random instead. Two synthetic fixtures, one machine; the shipped `topology_block_schedule` is unchanged, and the measurement is in [Scheduled attention](#scheduled-attention).
 
 **Per-block salience is order-dependent.** Under component-size ties the absorbed component is chosen by index order, so the same centroid scores differently depending on sequence position. The multiset is invariant. A fix needs a tie-break on centroid content.
 
