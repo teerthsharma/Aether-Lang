@@ -186,6 +186,7 @@ against, one level up.
 | `pairwise_sqdist` distance not squared | **caught** | survives |
 | `sgd_update` ascends instead of descending | **caught** | survives |
 | `softmax_rows` max subtraction removed | **caught** | survives |
+| `relu_backward` gates on the gradient, not the pre-activation | **caught** | **caught** |
 
 **Every defect is now caught by at least one suite. Two were not, before this
 run added tests for them.**
@@ -298,9 +299,10 @@ Dispatch and allocation dominate below roughly 128×128.
   parity baseline, not a tuned BLAS. Ratios compare this crate's own two paths.
 - f32 only. `aether-core` computes in f64 on the CPU path, and nothing in
   `aether-core` routes through this crate yet.
-- Gradcheck covers both output heads now, sigmoid/BCE and softmax/cross-entropy,
-  each through a one-hidden-layer network. The two-hidden-layer path used by the
-  training examples is covered only by the end-to-end accuracy match.
+- Gradcheck covers both output heads, sigmoid/BCE and softmax/cross-entropy, and
+  both depths: one hidden layer for each head, plus the two-hidden-layer stack
+  the training examples actually run. 41 parameters through the stacked network,
+  matched against central differences and then against the GPU kernels.
 - 0.8220 is what 100 full-batch epochs at lr=0.5 buys on this task. It is a
   fixed budget, not a tuned result, and not the architecture's ceiling.
 

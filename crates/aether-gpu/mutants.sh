@@ -51,6 +51,7 @@ mutants=(
 "pairwise_sqdist: distance not squared|s/sum = sum \+ delta \* delta;/sum = sum + delta;/"
 "sgd_update: ascends instead of descending|s/c\[idx\] = a\[idx\] - bitcast<f32>/c[idx] = a[idx] + bitcast<f32>/"
 "softmax_rows: max subtraction removed|s/let e = exp\(a\[base \+ j\] - mx\);/let e = exp(a[base + j]);/"
+"relu_backward: gates on the gradient not the pre-activation|s/if \(a\[idx\] > 0\.0\) \{/if (b[idx] > 0.0) {/"
 )
 
 # Without a GPU every test in both suites skips and returns success, so every
