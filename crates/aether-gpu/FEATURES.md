@@ -74,6 +74,54 @@ measures the schedule against the attention it approximates, not downstream task
 performance, and a selector can in principle lose mass and still serve a model
 well.
 
+### A trained model finds no advantage either, and the first run of it was noise
+
+The mass measurement above compares a schedule against the attention it
+approximates. It assumes losing mass costs a model something, which nothing had
+checked — a selector could drop most of the mass and keep whatever a task needs.
+
+`recall_training` closes that. Associative recall on 2,400 sequences: the final
+query is planted onto a content-addressed earlier key, the label is the sign of a
+component of the value stored there, and a schedule that misses the block holding
+it leaves features carrying no information about the label. Attention and the
+head both run on GPU with resident tensors and Adam; no gradient reaches the
+schedule, so this measures retained signal rather than the model's ability to
+compensate.
+
+| schedule | density | mass | accuracy | fold range |
+|---|---:|---:|---:|---|
+| dense | 100.0% | 1.0000 | 92.4% | 90.8 – 94.4 |
+| topological | 50.1% | 0.5916 | 60.5% | 56.9 – 62.5 |
+| inverted | 51.9% | 0.6097 | 59.0% | 55.8 – 66.7 |
+| random | 50.1% | 0.6110 | 61.0% | 59.6 – 62.7 |
+| local+sink only | 33.1% | 0.4512 | 52.0% | 49.4 – 54.2 |
+
+**At equal budget the three content-selecting schedules are indistinguishable.**
+Topological, inverted and random all land near 60% with overlapping fold ranges,
+against 92.4% for dense and a 50% chance floor. Whatever the salience ranking
+contributes on this task, it is smaller than the resolution of a 2,400-sample
+five-fold comparison.
+
+The same experiment at 600 samples reported topological 58.5% against random
+52.2% and would have been written up as the selector winning. Four times the data
+moved random to 61.0%, the highest of the three. The gap was noise, the fold
+ranges said so at the time, and nothing but the larger run would have caught it.
+
+The first configuration was worse than uninformative. With the planted query
+scaled at 6, the target key drew about 5% of the softmax against 127 distractors,
+dense scored 56.7%, and every arm sat near chance for a reason having nothing to
+do with the schedules. The example now refuses to print the comparison unless
+dense clears 80%: a control that fails should stop the report rather than appear
+as one row of it.
+
+Limits: one synthetic task, one sequence length, features taken from a single row
+of a single head. Frozen attention is the point of the design and also its
+narrowest assumption — a model trained end to end could reshape queries to suit
+whatever schedule it was given, and that is a different and much larger
+experiment. `local+sink only` runs at a lower density than the other three, so
+its deficit is not a same-budget result and cannot separate budget from
+selection.
+
 **Both integrations are measured; neither is made.**
 
 | candidate | verdict | why |

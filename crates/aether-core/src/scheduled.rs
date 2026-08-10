@@ -331,6 +331,82 @@ pub fn topology_block_schedule(
     Ok(BlockSchedule { offsets, indices })
 }
 
+/// [`topology_block_schedule`] with the salience ranking reversed.
+///
+/// Measured against a same-budget random baseline, ranking by *highest* salience
+/// recovers less attention mass than choosing blocks at random, and the deficit
+/// grows as more budget is given to it. Reversing the ranking turns that around:
+/// it beats random by a margin that widens with budget, which is what an
+/// informative signal looks like. The numbers are in `aether-gpu/FEATURES.md`
+/// and reproduce with `cargo run -p aether-gpu --example selector_ablation`.
+///
+/// The mechanism is not mysterious. [`block_salience`] scores a block by its H0
+/// death time, which measures how *isolated* it is. Attention mass concentrates
+/// where a key resembles the query, and a block unlike everything else is unlike
+/// the typical query too, so the two rankings are anti-correlated by
+/// construction.
+///
+/// **The zero-salience block is excluded rather than ranked first.** Exactly one
+/// block never merges into a larger component and records no death time;
+/// [`block_salience`] reports it as 0. Under the original ranking that sentinel
+/// sorts last and is never selected, so it costs nothing. Reversed, 0 becomes
+/// the minimum and that block would be chosen before every real candidate —
+/// which reads a marker for "undefined" as "least isolated". It is filtered out
+/// here, and a schedule that wants it can still reach it through the local
+/// window or the sinks.
+///
+/// This is offered alongside [`topology_block_schedule`] rather than replacing
+/// its ranking. Changing the sign changes what the method is, and that belongs
+/// to whoever is making the claim rather than to the function that measured it.
+pub fn inverted_topology_block_schedule(
+    keys: &[f64],
+    seq: usize,
+    dim: usize,
+    config: TopologyScheduleConfig,
+) -> Result<BlockSchedule, ScheduleError> {
+    let num_blocks = validate_blocking(seq, config.block_size)?;
+    if keys.len() != seq * dim {
+        return Err(ScheduleError::ShapeMismatch);
+    }
+
+    let salience = block_salience(keys, seq, dim, config.block_size)?;
+    let mut ranked: Vec<usize> = (0..num_blocks).filter(|&b| salience[b] != 0.0).collect();
+    // Lowest salience first; ties by index so the schedule is deterministic.
+    ranked.sort_by(|&a, &b| salience[a].total_cmp(&salience[b]).then(a.cmp(&b)));
+
+    let topk = config.topk_topology_blocks.min(ranked.len());
+    let mut is_salient = vec![false; num_blocks];
+    for &block in &ranked[..topk] {
+        is_salient[block] = true;
+    }
+
+    let mut offsets = Vec::with_capacity(num_blocks + 1);
+    let mut indices = Vec::new();
+    offsets.push(0);
+
+    for q_block in 0..num_blocks {
+        let mut allowed = vec![false; q_block + 1];
+        for block in 0..config.sink_blocks.min(num_blocks).min(q_block + 1) {
+            allowed[block] = true;
+        }
+        for block in q_block.saturating_sub(config.local_radius_blocks)..=q_block {
+            allowed[block] = true;
+        }
+        for (block, slot) in allowed.iter_mut().enumerate() {
+            if is_salient[block] {
+                *slot = true;
+            }
+        }
+        if !allowed.iter().any(|&on| on) {
+            allowed[q_block] = true;
+        }
+
+        indices.extend((0..=q_block).filter(|&block| allowed[block]));
+        offsets.push(indices.len());
+    }
+    Ok(BlockSchedule { offsets, indices })
+}
+
 // ═══════════════════════════════════════════════════════════════════════════════
 // The kernel
 // ═══════════════════════════════════════════════════════════════════════════════
