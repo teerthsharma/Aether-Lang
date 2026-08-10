@@ -134,6 +134,8 @@ pub struct GpuContext {
     sgd_update: wgpu::ComputePipeline,
     sigmoid: wgpu::ComputePipeline,
     sigmoid_bce_grad: wgpu::ComputePipeline,
+    softmax_rows: wgpu::ComputePipeline,
+    softmax_xent_grad: wgpu::ComputePipeline,
     layout: wgpu::BindGroupLayout,
     pending: RefCell<Pending>,
 }
@@ -265,6 +267,8 @@ impl GpuContext {
             sgd_update: build("sgd_update"),
             sigmoid: build("sigmoid"),
             sigmoid_bce_grad: build("sigmoid_bce_grad"),
+            softmax_rows: build("softmax_rows"),
+            softmax_xent_grad: build("softmax_xent_grad"),
             device,
             queue,
             info,
@@ -615,6 +619,53 @@ impl GpuContext {
                 _pad: 0,
             },
             (logits.len().div_ceil(256).max(1) as u32, 1, 1),
+        );
+        Ok(out)
+    }
+
+    /// Row-wise softmax over `[m, classes]` logits, resident.
+    ///
+    /// Subtracts the row maximum before exponentiating, which leaves the result
+    /// unchanged and makes overflow impossible.
+    pub fn softmax_resident(&self, logits: &GpuTensor) -> Result<GpuTensor, GpuError> {
+        let out = self.alloc(logits.rows, logits.cols);
+        self.dispatch_resident(
+            &self.softmax_rows,
+            &logits.buffer,
+            &logits.buffer,
+            &out.buffer,
+            self.dims_of(logits),
+            (logits.rows.div_ceil(64).max(1) as u32, 1, 1),
+        );
+        Ok(out)
+    }
+
+    /// `(softmax(logits) - one_hot) / rows`, resident.
+    ///
+    /// The fused categorical cross-entropy gradient. Composed, this would form
+    /// the softmax Jacobian per row; fused, the product collapses to a
+    /// difference that neither allocates the Jacobian nor underflows when the
+    /// softmax saturates.
+    pub fn softmax_xent_grad_resident(
+        &self,
+        logits: &GpuTensor,
+        one_hot: &GpuTensor,
+    ) -> Result<GpuTensor, GpuError> {
+        if logits.rows != one_hot.rows || logits.cols != one_hot.cols {
+            return Err(GpuError::ShapeMismatch(format!(
+                "logits are {}x{}, targets are {}x{}",
+                logits.rows, logits.cols, one_hot.rows, one_hot.cols
+            )));
+        }
+
+        let out = self.alloc(logits.rows, logits.cols);
+        self.dispatch_resident(
+            &self.softmax_xent_grad,
+            &logits.buffer,
+            &one_hot.buffer,
+            &out.buffer,
+            self.dims_of(logits),
+            (logits.rows.div_ceil(64).max(1) as u32, 1, 1),
         );
         Ok(out)
     }

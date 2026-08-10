@@ -178,6 +178,78 @@ fn sigmoid_bce_grad(@builtin(global_invocation_id) gid: vec3<u32>) {
     c[idx] = (p - b[idx]) / f32(dims.m);
 }
 
+// Row-wise softmax over an [m, n] matrix of logits.
+//
+// One invocation per row, three passes over the row: maximum, exponentiate and
+// accumulate, normalise. A per-element invocation would need a cross-invocation
+// reduction for the max and the sum, and at the class counts this is used for
+// (single digits) the row is shorter than a workgroup.
+//
+// The maximum is subtracted before exponentiating. softmax is invariant to a
+// constant shift in its input, so this changes nothing mathematically, and it
+// bounds every exponent at or below zero so exp cannot overflow. Without it a
+// logit above about 88 produces inf, and inf/inf produces NaN.
+@compute @workgroup_size(64, 1, 1)
+fn softmax_rows(@builtin(global_invocation_id) gid: vec3<u32>) {
+    let row = gid.x;
+
+    if (row >= dims.m) {
+        return;
+    }
+
+    let base = row * dims.n;
+
+    var mx = a[base];
+    for (var j: u32 = 1u; j < dims.n; j = j + 1u) {
+        mx = max(mx, a[base + j]);
+    }
+
+    var sum = 0.0;
+    for (var j: u32 = 0u; j < dims.n; j = j + 1u) {
+        let e = exp(a[base + j] - mx);
+        c[base + j] = e;
+        sum = sum + e;
+    }
+
+    for (var j: u32 = 0u; j < dims.n; j = j + 1u) {
+        c[base + j] = c[base + j] / sum;
+    }
+}
+
+// Fused gradient of categorical cross-entropy through a softmax:
+// (softmax(z) - y) / m, with y one-hot and m the batch size.
+//
+// Fused for the same reason as the binary case. Composed, the softmax Jacobian
+// is an n-by-n matrix per row and the product with the cross-entropy derivative
+// collapses to this difference; forming the Jacobian explicitly is both slower
+// and numerically worse, because its diagonal p_i*(1-p_i) underflows once the
+// softmax saturates.
+@compute @workgroup_size(64, 1, 1)
+fn softmax_xent_grad(@builtin(global_invocation_id) gid: vec3<u32>) {
+    let row = gid.x;
+
+    if (row >= dims.m) {
+        return;
+    }
+
+    let base = row * dims.n;
+
+    var mx = a[base];
+    for (var j: u32 = 1u; j < dims.n; j = j + 1u) {
+        mx = max(mx, a[base + j]);
+    }
+
+    var sum = 0.0;
+    for (var j: u32 = 0u; j < dims.n; j = j + 1u) {
+        sum = sum + exp(a[base + j] - mx);
+    }
+
+    for (var j: u32 = 0u; j < dims.n; j = j + 1u) {
+        let p = exp(a[base + j] - mx) / sum;
+        c[base + j] = (p - b[base + j]) / f32(dims.m);
+    }
+}
+
 // C = transpose(A), where A is [m, n] and C is [n, m].
 //
 // A transpose is pure data movement, so on its own it is not worth a dispatch.
