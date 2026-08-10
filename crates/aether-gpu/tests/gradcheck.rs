@@ -51,9 +51,16 @@ fn fill(n: usize, seed: u64) -> Vec<f64> {
 /// The reference network, in f64, matching the kernels exactly:
 /// `x -> W1 -> +b1 -> relu -> W2 -> +b2 -> sigmoid -> mean BCE`.
 ///
-/// One hidden layer rather than the two in `train_resident`: the gradient
-/// through a second identical layer exercises no new code path, and fewer
-/// parameters means the finite-difference sweep stays cheap.
+/// One hidden layer, which isolates the output head: everything this fixture
+/// catches is attributable to the sigmoid and BCE path rather than to the
+/// composition of two gates.
+///
+/// This is deliberately not the whole check. An earlier version of this comment
+/// claimed a second identical layer "exercises no new code path", which is
+/// wrong -- with one hidden layer the gradient reaching the input weights
+/// crosses exactly one ReLU gate, so gating the wrong tensor or reusing the
+/// first layer's mask has nowhere to surface. `Ref2` below covers the stacked
+/// case that the training examples actually run.
 struct Ref {
     w1: Vec<f64>, // [IN, HID]
     b1: Vec<f64>, // [HID]
@@ -332,6 +339,330 @@ fn the_gradient_is_scaled_by_the_batch_size_not_merely_proportional() {
         "db2 = {} exceeds 1, which means the 1/batch scaling is missing",
         db2[0]
     );
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// Two hidden layers
+//
+// Both training examples stack two ReLU layers; every check above uses one.
+// The distinction is not cosmetic. With a single hidden layer the gradient
+// reaching the input weights passes through exactly one ReLU gate, so an error
+// in how the gate composes with the chain rule -- gating the wrong tensor,
+// gating after the matmul instead of before, reusing the first layer's mask --
+// has nowhere to show up. Two layers is the smallest network where the
+// composition is exercised at all.
+// ═══════════════════════════════════════════════════════════════════════════════
+
+/// `x -> W1 -> +b1 -> relu -> W2 -> +b2 -> relu -> W3 -> +b3 -> sigmoid -> BCE`,
+/// the architecture `train_resident` actually trains.
+struct Ref2 {
+    w1: Vec<f64>, // [IN, HID]
+    b1: Vec<f64>, // [HID]
+    w2: Vec<f64>, // [HID, HID]
+    b2: Vec<f64>, // [HID]
+    w3: Vec<f64>, // [HID, 1]
+    b3: Vec<f64>, // [1]
+}
+
+struct Fwd2 {
+    z1: Vec<f64>,
+    a1: Vec<f64>,
+    z2: Vec<f64>,
+    a2: Vec<f64>,
+    p: Vec<f64>,
+}
+
+impl Ref2 {
+    fn forward(&self, x: &[f64]) -> Fwd2 {
+        let mut z1 = vec![0.0; BATCH * HID];
+        for i in 0..BATCH {
+            for j in 0..HID {
+                let mut s = self.b1[j];
+                for k in 0..IN {
+                    s += x[i * IN + k] * self.w1[k * HID + j];
+                }
+                z1[i * HID + j] = s;
+            }
+        }
+        let a1: Vec<f64> = z1.iter().map(|v| v.max(0.0)).collect();
+
+        let mut z2 = vec![0.0; BATCH * HID];
+        for i in 0..BATCH {
+            for j in 0..HID {
+                let mut s = self.b2[j];
+                for k in 0..HID {
+                    s += a1[i * HID + k] * self.w2[k * HID + j];
+                }
+                z2[i * HID + j] = s;
+            }
+        }
+        let a2: Vec<f64> = z2.iter().map(|v| v.max(0.0)).collect();
+
+        let mut p = vec![0.0; BATCH];
+        for i in 0..BATCH {
+            let mut s = self.b3[0];
+            for j in 0..HID {
+                s += a2[i * HID + j] * self.w3[j];
+            }
+            p[i] = 1.0 / (1.0 + (-s).exp());
+        }
+
+        Fwd2 { z1, a1, z2, a2, p }
+    }
+
+    fn loss(&self, x: &[f64], y: &[f64]) -> f64 {
+        let f = self.forward(x);
+        f.p.iter()
+            .zip(y)
+            .map(|(p, t)| {
+                let p = p.clamp(1e-12, 1.0 - 1e-12);
+                -(t * p.ln() + (1.0 - t) * (1.0 - p).ln())
+            })
+            .sum::<f64>()
+            / BATCH as f64
+    }
+
+    #[allow(clippy::type_complexity)]
+    fn grads(
+        &self,
+        x: &[f64],
+        y: &[f64],
+    ) -> (Vec<f64>, Vec<f64>, Vec<f64>, Vec<f64>, Vec<f64>, Vec<f64>) {
+        let f = self.forward(x);
+
+        let dz3: Vec<f64> =
+            f.p.iter()
+                .zip(y)
+                .map(|(p, t)| (p - t) / BATCH as f64)
+                .collect();
+
+        let mut dw3 = vec![0.0; HID];
+        for j in 0..HID {
+            for i in 0..BATCH {
+                dw3[j] += f.a2[i * HID + j] * dz3[i];
+            }
+        }
+        let db3 = vec![dz3.iter().sum::<f64>()];
+
+        // Second gate: uses z2, not z1, and not a2.
+        let mut dz2 = vec![0.0; BATCH * HID];
+        for i in 0..BATCH {
+            for j in 0..HID {
+                let gate = if f.z2[i * HID + j] > 0.0 { 1.0 } else { 0.0 };
+                dz2[i * HID + j] = dz3[i] * self.w3[j] * gate;
+            }
+        }
+
+        let mut dw2 = vec![0.0; HID * HID];
+        for k in 0..HID {
+            for j in 0..HID {
+                for i in 0..BATCH {
+                    dw2[k * HID + j] += f.a1[i * HID + k] * dz2[i * HID + j];
+                }
+            }
+        }
+        let mut db2 = vec![0.0; HID];
+        for j in 0..HID {
+            for i in 0..BATCH {
+                db2[j] += dz2[i * HID + j];
+            }
+        }
+
+        // First gate: uses z1, and the incoming gradient is dz2 through W2.
+        let mut dz1 = vec![0.0; BATCH * HID];
+        for i in 0..BATCH {
+            for j in 0..HID {
+                let mut s = 0.0;
+                for k in 0..HID {
+                    s += dz2[i * HID + k] * self.w2[j * HID + k];
+                }
+                let gate = if f.z1[i * HID + j] > 0.0 { 1.0 } else { 0.0 };
+                dz1[i * HID + j] = s * gate;
+            }
+        }
+
+        let mut dw1 = vec![0.0; IN * HID];
+        for k in 0..IN {
+            for j in 0..HID {
+                for i in 0..BATCH {
+                    dw1[k * HID + j] += x[i * IN + k] * dz1[i * HID + j];
+                }
+            }
+        }
+        let mut db1 = vec![0.0; HID];
+        for j in 0..HID {
+            for i in 0..BATCH {
+                db1[j] += dz1[i * HID + j];
+            }
+        }
+
+        (dw1, db1, dw2, db2, dw3, db3)
+    }
+}
+
+/// Stage 1 for the stacked network.
+#[test]
+fn the_two_layer_reference_gradient_matches_central_differences() {
+    let x = fill(BATCH * IN, 91);
+    let y: Vec<f64> = (0..BATCH).map(|i| (i % 2) as f64).collect();
+
+    let mut net = Ref2 {
+        w1: fill(IN * HID, 92),
+        b1: fill(HID, 93),
+        w2: fill(HID * HID, 94),
+        b2: fill(HID, 95),
+        w3: fill(HID, 96),
+        b3: fill(1, 97),
+    };
+
+    let (dw1, db1, dw2, db2, dw3, db3) = net.grads(&x, &y);
+    let h = 1e-6;
+
+    // Both gates must sit clear of the kink, or a central difference straddles
+    // a point of non-differentiability and disagrees for a legitimate reason.
+    let f = net.forward(&x);
+    assert!(
+        f.z1.iter().chain(f.z2.iter()).all(|z| z.abs() > 1e-3),
+        "a pre-activation sits on a ReLU kink; reseed rather than loosen the tolerance"
+    );
+
+    let mut checked = 0;
+    for (which, analytic) in [
+        (0usize, &dw1),
+        (1, &db1),
+        (2, &dw2),
+        (3, &db2),
+        (4, &dw3),
+        (5, &db3),
+    ] {
+        for (idx, &a) in analytic.iter().enumerate() {
+            let orig = match which {
+                0 => net.w1[idx],
+                1 => net.b1[idx],
+                2 => net.w2[idx],
+                3 => net.b2[idx],
+                4 => net.w3[idx],
+                _ => net.b3[idx],
+            };
+            let set = |v: f64, n: &mut Ref2| match which {
+                0 => n.w1[idx] = v,
+                1 => n.b1[idx] = v,
+                2 => n.w2[idx] = v,
+                3 => n.b2[idx] = v,
+                4 => n.w3[idx] = v,
+                _ => n.b3[idx] = v,
+            };
+
+            set(orig + h, &mut net);
+            let up = net.loss(&x, &y);
+            set(orig - h, &mut net);
+            let down = net.loss(&x, &y);
+            set(orig, &mut net);
+
+            let fd = (up - down) / (2.0 * h);
+            let denom = a.abs().max(fd.abs()).max(1e-8);
+            let rel = (a - fd).abs() / denom;
+
+            assert!(
+                rel < 1e-5,
+                "group {which} index {idx}: analytic {a:.12e} vs finite diff {fd:.12e}, \
+                 relative error {rel:.3e}"
+            );
+            checked += 1;
+        }
+    }
+
+    let expected = IN * HID + HID + HID * HID + HID + HID + 1;
+    assert_eq!(checked, expected, "every parameter must be checked");
+    println!("stage 1 (two layers): {checked} parameters matched central differences");
+}
+
+/// Stage 2 for the stacked network: the exact operation sequence
+/// `train_resident` runs, compared against the verified f64 reference.
+#[test]
+fn the_gpu_two_layer_backward_matches_the_reference_gradients() {
+    let Some(ctx) = context() else { return };
+
+    let x64 = fill(BATCH * IN, 101);
+    let y64: Vec<f64> = (0..BATCH).map(|i| (i % 2) as f64).collect();
+    let w1_64 = fill(IN * HID, 102);
+    let b1_64 = fill(HID, 103);
+    let w2_64 = fill(HID * HID, 104);
+    let b2_64 = fill(HID, 105);
+    let w3_64 = fill(HID, 106);
+    let b3_64 = fill(1, 107);
+
+    let net = Ref2 {
+        w1: w1_64.clone(),
+        b1: b1_64.clone(),
+        w2: w2_64.clone(),
+        b2: b2_64.clone(),
+        w3: w3_64.clone(),
+        b3: b3_64.clone(),
+    };
+    let (r_dw1, r_db1, r_dw2, r_db2, r_dw3, r_db3) = net.grads(&x64, &y64);
+
+    let f32v = |v: &[f64]| -> Vec<f32> { v.iter().map(|x| *x as f32).collect() };
+
+    let gx = ctx.upload(&f32v(&x64), BATCH, IN).expect("x");
+    let gy = ctx.upload(&f32v(&y64), BATCH, 1).expect("y");
+    let gw1 = ctx.upload(&f32v(&w1_64), IN, HID).expect("w1");
+    let gb1 = ctx.upload(&f32v(&b1_64), 1, HID).expect("b1");
+    let gw2 = ctx.upload(&f32v(&w2_64), HID, HID).expect("w2");
+    let gb2 = ctx.upload(&f32v(&b2_64), 1, HID).expect("b2");
+    let gw3 = ctx.upload(&f32v(&w3_64), HID, 1).expect("w3");
+    let gb3 = ctx.upload(&f32v(&b3_64), 1, 1).expect("b3");
+
+    let z1 = ctx.matmul_resident(&gx, &gw1).expect("z1");
+    let z1 = ctx.add_bias_resident(&z1, &gb1).expect("z1b");
+    let a1 = ctx.relu_resident(&z1).expect("a1");
+    let z2 = ctx.matmul_resident(&a1, &gw2).expect("z2");
+    let z2 = ctx.add_bias_resident(&z2, &gb2).expect("z2b");
+    let a2 = ctx.relu_resident(&z2).expect("a2");
+    let z3 = ctx.matmul_resident(&a2, &gw3).expect("z3");
+    let z3 = ctx.add_bias_resident(&z3, &gb3).expect("z3b");
+
+    let dz3 = ctx.sigmoid_bce_grad_resident(&z3, &gy).expect("dz3");
+    let a2t = ctx.transpose_resident(&a2).expect("a2t");
+    let dw3 = ctx.matmul_resident(&a2t, &dz3).expect("dw3");
+    let db3 = ctx.column_sums_resident(&dz3).expect("db3");
+
+    let w3t = ctx.transpose_resident(&gw3).expect("w3t");
+    let da2 = ctx.matmul_resident(&dz3, &w3t).expect("da2");
+    let dz2 = ctx.relu_backward_resident(&z2, &da2).expect("dz2");
+
+    let a1t = ctx.transpose_resident(&a1).expect("a1t");
+    let dw2 = ctx.matmul_resident(&a1t, &dz2).expect("dw2");
+    let db2 = ctx.column_sums_resident(&dz2).expect("db2");
+
+    let w2t = ctx.transpose_resident(&gw2).expect("w2t");
+    let da1 = ctx.matmul_resident(&dz2, &w2t).expect("da1");
+    let dz1 = ctx.relu_backward_resident(&z1, &da1).expect("dz1");
+
+    let xt = ctx.transpose_resident(&gx).expect("xt");
+    let dw1 = ctx.matmul_resident(&xt, &dz1).expect("dw1");
+    let db1 = ctx.column_sums_resident(&dz1).expect("db1");
+
+    let cmp = |name: &str, got: &GpuTensor, want: &[f64]| {
+        let g = ctx.read(got).expect("readback");
+        assert_eq!(g.len(), want.len(), "{name}: length");
+        for (i, (a, b)) in g.iter().zip(want).enumerate() {
+            let denom = (*b).abs().max(1e-6);
+            let rel = ((*a as f64) - b).abs() / denom;
+            assert!(
+                rel < 2e-3,
+                "{name}[{i}]: gpu {a:.8e} vs reference {b:.8e}, relative error {rel:.3e}"
+            );
+        }
+        println!("{name}: {} entries matched the f64 reference", g.len());
+    };
+
+    cmp("dw1", &dw1, &r_dw1);
+    cmp("db1", &db1, &r_db1);
+    cmp("dw2", &dw2, &r_dw2);
+    cmp("db2", &db2, &r_db2);
+    cmp("dw3", &dw3, &r_dw3);
+    cmp("db3", &db3, &r_db3);
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
