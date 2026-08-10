@@ -51,7 +51,7 @@ trap restore EXIT
 
 # A baseline run must pass, or every mutant is "caught" by a failure that was
 # already there and the whole table means nothing.
-if ! cargo test -p aether-core --test ablation_baselines --test scheduled_attention >/dev/null 2>&1; then
+if ! cargo test -p aether-core --test ablation_baselines --test scheduled_attention --test attention_backward >/dev/null 2>&1; then
     echo "the clean tree already fails ablation_baselines." >&2
     echo "Every mutant would be reported as caught by a pre-existing failure." >&2
     exit 100
@@ -81,10 +81,21 @@ mutants=(
 "block_salience: squared distance left unrooted|s/edges\.push\(\(sqrt\(sum\), i, j\)\);/edges.push((sum, i, j));/"
 "topology_block_schedule: local window narrowed to the diagonal|s/for block in q_block\.saturating_sub\(config\.local_radius_blocks\)\.\.=q_block \{/for block in q_block..=q_block {/"
 "topology_block_schedule: sink blocks dropped|s/for block in 0\.\.config\.sink_blocks\.min\(num_blocks\)\.min\(q_block \+ 1\) \{/for block in 0..0usize {/"
+# ── scheduled_attention_backward ────────────────────────────────────────────
+#
+# A wrong backward pass is the least visible defect here: the forward stays
+# correct, the loss still falls, and the model converges to a plausible worse
+# optimum with no crash and no NaN to notice. These target the terms that fail
+# that way rather than loudly.
+"backward: softmax rank-one correction dropped|s/let ds = p \* \(dp - delta\) \* scale;/let ds = p * dp * scale;/"
+"backward: delta unweighted by the attention weights|s/delta \+= weights\[idx\] \* dp;/delta += dp;/"
+"backward: dq accumulates q instead of k|s/dq\[row \* head_dim \+ d\] \+= ds \* k\[col \* head_dim \+ d\];/dq[row * head_dim + d] += ds * q[col * head_dim + d];/"
+"backward: dv accumulates the cotangent unweighted|s/dv\[col \* head_dim \+ d\] \+= p \* d_out\[row \* head_dim \+ d\];/dv[col * head_dim + d] += d_out[row * head_dim + d];/"
+"backward: scale factor omitted|s/let ds = p \* \(dp - delta\) \* scale;/let ds = p * (dp - delta);/"
 )
 
 # Suites run against each mutant. A mutant escapes only if it survives every one.
-suites=(ablation_baselines scheduled_attention)
+suites=(ablation_baselines scheduled_attention attention_backward)
 
 printf '%-58s' "MUTANT"
 for suite in "${suites[@]}"; do printf ' %-12s' "$suite"; done
@@ -141,7 +152,7 @@ restore
 
 echo
 echo "verifying the restored tree still passes"
-if clean="$(cargo test -p aether-core --test ablation_baselines --test scheduled_attention 2>&1)"; then
+if clean="$(cargo test -p aether-core --test ablation_baselines --test scheduled_attention --test attention_backward 2>&1)"; then
     echo "  clean tree: pass"
 else
     echo "  clean tree: FAIL" >&2
@@ -157,3 +168,4 @@ fi
 echo
 echo "mutants escaping: $escaped / ${#mutants[@]}"
 [ "$escaped" -eq 0 ]
+
