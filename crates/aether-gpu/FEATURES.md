@@ -75,6 +75,11 @@ by re-running an unchanged binary:
 | `Tensor::matmul` time | 197.9 – 321.8 ms | 43% |
 | **their ratio** | **18.5× – 61.0×** | **96%** |
 
+The bridge row understates the term badly and is left as recorded because it is
+what that sample showed. A later measurement that printed individual timings
+instead of medians found the same quantity ranging 4.9 – 25.7 ms — a 5.2× swing
+against the 12% here. See *Which side the variance is on* below.
+
 **The ratio is less stable than either term, not more.** An earlier note in this
 file claimed the opposite — that both columns move together so the comparison
 survives what the absolutes do not — and that was asserted rather than measured.
@@ -89,19 +94,47 @@ Three attempts to stabilise it, none of which worked:
 | 9 CPU reps | a median of three is a poor estimator | worse |
 | paired, interleaved | each pair sees the same thermal state, so dividing within a pair cancels drift | **130%** |
 
-Pairing is the statistically correct design for a ratio and it made things
-worse, which is the informative part: **if the noise were slow thermal drift,
-pairing would have cancelled it.** It did not, so the variance lives at a
-shorter timescale than a single measurement pair — GPU scheduling, driver
-behaviour, or the OS moving the process between cores.
+#### Which side the variance is on
+
+Every attempt above changed *how* the ratio was aggregated, and none asked the
+prior question: which of the two factors moves. `--samples` on the crossover
+example answers it by printing individual timings instead of a median. Six
+consecutive runs, 24 alternating pairs each, n=512:
+
+| factor | range across runs | swing |
+|---|---|---:|
+| `Tensor::matmul` | 167 – 262 ms | 1.6× |
+| bridge | 4.9 – 25.7 ms | **5.2×** |
+
+**The variance is GPU-side.** The CPU term is comparatively steady; the GPU term
+moves by a factor of five, and the ratio inherits it almost entirely.
+
+That is also the explanation for the paired result, which until now was recorded
+as an unexplained negative. Pairing cancels *common-mode* noise — drift that
+moves both terms together. This noise is not common-mode. It sits almost
+entirely on one side, so there is nothing for pairing to cancel, and it actively
+hurts: it puts the GPU's full variance into every individual ratio sample rather
+than leaving it to be averaged down by a median over a block.
+
+An earlier revision of this section concluded from the same negative result that
+the variance must live at a shorter timescale than a measurement pair. That was
+an inference from pairing failing rather than an observation, and the raw samples
+do not support it: within a single run the timings ramp and then flatten, and the
+settled portion is far tighter than the run-to-run spread.
+
+What produces the GPU-side swing is not identified. It is not per-sample scatter
+and not monotone drift within a process; it changed between runs, stayed changed
+across four consecutive runs, and then reverted. Naming a cause on that evidence
+would repeat the error this section is correcting.
 
 The interleaved measurement is kept anyway. It is the right design, and the
 reason to hold it is that it is correct, not that it is faster; reverting to a
 method known to be worse because a better one did not help here would be
 optimising the number rather than the measurement.
 
-The practical conclusion is that this machine cannot produce a trustworthy
-magnitude, and no amount of method fixes that from inside the benchmark.
+The practical conclusion is unchanged and now has a mechanism behind it: this
+machine cannot produce a trustworthy magnitude, because the quantity that moves
+is the one being measured, and no aggregation inside the benchmark reaches it.
 
 What this means for the figures quoted here:
 
@@ -134,6 +167,7 @@ Listed here so a reader is not misled by encountering them mid-file:
 | "The GPU kernel's output needs symmetrising" | **withdrawn** — it is bitwise symmetric by construction |
 | "The suite never reports success for work that did not happen" | **withdrawn** — it did exactly that for twenty-odd commits |
 | "Ratios are more stable than the timings they divide" | **withdrawn** — measured at 96% spread against 43% and 12% for the terms |
+| "The benchmark noise is short-timescale" | **withdrawn** — inferred from pairing failing; raw samples show the variance is GPU-side and between runs |
 
 ## Shipped
 

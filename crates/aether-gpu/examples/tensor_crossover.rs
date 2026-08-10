@@ -49,10 +49,12 @@ fn median_ms(reps: usize, mut f: impl FnMut()) -> f64 {
 /// at n=512, the paired ratio spread 130% against the unpaired 96% — worse, not
 /// better.
 ///
-/// Pairing cancels noise that is slow relative to a pair. That it did not help
-/// rules that out: the variance lives at a shorter timescale than a single
-/// measurement, so GPU scheduling, driver behaviour or the OS moving the process
-/// between cores, none of which alternating touches.
+/// The reason is visible in `--samples`, which prints individual timings rather
+/// than a median. Across six runs at n=512 the CPU term moved 1.6× and the GPU
+/// term moved 5.2×, so the variance is almost entirely on one side. Pairing
+/// cancels *common-mode* noise, and there is no common mode here — which is also
+/// why it hurt: it puts the GPU's full variance into every ratio sample instead
+/// of leaving it to be averaged down across a block.
 ///
 /// Kept regardless. It is the correct design for estimating a ratio, and the
 /// reason to hold it is that it is right rather than that it helped here;
@@ -99,6 +101,97 @@ fn fill64(n: usize, seed: u64) -> Vec<f64> {
         .collect()
 }
 
+/// Dump every individual timing at one size instead of a median.
+///
+/// The aggregate view cannot tell where the variance lives. Three attempts to
+/// stabilise the ratio failed, and the conclusion that the noise is
+/// short-timescale came from pairing not helping — an inference from a negative
+/// result rather than an identification.
+///
+/// Raw samples answer it directly, and the answer was neither of the aggregation
+/// fixes tried before: the CPU term is comparatively steady while the GPU term
+/// swings by a factor of five, so the ratio inherits the GPU's variance and no
+/// way of combining the two terms can remove it.
+///
+/// Reading the output: compare the two spread blocks. A run whose samples ramp
+/// and then flatten is showing a warmup transient, and the settled tail is the
+/// steady-state figure. A plateau ratio that agrees across runs while the
+/// all-samples ratio does not means the transient was the problem; both
+/// disagreeing means the variance is between runs and outside this process.
+fn dump_samples(ctx: &GpuContext, n: usize, reps: usize) {
+    let a64 = fill64(n * n, 1);
+    let b64 = fill64(n * n, 2);
+    let ta = Tensor::new(&a64, &[n, n]);
+    let tb = Tensor::new(&b64, &[n, n]);
+
+    let _ = tensor_matmul(ctx, &ta, &tb).expect("warmup");
+
+    println!("raw samples at n={n}, {reps} alternating pairs");
+    println!(
+        "  {:>4}  {:>12}  {:>12}  {:>9}",
+        "i", "Tensor ms", "bridge ms", "ratio"
+    );
+
+    let mut cpu = Vec::new();
+    let mut gpu = Vec::new();
+
+    for i in 0..reps {
+        let t0 = Instant::now();
+        let _ = ta.matmul(&tb);
+        let c = t0.elapsed().as_secs_f64() * 1000.0;
+
+        let t1 = Instant::now();
+        let _ = tensor_matmul(ctx, &ta, &tb).expect("bridge");
+        let g = t1.elapsed().as_secs_f64() * 1000.0;
+
+        println!("  {i:>4}  {c:>12.3}  {g:>12.3}  {:>8.2}x", c / g);
+        cpu.push(c);
+        gpu.push(g);
+    }
+
+    let stats = |v: &[f64]| -> (f64, f64, f64) {
+        let mn = v.iter().cloned().fold(f64::INFINITY, f64::min);
+        let mx = v.iter().cloned().fold(f64::NEG_INFINITY, f64::max);
+        let mean = v.iter().sum::<f64>() / v.len() as f64;
+        (mn, mx, 100.0 * (mx - mn) / mean)
+    };
+
+    let (cmin, cmax, cspread) = stats(&cpu);
+    let (gmin, gmax, gspread) = stats(&gpu);
+
+    println!();
+    println!("  all {reps} samples");
+    println!("    Tensor  {cmin:.3} – {cmax:.3} ms   {cspread:.1}%");
+    println!("    bridge  {gmin:.3} – {gmax:.3} ms   {gspread:.1}%");
+
+    // The samples are not scattered around a mean, they ramp and then flatten:
+    // the CPU boosts at process start and settles to a sustained clock under
+    // load. Averaging across that mixes two different machine states. The last
+    // third is the settled one, and it is the only part that describes steady
+    // operation rather than the transient into it.
+    let tail = reps / 3;
+    let (tcmin, tcmax, tcspread) = stats(&cpu[reps - tail..]);
+    let (tgmin, tgmax, tgspread) = stats(&gpu[reps - tail..]);
+
+    println!();
+    println!("  last {tail} samples only");
+    println!("    Tensor  {tcmin:.3} – {tcmax:.3} ms   {tcspread:.1}%");
+    println!("    bridge  {tgmin:.3} – {tgmax:.3} ms   {tgspread:.1}%");
+
+    let mut plateau: Vec<f64> = cpu[reps - tail..]
+        .iter()
+        .zip(&gpu[reps - tail..])
+        .map(|(c, g)| c / g)
+        .collect();
+    plateau.sort_by(f64::total_cmp);
+    println!();
+    println!("  plateau ratio  {:.2}x", plateau[plateau.len() / 2]);
+    println!();
+    println!("  Run this several times. If the plateau ratio agrees across runs");
+    println!("  while the full-sample ratio does not, the variance was the ramp");
+    println!("  and discarding it is the fix. If both disagree, it is not.");
+}
+
 fn main() {
     let ctx = match GpuContext::new() {
         Ok(c) => c,
@@ -107,6 +200,11 @@ fn main() {
             std::process::exit(1);
         }
     };
+
+    if std::env::args().any(|a| a == "--samples") {
+        dump_samples(&ctx, 512, 24);
+        return;
+    }
 
     let info = ctx.adapter_info();
     println!("═══════════════════════════════════════════════════════════════════════");
