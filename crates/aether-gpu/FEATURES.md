@@ -101,6 +101,47 @@ Square matmul, median of 20:
 | 512 | 71.191 | 3.286 | 2.496 | 1.929 |
 | 1024 | 3714.298 | 20.234 | 15.401 | 11.031 |
 
+## Multi-class
+
+Softmax and categorical cross-entropy, with reporting that can detect the
+failure accuracy hides: a three-class model that abandons one class and splits
+the rest still posts a plausible accuracy. The confusion matrix and per-class
+recall are what show whether it did.
+
+Three interleaved spirals, 900 points, stratified 5-fold CV, 100 epochs/fold,
+network 2 → 64 → 64 → 3:
+
+```
+confusion matrix (rows = true, cols = predicted)
+             pred 0  pred 1  pred 2
+  true 0        251       9      40
+  true 1         67     218      15
+  true 2         22      21     257
+
+class     precision   recall       F1
+0            0.7382   0.8367   0.7844
+1            0.8790   0.7267   0.7956
+2            0.8237   0.8567   0.8399
+
+CV accuracy       0.8067 +/- 0.0379
+macro F1          0.8066
+majority-class    0.3333   <- control
+separation        +0.4733
+wall clock        0.68 s
+```
+
+Macro F1 tracking accuracy to four decimals is the evidence that no class was
+abandoned. Class 1 is the weakest at 0.7267 recall, losing 67 points to class 0.
+
+Folds are stratified rather than contiguous slices of a shuffled array. On three
+classes the balance drift from contiguous slicing moves accuracy by more than
+the effects being measured.
+
+The data is generated, not observed. It is used because three interleaved
+spirals are not linearly separable, so the majority-class control is a real
+floor rather than a formality — but nothing measured on it transfers to real
+data, and this row is not evidence about real datasets.
+
 ## Mutation testing
 
 A suite nobody has mutated is a suite of unknown strength. Two defects injected

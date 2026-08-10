@@ -300,6 +300,168 @@ fn a_resident_matmul_rejects_disagreeing_inner_dimensions() {
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
+// Softmax and categorical cross-entropy
+// ═══════════════════════════════════════════════════════════════════════════════
+
+#[test]
+fn softmax_rows_are_probability_distributions() {
+    let Some(ctx) = context() else { return };
+
+    let (rows, classes) = (7, 4);
+    let logits = ctx
+        .upload(&fill(rows * classes, 41), rows, classes)
+        .expect("upload");
+    let p = ctx
+        .read(&ctx.softmax_resident(&logits).expect("softmax"))
+        .expect("read");
+
+    for r in 0..rows {
+        let row = &p[r * classes..(r + 1) * classes];
+        let sum: f32 = row.iter().sum();
+        assert!(
+            (sum - 1.0).abs() < 1e-5,
+            "row {r} sums to {sum}, expected 1"
+        );
+        for (j, v) in row.iter().enumerate() {
+            assert!(
+                *v > 0.0 && *v < 1.0,
+                "row {r} class {j} is {v}, outside (0, 1)"
+            );
+        }
+    }
+}
+
+/// Softmax is invariant to adding a constant to every logit in a row. This is
+/// the identity the max-subtraction relies on, so it is asserted rather than
+/// assumed.
+#[test]
+fn softmax_is_invariant_to_a_constant_shift() {
+    let Some(ctx) = context() else { return };
+
+    let (rows, classes) = (5, 3);
+    let base = fill(rows * classes, 42);
+    let shifted: Vec<f32> = base.iter().map(|v| v + 12.5).collect();
+
+    let a = ctx.upload(&base, rows, classes).expect("upload");
+    let b = ctx.upload(&shifted, rows, classes).expect("upload");
+
+    let pa = ctx
+        .read(&ctx.softmax_resident(&a).expect("softmax"))
+        .expect("read");
+    let pb = ctx
+        .read(&ctx.softmax_resident(&b).expect("softmax"))
+        .expect("read");
+
+    for (i, (x, y)) in pa.iter().zip(&pb).enumerate() {
+        assert!(
+            (x - y).abs() < 1e-6,
+            "index {i}: shifted logits gave {y} vs {x}"
+        );
+    }
+}
+
+/// Without the max subtraction, a logit above roughly 88 overflows f32 `exp`
+/// to inf, and inf/inf is NaN. This is the test that would fail if someone
+/// simplified the kernel back to the naive form.
+#[test]
+fn large_logits_do_not_produce_nan_in_softmax() {
+    let Some(ctx) = context() else { return };
+
+    let logits = vec![
+        1000.0, 999.0, 998.0, //
+        -1000.0, -999.0, -998.0,
+    ];
+    let g = ctx.upload(&logits, 2, 3).expect("upload");
+    let p = ctx
+        .read(&ctx.softmax_resident(&g).expect("softmax"))
+        .expect("read");
+
+    for (i, v) in p.iter().enumerate() {
+        assert!(v.is_finite(), "index {i} is {v}");
+    }
+
+    for r in 0..2 {
+        let sum: f32 = p[r * 3..(r + 1) * 3].iter().sum();
+        assert!((sum - 1.0).abs() < 1e-5, "row {r} sums to {sum}");
+    }
+}
+
+/// The fused gradient must equal `softmax(z) - y` divided by the batch size.
+/// Computed here from the separately-tested softmax kernel, so the two paths
+/// have to agree.
+#[test]
+fn the_fused_softmax_gradient_equals_softmax_minus_target() {
+    let Some(ctx) = context() else { return };
+
+    let (rows, classes) = (6, 3);
+    let logits_host = fill(rows * classes, 43);
+
+    // One-hot targets, class = row index mod classes.
+    let mut targets = vec![0.0f32; rows * classes];
+    for r in 0..rows {
+        targets[r * classes + (r % classes)] = 1.0;
+    }
+
+    let gl = ctx.upload(&logits_host, rows, classes).expect("upload");
+    let gt = ctx.upload(&targets, rows, classes).expect("upload");
+
+    let fused = ctx
+        .read(&ctx.softmax_xent_grad_resident(&gl, &gt).expect("grad"))
+        .expect("read");
+    let p = ctx
+        .read(&ctx.softmax_resident(&gl).expect("softmax"))
+        .expect("read");
+
+    for i in 0..rows * classes {
+        let want = (p[i] - targets[i]) / rows as f32;
+        assert!(
+            (fused[i] - want).abs() < 1e-6,
+            "index {i}: fused {} vs softmax-minus-target {want}",
+            fused[i]
+        );
+    }
+}
+
+/// A correct cross-entropy gradient sums to zero across each row, because the
+/// softmax probabilities sum to one and the one-hot target sums to one. This
+/// catches a missing or doubled target term that a magnitude check would not.
+#[test]
+fn the_softmax_gradient_sums_to_zero_across_each_row() {
+    let Some(ctx) = context() else { return };
+
+    let (rows, classes) = (8, 5);
+    let logits_host = fill(rows * classes, 44);
+    let mut targets = vec![0.0f32; rows * classes];
+    for r in 0..rows {
+        targets[r * classes + (r % classes)] = 1.0;
+    }
+
+    let gl = ctx.upload(&logits_host, rows, classes).expect("upload");
+    let gt = ctx.upload(&targets, rows, classes).expect("upload");
+    let g = ctx
+        .read(&ctx.softmax_xent_grad_resident(&gl, &gt).expect("grad"))
+        .expect("read");
+
+    for r in 0..rows {
+        let sum: f32 = g[r * classes..(r + 1) * classes].iter().sum();
+        assert!(
+            sum.abs() < 1e-6,
+            "row {r} gradient sums to {sum}, expected 0"
+        );
+    }
+}
+
+#[test]
+fn the_softmax_gradient_rejects_mismatched_target_shapes() {
+    let Some(ctx) = context() else { return };
+
+    let logits = ctx.upload(&fill(12, 45), 4, 3).expect("upload");
+    let targets = ctx.upload(&fill(8, 46), 4, 2).expect("upload");
+
+    assert!(ctx.softmax_xent_grad_resident(&logits, &targets).is_err());
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
 // Batched submission
 // ═══════════════════════════════════════════════════════════════════════════════
 
