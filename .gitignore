@@ -3,7 +3,13 @@
 /debug
 /release
 **/*.rs.bk
-Cargo.lock
+*.orig
+
+# Cargo.lock is committed on purpose. This workspace ships binaries
+# (aether-cli, aether-kernel), the Dockerfile COPYs the lockfile, and the CI
+# cache key is hashFiles('**/Cargo.lock') — all three are broken without it.
+# Ignoring it also let CI re-resolve every dependency to its newest compatible
+# version on every run, which is how a nightly deprecation reached the gate.
 
 # Build artifacts
 build_err*.txt

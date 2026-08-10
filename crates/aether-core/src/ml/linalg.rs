@@ -21,8 +21,6 @@ use alloc::vec::Vec;
 
 #[cfg(not(feature = "std"))]
 use libm::log;
-#[cfg(feature = "std")]
-use std::f64;
 
 use super::tensor::Tensor;
 
