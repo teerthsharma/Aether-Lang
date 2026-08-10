@@ -14,9 +14,15 @@ that were later retracted. That is deliberate — the reasoning that produced a
 wrong answer is worth keeping — but it means the current state has to be
 reconstructed from a sequence of corrections. This section is the state.
 
-**The backend works and nothing uses it.** 13 WGSL kernels, resident tensors,
-batched submission, 70 tests, 0 of 10 mutants escaping. No line of `aether-core`
-or `aether-lang` calls it.
+**The backend works and nothing uses it.** 14 WGSL kernels, resident tensors,
+batched submission, 80 tests, measured against 15 mutants. No line of
+`aether-core` or `aether-lang` calls it.
+
+The newest kernel is the exception worth naming: `scheduled_attention` is the
+GPU port of this repository's headline mechanism, which until now ran only on
+the CPU while the GPU did generic MLP work. It is still not called from
+`aether-core` — the sentence above holds — but it is the first kernel here that
+implements the thing the project is about rather than a primitive it needs.
 
 **Both integrations are measured; neither is made.**
 

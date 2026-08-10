@@ -91,16 +91,40 @@ fn the_documented_test_count_matches_the_tests_that_exist() {
     );
 }
 
+/// The documented mutant denominator must match the harness.
+///
+/// This binds the count and deliberately not the result. An earlier version
+/// asserted the literal string "0 of N mutants", which made the document's only
+/// legal statement the flattering one: adding a mutant and honestly recording
+/// that it escaped would fail the test, and the cheapest way to green would be
+/// to claim a clean sweep that had not been run. A guard that can only be
+/// satisfied by a particular answer is not checking the answer.
+///
+/// What must hold is that the denominator describes the harness that exists, so
+/// a mutant added without re-running cannot hide behind a stale total.
 #[test]
 fn the_documented_mutant_count_matches_the_harness() {
     let doc = features_md();
     let actual = actual_mutant_count();
 
-    assert!(
-        doc.contains(&format!("0 of {actual} mutants")),
-        "FEATURES.md does not claim '0 of {actual} mutants', but mutants.sh \
-         declares {actual}. Either the harness gained a mutant and the summary \
-         did not, or the phrasing changed and this check needs updating."
+    let denominator = doc
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .windows(2)
+        .find_map(|w| {
+            if w[1].starts_with("mutants") {
+                w[0].parse::<usize>().ok()
+            } else {
+                None
+            }
+        })
+        .expect("FEATURES.md states no mutant count");
+
+    assert_eq!(
+        denominator, actual,
+        "FEATURES.md reports against {denominator} mutants; mutants.sh declares \
+         {actual}. A mutant was added without re-running the harness, or the \
+         summary was not updated after it was."
     );
 }
 

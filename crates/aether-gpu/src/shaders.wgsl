@@ -415,3 +415,128 @@ fn relu_backward(@builtin(global_invocation_id) gid: vec3<u32>) {
         c[idx] = 0.0;
     }
 }
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// Topology-scheduled attention
+//
+// The port of `aether_core::scheduled::scheduled_attention`: flash-style online
+// softmax over a CSR block schedule, causally masked. This is the repository's
+// headline mechanism, and until now it ran only on the CPU while the GPU did
+// generic MLP work.
+//
+// Packing. Every kernel in this file shares one four-binding layout, and
+// attention needs six arrays. Rather than introduce a second layout for one
+// kernel, the operands are concatenated: `a` holds q ‖ k ‖ v and `b` holds
+// offsets ‖ indices. The four `Dims` slots hold exactly the four sizes needed,
+// so nothing is stolen from the uniform either.
+//
+// Schedule indices travel as f32. They are block numbers bounded by num_blocks,
+// and every integer below 2^24 is exact in f32, so the conversion is lossless
+// for any schedule that fits in memory by a wide margin.
+//
+// One invocation per query row. The row owns its running max, denominator and
+// accumulator, so there is no cross-thread reduction and therefore no atomics --
+// the same reason `matmul` is deterministic applies here.
+// ═══════════════════════════════════════════════════════════════════════════════
+
+// Bounds on the private scratch arrays. A kernel cannot allocate dynamically, so
+// these are ceilings the host must check rather than negotiate.
+const MAX_HEAD_DIM: u32 = 128u;
+const MAX_BLOCK: u32 = 128u;
+
+// f32::MIN as the empty-tile sentinel. A real score reaching it would need a dot
+// product at the edge of the type, which the scale factor makes unreachable.
+const NEG_SENTINEL: f32 = -3.4028235e38;
+
+@compute @workgroup_size(64, 1, 1)
+fn scheduled_attention(@builtin(global_invocation_id) gid: vec3<u32>) {
+    let row = gid.x;
+    let seq = dims.m;
+    let head_dim = dims.k;
+    let block_size = dims.n;
+    let num_blocks = dims._pad;
+
+    if (row >= seq) {
+        return;
+    }
+
+    let q_base = 0u;
+    let k_base = seq * head_dim;
+    let v_base = 2u * seq * head_dim;
+    let idx_base = num_blocks + 1u;
+
+    let q_block = row / block_size;
+    let scale = 1.0 / sqrt(f32(head_dim));
+
+    var acc: array<f32, 128>;
+    var scores: array<f32, 128>;
+    for (var d = 0u; d < head_dim; d = d + 1u) {
+        acc[d] = 0.0;
+    }
+    var running_max = NEG_SENTINEL;
+    var denom = 0.0;
+
+    let start = u32(b[q_block]);
+    let end = u32(b[q_block + 1u]);
+
+    for (var e = start; e < end; e = e + 1u) {
+        let k_block = u32(b[idx_base + e]);
+
+        // Score tile for this (query row, key block), causally masked.
+        var tile_max = NEG_SENTINEL;
+        for (var n = 0u; n < block_size; n = n + 1u) {
+            let col = k_block * block_size + n;
+            if (col > row) {
+                scores[n] = NEG_SENTINEL;
+                continue;
+            }
+            var dot = 0.0;
+            for (var d = 0u; d < head_dim; d = d + 1u) {
+                dot = dot + a[q_base + row * head_dim + d] * a[k_base + col * head_dim + d];
+            }
+            scores[n] = dot * scale;
+            if (scores[n] > tile_max) {
+                tile_max = scores[n];
+            }
+        }
+
+        // Entirely in the future. Folding it in would rescale by
+        // exp(-inf - -inf), which is NaN rather than the zero it should be.
+        if (tile_max == NEG_SENTINEL) {
+            continue;
+        }
+
+        let previous_max = running_max;
+        let new_max = max(previous_max, tile_max);
+        // exp(sentinel - finite) underflows to zero anyway; the branch states
+        // the intent for the first block a row ever sees.
+        var alpha = 0.0;
+        if (previous_max != NEG_SENTINEL) {
+            alpha = exp(previous_max - new_max);
+        }
+
+        denom = denom * alpha;
+        for (var d = 0u; d < head_dim; d = d + 1u) {
+            acc[d] = acc[d] * alpha;
+        }
+
+        for (var n = 0u; n < block_size; n = n + 1u) {
+            if (scores[n] == NEG_SENTINEL) {
+                continue;
+            }
+            let weight = exp(scores[n] - new_max);
+            denom = denom + weight;
+            let col = k_block * block_size + n;
+            for (var d = 0u; d < head_dim; d = d + 1u) {
+                acc[d] = acc[d] + weight * a[v_base + col * head_dim + d];
+            }
+        }
+        running_max = new_max;
+    }
+
+    // `denom` is positive for every row: a causal schedule always includes the
+    // diagonal block, so a row always attends to at least itself.
+    for (var d = 0u; d < head_dim; d = d + 1u) {
+        c[row * head_dim + d] = acc[d] / denom;
+    }
+}
