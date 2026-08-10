@@ -432,6 +432,120 @@ fn launches_beyond_the_kernel_ceilings_are_rejected() {
     );
 }
 
+/// The resident and read-back paths must agree bitwise.
+///
+/// A weaker claim than it appears, and deliberately so. `scheduled_attention` is
+/// the resident call followed by a download, not a second implementation, so this
+/// asserts that the wrapper stayed a wrapper. It would fail if someone later
+/// gave the read-back path its own dispatch — which is exactly when two paths
+/// start drifting, and exactly when nothing else in this file would notice.
+#[test]
+#[cfg_attr(not(feature = "gpu"), ignore)]
+fn the_resident_and_read_back_paths_agree_bitwise() {
+    let ctx = require_context();
+    let block_size = 8;
+    let fixture = Fixture::new(48, 16, 37);
+    let schedule = dense_causal_block_schedule(fixture.seq / block_size);
+
+    let read_back = fixture
+        .on_gpu(&ctx, &schedule, block_size)
+        .expect("dispatch");
+
+    let resident = ctx
+        .scheduled_attention_resident(
+            &to_f32(&fixture.q),
+            &to_f32(&fixture.k),
+            &to_f32(&fixture.v),
+            fixture.seq,
+            fixture.head_dim,
+            &schedule,
+            block_size,
+        )
+        .expect("resident dispatch");
+
+    assert_eq!(
+        resident.rows(),
+        fixture.seq,
+        "resident output has {} rows, expected {}",
+        resident.rows(),
+        fixture.seq
+    );
+    assert_eq!(
+        resident.cols(),
+        fixture.head_dim,
+        "resident output has {} columns, expected {}",
+        resident.cols(),
+        fixture.head_dim
+    );
+
+    let downloaded = ctx.read(&resident).expect("read");
+    assert_eq!(
+        read_back, downloaded,
+        "the read-back path disagreed with the resident path it wraps"
+    );
+}
+
+/// Attention output must feed another kernel without a round trip.
+///
+/// The reason the resident path exists. Before it, every use of this kernel
+/// downloaded a full `[seq, head_dim]` result even when the next thing to happen
+/// was a matmul on the device — the transfer pattern this crate has already
+/// measured as dominating `pairwise_sqdist`.
+///
+/// The projection is checked against the same product computed from the
+/// downloaded output, so the test fails if the tensor handed to `matmul_resident`
+/// holds anything other than what the attention kernel wrote.
+#[test]
+#[cfg_attr(not(feature = "gpu"), ignore)]
+fn resident_output_chains_into_another_kernel() {
+    let ctx = require_context();
+    let block_size = 8;
+    let head_dim = 16;
+    let out_dim = 4;
+    let fixture = Fixture::new(32, head_dim, 41);
+    let schedule = dense_causal_block_schedule(fixture.seq / block_size);
+
+    let attention = ctx
+        .scheduled_attention_resident(
+            &to_f32(&fixture.q),
+            &to_f32(&fixture.k),
+            &to_f32(&fixture.v),
+            fixture.seq,
+            head_dim,
+            &schedule,
+            block_size,
+        )
+        .expect("resident dispatch");
+
+    let weights: Vec<f32> = (0..head_dim * out_dim)
+        .map(|i| ((i % 7) as f32 - 3.0) * 0.25)
+        .collect();
+    let w = ctx.upload(&weights, head_dim, out_dim).expect("weights");
+
+    let projected = ctx.matmul_resident(&attention, &w).expect("chained matmul");
+    let got = ctx.read(&projected).expect("read");
+
+    let features = ctx.read(&attention).expect("read attention");
+    let mut expected = vec![0.0f32; fixture.seq * out_dim];
+    for row in 0..fixture.seq {
+        for col in 0..out_dim {
+            let mut sum = 0.0f32;
+            for d in 0..head_dim {
+                sum += features[row * head_dim + d] * weights[d * out_dim + col];
+            }
+            expected[row * out_dim + col] = sum;
+        }
+    }
+
+    assert_eq!(got.len(), expected.len());
+    for (i, (&g, &e)) in got.iter().zip(&expected).enumerate() {
+        assert!(
+            (g - e).abs() <= 1e-5,
+            "chained product differs at {i}: {g} against {e}"
+        );
+    }
+}
+
 /// Scores large enough to overflow `exp` must still produce finite output.
 ///
 /// This test exists because a mutant escaped every other test in this file. The
