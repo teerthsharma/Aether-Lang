@@ -27,8 +27,20 @@ pub mod datasets;
 use std::borrow::Cow;
 use std::cell::RefCell;
 
+use aether_core::scheduled::BlockSchedule;
 use bytemuck::{Pod, Zeroable};
 use wgpu::util::DeviceExt;
+
+/// Mirrors `MAX_HEAD_DIM` in `shaders.wgsl`.
+///
+/// WGSL cannot size a private array from a uniform, so the kernel's scratch is
+/// fixed at compile time and the host is the only place that can reject an
+/// oversized launch. A test asserts the two constants agree, because a silent
+/// divergence here produces wrong numbers rather than an error.
+const MAX_HEAD_DIM: usize = 128;
+
+/// Mirrors `MAX_BLOCK` in `shaders.wgsl`. See [`MAX_HEAD_DIM`].
+const MAX_BLOCK: usize = 128;
 
 /// Commands recorded but not yet submitted.
 ///
@@ -140,6 +152,7 @@ pub struct GpuContext {
     softmax_xent_grad: wgpu::ComputePipeline,
     adam_moments: wgpu::ComputePipeline,
     adam_update: wgpu::ComputePipeline,
+    scheduled_attention: wgpu::ComputePipeline,
     layout: wgpu::BindGroupLayout,
     pending: RefCell<Pending>,
 }
@@ -331,6 +344,7 @@ impl GpuContext {
             softmax_xent_grad: build("softmax_xent_grad"),
             adam_moments: build("adam_moments"),
             adam_update: build("adam_update"),
+            scheduled_attention: build("scheduled_attention"),
             device,
             queue,
             info,
@@ -819,6 +833,109 @@ impl GpuContext {
 
     /// Encode and submit one kernel over already-resident buffers. No upload,
     /// no readback.
+    /// Topology-scheduled attention: the GPU port of
+    /// [`aether_core::scheduled::scheduled_attention`].
+    ///
+    /// Takes a [`BlockSchedule`] rather than raw CSR arrays so that every
+    /// schedule invariant — causality, sortedness, no empty row, indices in
+    /// range — is already enforced by the constructor that built it. Re-checking
+    /// them here would duplicate `aether-core`'s validation and, worse, allow a
+    /// caller to bypass it by assembling the arrays directly.
+    ///
+    /// The two ceilings below are the kernel's, not the algorithm's: WGSL cannot
+    /// size a private array dynamically, so the scratch space for scores and the
+    /// accumulator is fixed at compile time. Exceeding either would index out of
+    /// bounds inside the shader, which WGSL clamps rather than traps — the result
+    /// would be silently wrong numbers, so this is checked before dispatch.
+    ///
+    /// Computes in f32 against `aether-core`'s f64. Parity is asserted in
+    /// `tests/attention_parity.rs` against the CPU kernel and against the
+    /// quadratic reference, at an f32 tolerance.
+    pub fn scheduled_attention(
+        &self,
+        q: &[f32],
+        k: &[f32],
+        v: &[f32],
+        seq: usize,
+        head_dim: usize,
+        schedule: &BlockSchedule,
+        block_size: usize,
+    ) -> Result<Vec<f32>, GpuError> {
+        if head_dim == 0 || block_size == 0 || seq == 0 {
+            return Err(GpuError::ShapeMismatch(format!(
+                "seq, head_dim and block_size must all be non-zero, got \
+                 seq={seq}, head_dim={head_dim}, block_size={block_size}"
+            )));
+        }
+        if head_dim > MAX_HEAD_DIM {
+            return Err(GpuError::ShapeMismatch(format!(
+                "head_dim {head_dim} exceeds the kernel's private-array ceiling \
+                 of {MAX_HEAD_DIM}"
+            )));
+        }
+        if block_size > MAX_BLOCK {
+            return Err(GpuError::ShapeMismatch(format!(
+                "block_size {block_size} exceeds the kernel's private-array \
+                 ceiling of {MAX_BLOCK}"
+            )));
+        }
+        if !seq.is_multiple_of(block_size) {
+            return Err(GpuError::ShapeMismatch(format!(
+                "seq {seq} is not a multiple of block_size {block_size}"
+            )));
+        }
+
+        let expected = seq * head_dim;
+        for (name, operand) in [("q", q), ("k", k), ("v", v)] {
+            if operand.len() != expected {
+                return Err(GpuError::ShapeMismatch(format!(
+                    "{name} has {} elements, expected seq*head_dim = {expected}",
+                    operand.len()
+                )));
+            }
+        }
+
+        let num_blocks = seq / block_size;
+        if schedule.num_blocks() != num_blocks {
+            return Err(GpuError::ShapeMismatch(format!(
+                "schedule covers {} query blocks, but seq/block_size = {num_blocks}",
+                schedule.num_blocks()
+            )));
+        }
+
+        // One layout serves every kernel in the crate, and attention needs six
+        // arrays against its four bindings. Concatenating is what makes that fit
+        // without a second layout existing for a single caller.
+        let mut operands = Vec::with_capacity(expected * 3);
+        operands.extend_from_slice(q);
+        operands.extend_from_slice(k);
+        operands.extend_from_slice(v);
+
+        // Block indices are bounded by num_blocks and every integer below 2^24
+        // is exact in f32, so this is lossless well past any schedule that fits
+        // in memory.
+        let csr: Vec<f32> = schedule
+            .offsets
+            .iter()
+            .chain(schedule.indices.iter())
+            .map(|&i| i as f32)
+            .collect();
+
+        self.dispatch(
+            &self.scheduled_attention,
+            &operands,
+            &csr,
+            expected,
+            Dims {
+                m: seq as u32,
+                k: head_dim as u32,
+                n: block_size as u32,
+                _pad: num_blocks as u32,
+            },
+            (seq.div_ceil(64) as u32, 1, 1),
+        )
+    }
+
     fn dispatch_resident(
         &self,
         pipeline: &wgpu::ComputePipeline,

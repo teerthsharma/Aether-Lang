@@ -69,21 +69,41 @@ mutants=(
 "relu_backward: gates on the gradient not the pre-activation|s/if \(a\[idx\] > 0\.0\) \{/if (b[idx] > 0.0) {/"
 "adam_update: bias correction dropped|s/let mhat = b\[idx\] \/ \(1\.0 - pow\(ADAM_B1, t\)\);/let mhat = b[idx];/"
 "adam_update: epsilon inside the square root|s/sqrt\(vhat\) \+ ADAM_EPS/sqrt(vhat + ADAM_EPS)/"
+"scheduled_attention: causal mask never fires|s/if \(col > row\) \{/if (col > row + 1000000u) {/"
+"scheduled_attention: accumulator rescale dropped|s/acc\[d\] = acc\[d\] \* alpha;/acc[d] = acc[d] * 1.0;/"
+"scheduled_attention: denominator rescale dropped|s/denom = denom \* alpha;/denom = denom * 1.0;/"
+"scheduled_attention: softmax scale dropped|s/scores\[n\] = dot \* scale;/scores[n] = dot;/"
+"scheduled_attention: running max forgotten|s/let new_max = max\(previous_max, tile_max\);/let new_max = tile_max;/"
 )
 
-# Without a GPU every test in both suites skips and returns success, so every
-# mutant would be reported as surviving and the run would announce a total
-# coverage failure that is really an absent adapter. Refuse instead.
+# Every hardware test is `#[ignore]`d unless `--features gpu` is passed, so the
+# feature is not optional here: without it each suite runs zero tests, exits
+# zero, and reports every mutant as surviving. That is not a conservative
+# failure — it is the script describing its own invocation and calling it
+# coverage.
 #
-# This is the same class of mistake the suites themselves guard against: a
-# result that looks like a measurement but describes the environment.
-probe="$(cargo test -p aether-gpu --test gpu_parity -- --nocapture \
-    the_selected_adapter_is_real_hardware_not_a_software_rasterizer 2>&1)"
+# An earlier revision omitted the feature and guarded instead by grepping the
+# probe for "SKIP: no usable GPU adapter". That string belonged to a still older
+# design in which the tests skipped at runtime; once they became ignored behind
+# the feature the string was never printed again, so the guard could not fire and
+# the script ran on to measure nothing. The guard below is written against exit
+# status and test counts, which cannot go stale the same way.
+features="--features gpu"
 
-if printf '%s' "$probe" | grep -q "SKIP: no usable GPU adapter"; then
-    echo "no GPU adapter available." >&2
-    echo "Every kernel test would skip, so every mutant would appear to survive." >&2
-    echo "Refusing to report a coverage result that would describe the machine." >&2
+if ! probe="$(cargo test -p aether-gpu $features --test gpu_parity -- --nocapture \
+    the_selected_adapter_is_real_hardware_not_a_software_rasterizer 2>&1)"; then
+    echo "the adapter probe failed:" >&2
+    printf '%s\n' "$probe" >&2
+    echo "Refusing to report a coverage result without a working adapter." >&2
+    exit 100
+fi
+
+# A probe that selects no test also exits zero. Requiring that exactly one ran is
+# what distinguishes "the adapter works" from "the test was renamed".
+if ! printf '%s' "$probe" | grep -q "1 passed"; then
+    echo "the adapter probe ran no test." >&2
+    echo "Either the test was renamed or the feature gate changed." >&2
+    printf '%s\n' "$probe" >&2
     exit 100
 fi
 
@@ -93,8 +113,9 @@ if printf '%s' "$probe" | grep -q "device_type=Cpu"; then
     exit 100
 fi
 
-printf '%-46s %-10s %-10s\n' "MUTANT" "gpu_parity" "gradcheck"
-printf '%-46s %-10s %-10s\n' "----------------------------------------------" "----------" "----------"
+printf '%-46s %-10s %-10s %-10s\n' "MUTANT" "gpu_parity" "gradcheck" "attention"
+printf '%-46s %-10s %-10s %-10s\n' "----------------------------------------------" \
+    "----------" "----------" "----------"
 
 escaped=0
 
@@ -115,23 +136,30 @@ for entry in "${mutants[@]}"; do
 
     touch "$shader"
 
-    if cargo test -p aether-gpu --test gpu_parity >/dev/null 2>&1; then
+    if cargo test -p aether-gpu $features --test gpu_parity >/dev/null 2>&1; then
         parity="survives"
     else
         parity="CAUGHT"
     fi
 
-    if cargo test -p aether-gpu --test gradcheck >/dev/null 2>&1; then
+    if cargo test -p aether-gpu $features --test gradcheck >/dev/null 2>&1; then
         grad="survives"
     else
         grad="CAUGHT"
     fi
 
-    if [ "$parity" = "survives" ] && [ "$grad" = "survives" ]; then
-        escaped=$((escaped + 1))
-        printf '%-46s %-10s %-10s  <- ESCAPED EVERY SUITE\n' "$name" "$parity" "$grad"
+    if cargo test -p aether-gpu $features --test attention_parity >/dev/null 2>&1; then
+        attn="survives"
     else
-        printf '%-46s %-10s %-10s\n' "$name" "$parity" "$grad"
+        attn="CAUGHT"
+    fi
+
+    if [ "$parity" = "survives" ] && [ "$grad" = "survives" ] && [ "$attn" = "survives" ]; then
+        escaped=$((escaped + 1))
+        printf '%-46s %-10s %-10s %-10s  <- ESCAPED EVERY SUITE\n' \
+            "$name" "$parity" "$grad" "$attn"
+    else
+        printf '%-46s %-10s %-10s %-10s\n' "$name" "$parity" "$grad" "$attn"
     fi
 done
 
