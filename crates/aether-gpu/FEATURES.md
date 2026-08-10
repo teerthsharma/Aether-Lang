@@ -14,8 +14,8 @@ that were later retracted. That is deliberate — the reasoning that produced a
 wrong answer is worth keeping — but it means the current state has to be
 reconstructed from a sequence of corrections. This section is the state.
 
-**The backend works and nothing uses it.** 14 WGSL kernels, resident tensors,
-batched submission, 83 tests, 0 of 15 mutants escaping. No line of
+**The backend works and nothing uses it.** 18 WGSL kernels, resident tensors,
+batched submission, 86 tests, 0 of 20 mutants escaping. No line of
 `aether-core` or `aether-lang` calls it.
 
 `scheduled_attention_resident` returns a `GpuTensor` so attention output can feed
@@ -83,7 +83,7 @@ measures the schedule against the attention it approximates, not downstream task
 performance, and a selector can in principle lose mass and still serve a model
 well.
 
-### Reverse mode exists on the CPU and not yet on the GPU
+### Reverse mode, CPU reference and GPU port
 
 `recall_training` freezes attention and trains only a head, and records that as
 its narrowest assumption: a model trained end to end could reshape its queries to
@@ -110,10 +110,29 @@ unweighted, scale omitted. All five die, and only against `attention_backward`;
 the selection and mechanism suites report them surviving. **0 of 19 escape**
 across the three suites.
 
-There is no GPU port of the backward pass. The forward kernel was built the same
-way — f64 reference first, then WGSL checked against it — so this is the half
-that has to exist before the other can be verified rather than a substitute for
-it.
+Four WGSL kernels now port it. `attention_row_stats` computes the per-row
+maximum, log-sum-exp and delta once; `attention_dq`, `attention_dk` and
+`attention_dv` read them. Without that sharing, each (row, column) pair would
+cost a full sweep of the row's scheduled blocks and the kernels would be
+quadratic in the sequence where the reference is linear in the scheduled work.
+
+**No atomics anywhere**, which is a constraint rather than an optimisation. `dq`
+accumulates over the columns a query row sees, so one invocation per query row
+owns its result; `dk` and `dv` accumulate over the query rows that see a column,
+so those run one invocation per *key* row. Both directions keep accumulation
+thread-local, which makes them deterministic for the same reason `matmul` is. The
+shorter alternative — one thread per query row writing `dk` through atomics —
+would make the result depend on scheduling order, and this file already records
+that a non-deterministic kernel invalidates every A/B comparison made with it.
+
+Checked against the f64 reference on dense and sparse schedules, with the three
+gradients asserted separately: `dv` is linear in the values and never reads the
+delta term, so a mistake there leaves it exactly right while corrupting the other
+two, and a joint assertion would report one failure where the split reports which
+half is broken. A third test pins that the kernel zeroes what the reference
+zeroes — `dk` and `dv` walk the schedule in the opposite direction from every
+other kernel here, testing block membership per query block, and a test that
+answered yes too often would write gradient where there should be none.
 
 ### The function that makes the ablation fair had no test
 

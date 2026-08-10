@@ -540,3 +540,300 @@ fn scheduled_attention(@builtin(global_invocation_id) gid: vec3<u32>) {
         c[row * head_dim + d] = acc[d] / denom;
     }
 }
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// Scheduled attention, reverse mode
+//
+// The port of `aether_core::scheduled::scheduled_attention_backward`. Four entry
+// points, because the shared layout carries one output buffer and there are three
+// gradients plus the per-row statistics they all need.
+//
+// No atomics anywhere, which is a design constraint rather than an optimisation.
+// `dq` accumulates over the columns a query row sees, so one invocation per query
+// row owns its whole result. `dk` and `dv` accumulate over the query rows that see
+// a column, so those run one invocation per *key* row instead. Both directions
+// keep every accumulation thread-local, which is what makes these deterministic
+// for the same reason `matmul` is.
+//
+// The shorter alternative -- one thread per query row writing into `dk` through
+// atomics -- would make the result depend on scheduling order. This crate has
+// already recorded that a non-deterministic kernel invalidates every A/B
+// comparison made with it, because part of the measured difference becomes the
+// kernel disagreeing with itself.
+//
+// `attention_row_stats` exists so `dk` and `dv` need not rebuild a query row's
+// softmax to touch one of its columns. Without it each (row, column) pair would
+// cost a full sweep of that row's scheduled blocks, making the kernels quadratic
+// in the sequence where the CPU reference is linear in the scheduled work. With
+// it every entry point costs O(head_dim) per pair, matching the reference.
+//
+// Packing: `a` holds q ‖ k ‖ v ‖ dOut ‖ stats, where stats is three floats per
+// row -- running maximum, log-sum-exp, and the delta term. The stats kernel
+// writes them and does not read them.
+// ═══════════════════════════════════════════════════════════════════════════════
+
+// Row maximum, log-sum-exp, and delta = sum_j p_ij (dOut_i . V_j).
+//
+// Delta is what makes the softmax Jacobian a rank-one correction rather than a
+// dense matrix. It is a per-row scalar, so computing it once here is what lets
+// three kernels share it.
+@compute @workgroup_size(64, 1, 1)
+fn attention_row_stats(@builtin(global_invocation_id) gid: vec3<u32>) {
+    let row = gid.x;
+    let seq = dims.m;
+    let head_dim = dims.k;
+    let block_size = dims.n;
+    let num_blocks = dims._pad;
+
+    if (row >= seq) {
+        return;
+    }
+
+    let k_base = seq * head_dim;
+    let v_base = 2u * seq * head_dim;
+    let d_base = 3u * seq * head_dim;
+    let idx_base = num_blocks + 1u;
+
+    let q_block = row / block_size;
+    let scale = 1.0 / sqrt(f32(head_dim));
+    let start = u32(b[q_block]);
+    let end = u32(b[q_block + 1u]);
+
+    var mx = NEG_SENTINEL;
+    for (var e = start; e < end; e = e + 1u) {
+        let k_block = u32(b[idx_base + e]);
+        for (var n = 0u; n < block_size; n = n + 1u) {
+            let col = k_block * block_size + n;
+            if (col > row) {
+                continue;
+            }
+            var dot = 0.0;
+            for (var d = 0u; d < head_dim; d = d + 1u) {
+                dot = dot + a[row * head_dim + d] * a[k_base + col * head_dim + d];
+            }
+            let s = dot * scale;
+            if (s > mx) {
+                mx = s;
+            }
+        }
+    }
+
+    var denom = 0.0;
+    var weighted = 0.0;
+    for (var e = start; e < end; e = e + 1u) {
+        let k_block = u32(b[idx_base + e]);
+        for (var n = 0u; n < block_size; n = n + 1u) {
+            let col = k_block * block_size + n;
+            if (col > row) {
+                continue;
+            }
+            var dot = 0.0;
+            var dp = 0.0;
+            for (var d = 0u; d < head_dim; d = d + 1u) {
+                dot = dot + a[row * head_dim + d] * a[k_base + col * head_dim + d];
+                dp = dp + a[d_base + row * head_dim + d] * a[v_base + col * head_dim + d];
+            }
+            let w = exp(dot * scale - mx);
+            denom = denom + w;
+            weighted = weighted + w * dp;
+        }
+    }
+
+    c[row * 3u + 0u] = mx;
+    c[row * 3u + 1u] = mx + log(denom);
+    c[row * 3u + 2u] = weighted / denom;
+}
+
+// dQ_i = sum_j p_ij (dOut_i . V_j - delta_i) * scale * K_j
+@compute @workgroup_size(64, 1, 1)
+fn attention_dq(@builtin(global_invocation_id) gid: vec3<u32>) {
+    let row = gid.x;
+    let seq = dims.m;
+    let head_dim = dims.k;
+    let block_size = dims.n;
+    let num_blocks = dims._pad;
+
+    if (row >= seq) {
+        return;
+    }
+
+    let k_base = seq * head_dim;
+    let v_base = 2u * seq * head_dim;
+    let d_base = 3u * seq * head_dim;
+    let s_base = 4u * seq * head_dim;
+    let idx_base = num_blocks + 1u;
+
+    let q_block = row / block_size;
+    let scale = 1.0 / sqrt(f32(head_dim));
+    let lse = a[s_base + row * 3u + 1u];
+    let delta = a[s_base + row * 3u + 2u];
+
+    var acc: array<f32, 128>;
+    for (var d = 0u; d < head_dim; d = d + 1u) {
+        acc[d] = 0.0;
+    }
+
+    let start = u32(b[q_block]);
+    let end = u32(b[q_block + 1u]);
+    for (var e = start; e < end; e = e + 1u) {
+        let k_block = u32(b[idx_base + e]);
+        for (var n = 0u; n < block_size; n = n + 1u) {
+            let col = k_block * block_size + n;
+            if (col > row) {
+                continue;
+            }
+            var dot = 0.0;
+            var dp = 0.0;
+            for (var d = 0u; d < head_dim; d = d + 1u) {
+                dot = dot + a[row * head_dim + d] * a[k_base + col * head_dim + d];
+                dp = dp + a[d_base + row * head_dim + d] * a[v_base + col * head_dim + d];
+            }
+            let p = exp(dot * scale - lse);
+            let ds = p * (dp - delta) * scale;
+            for (var d = 0u; d < head_dim; d = d + 1u) {
+                acc[d] = acc[d] + ds * a[k_base + col * head_dim + d];
+            }
+        }
+    }
+
+    for (var d = 0u; d < head_dim; d = d + 1u) {
+        c[row * head_dim + d] = acc[d];
+    }
+}
+
+// dK_j = sum_i p_ij (dOut_i . V_j - delta_i) * scale * Q_i
+//
+// One invocation per key row, walking the query blocks that could see it. The
+// membership test runs once per query block rather than once per query row, since
+// every row in a block shares that block's schedule.
+@compute @workgroup_size(64, 1, 1)
+fn attention_dk(@builtin(global_invocation_id) gid: vec3<u32>) {
+    let col = gid.x;
+    let seq = dims.m;
+    let head_dim = dims.k;
+    let block_size = dims.n;
+    let num_blocks = dims._pad;
+
+    if (col >= seq) {
+        return;
+    }
+
+    let k_base = seq * head_dim;
+    let v_base = 2u * seq * head_dim;
+    let d_base = 3u * seq * head_dim;
+    let s_base = 4u * seq * head_dim;
+    let idx_base = num_blocks + 1u;
+
+    let k_block = col / block_size;
+    let scale = 1.0 / sqrt(f32(head_dim));
+
+    var acc: array<f32, 128>;
+    for (var d = 0u; d < head_dim; d = d + 1u) {
+        acc[d] = 0.0;
+    }
+
+    for (var q_block = k_block; q_block < num_blocks; q_block = q_block + 1u) {
+        var present = false;
+        let start = u32(b[q_block]);
+        let end = u32(b[q_block + 1u]);
+        for (var e = start; e < end; e = e + 1u) {
+            if (u32(b[idx_base + e]) == k_block) {
+                present = true;
+            }
+        }
+        if (!present) {
+            continue;
+        }
+
+        for (var m = 0u; m < block_size; m = m + 1u) {
+            let row = q_block * block_size + m;
+            if (row >= seq || col > row) {
+                continue;
+            }
+            let lse = a[s_base + row * 3u + 1u];
+            let delta = a[s_base + row * 3u + 2u];
+
+            var dot = 0.0;
+            var dp = 0.0;
+            for (var d = 0u; d < head_dim; d = d + 1u) {
+                dot = dot + a[row * head_dim + d] * a[k_base + col * head_dim + d];
+                dp = dp + a[d_base + row * head_dim + d] * a[v_base + col * head_dim + d];
+            }
+            let p = exp(dot * scale - lse);
+            let ds = p * (dp - delta) * scale;
+            for (var d = 0u; d < head_dim; d = d + 1u) {
+                acc[d] = acc[d] + ds * a[row * head_dim + d];
+            }
+        }
+    }
+
+    for (var d = 0u; d < head_dim; d = d + 1u) {
+        c[col * head_dim + d] = acc[d];
+    }
+}
+
+// dV_j = sum_i p_ij dOut_i
+//
+// The output is linear in V, so no softmax correction appears and delta is never
+// read. That asymmetry is worth noticing: a bug in delta shows in dq and dk and
+// leaves dv exactly right, which is why the tests check the three separately.
+@compute @workgroup_size(64, 1, 1)
+fn attention_dv(@builtin(global_invocation_id) gid: vec3<u32>) {
+    let col = gid.x;
+    let seq = dims.m;
+    let head_dim = dims.k;
+    let block_size = dims.n;
+    let num_blocks = dims._pad;
+
+    if (col >= seq) {
+        return;
+    }
+
+    let k_base = seq * head_dim;
+    let d_base = 3u * seq * head_dim;
+    let s_base = 4u * seq * head_dim;
+    let idx_base = num_blocks + 1u;
+
+    let k_block = col / block_size;
+    let scale = 1.0 / sqrt(f32(head_dim));
+
+    var acc: array<f32, 128>;
+    for (var d = 0u; d < head_dim; d = d + 1u) {
+        acc[d] = 0.0;
+    }
+
+    for (var q_block = k_block; q_block < num_blocks; q_block = q_block + 1u) {
+        var present = false;
+        let start = u32(b[q_block]);
+        let end = u32(b[q_block + 1u]);
+        for (var e = start; e < end; e = e + 1u) {
+            if (u32(b[idx_base + e]) == k_block) {
+                present = true;
+            }
+        }
+        if (!present) {
+            continue;
+        }
+
+        for (var m = 0u; m < block_size; m = m + 1u) {
+            let row = q_block * block_size + m;
+            if (row >= seq || col > row) {
+                continue;
+            }
+            let lse = a[s_base + row * 3u + 1u];
+
+            var dot = 0.0;
+            for (var d = 0u; d < head_dim; d = d + 1u) {
+                dot = dot + a[row * head_dim + d] * a[k_base + col * head_dim + d];
+            }
+            let p = exp(dot * scale - lse);
+            for (var d = 0u; d < head_dim; d = d + 1u) {
+                acc[d] = acc[d] + p * a[d_base + row * head_dim + d];
+            }
+        }
+    }
+
+    for (var d = 0u; d < head_dim; d = d + 1u) {
+        c[col * head_dim + d] = acc[d];
+    }
+}
