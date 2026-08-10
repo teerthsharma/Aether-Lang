@@ -108,8 +108,30 @@ The shipped code is correct — the mutant is a deliberate injection, not a bug
 found — so the tables below stand. What was missing was any test that would have
 noticed otherwise. `the_reported_budget_is_what_the_schedule_spends` now checks
 the reported counts against the schedule's own CSR rows, against the flat index
-total, and against the closed form `q + 1` for the dense schedule. With it, 0 of
-7 escape.
+total, and against the closed form `q + 1` for the dense schedule.
+
+The harness was then extended to `block_salience` and `topology_block_schedule`,
+which is where the *explanation* lives rather than the measurement. This document
+attributes the selector's deficit to salience ranking blocks by isolation, and
+that reading assumes `block_salience` computes the H0 death times it claims. If
+it did not, the anti-correlation would be an artefact and the explanation a story
+told about a bug. Seven more mutants cover it — elder rule inverted, death
+recorded for the surviving component, merges in decreasing distance, centroids
+summed rather than averaged, squared distance left unrooted, local window
+narrowed to the diagonal, sink blocks dropped. **0 of 14 escape.**
+
+The two suites turn out to cover disjoint ground: every selection mutant is
+caught only by `ablation_baselines`, every mechanism mutant only by
+`scheduled_attention`, with no overlap in either direction.
+
+Two of the mechanism mutants are rank-preserving and worth naming. Summing
+centroids instead of averaging, and leaving the squared distance unrooted, both
+scale every block identically, so the merge order and therefore every schedule
+the selector produces are unchanged. `ablation_baselines` reports `survives` for
+both, correctly — the ablation depends on the *ranking*, which those mutants do
+not touch. They die only against the one test that checks salience magnitudes.
+The distinction matters for reading this file: the ranking is what every result
+here rests on, and it is covered from two independent directions.
 
 ### A trained model finds no advantage either, and the first run of it was noise
 
