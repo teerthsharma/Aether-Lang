@@ -83,6 +83,38 @@ measures the schedule against the attention it approximates, not downstream task
 performance, and a selector can in principle lose mass and still serve a model
 well.
 
+### Reverse mode exists on the CPU and not yet on the GPU
+
+`recall_training` freezes attention and trains only a head, and records that as
+its narrowest assumption: a model trained end to end could reshape its queries to
+suit whatever schedule it was given, which would make the comparison a different
+experiment. It was frozen because there was no backward pass.
+
+`aether_core::scheduled::scheduled_attention_backward` is that pass, in f64, with
+the schedule held fixed. Holding it fixed is not a simplification — a block is
+selected or it is not, so the schedule has no useful derivative — and it means
+the gradient can teach a model to use the blocks it was given better, never to
+choose different ones.
+
+Verified by central differences against the forward kernel, which is the only
+reference that shares no assumption with the code under test. Worst disagreement
+6.535e-12 on a dense schedule and 3.859e-12 on a sparse one, against a 1e-7
+tolerance. Three structural tests sit alongside: keys the schedule excludes
+receive exactly zero gradient rather than something small, a one-hot cotangent
+recovers the forward's attention weights in `dv` and they sum to 1, and a
+mismatched cotangent is rejected.
+
+Five backward mutants are in `crates/aether-core/mutants.sh` — rank-one softmax
+correction dropped, delta unweighted, `dq` accumulating `q` instead of `k`, `dv`
+unweighted, scale omitted. All five die, and only against `attention_backward`;
+the selection and mechanism suites report them surviving. **0 of 19 escape**
+across the three suites.
+
+There is no GPU port of the backward pass. The forward kernel was built the same
+way — f64 reference first, then WGSL checked against it — so this is the half
+that has to exist before the other can be verified rather than a substitute for
+it.
+
 ### The function that makes the ablation fair had no test
 
 The selection code in `aether-core` produces every number in the two sections

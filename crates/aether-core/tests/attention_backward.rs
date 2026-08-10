@@ -95,10 +95,17 @@ const H: f64 = 1e-5;
 
 /// Tolerance on |analytic - numerical|.
 ///
-/// Set from the observed error rather than chosen: across every fixture in this
-/// file the worst disagreement is below 1e-9, and a defect in any of the three
-/// gradients moves entries by O(0.1) or more. Two orders of headroom above what
-/// is observed, seven below what a bug would produce.
+/// Measured rather than assumed. Forcing this to zero and reading the reported
+/// figures gives a worst disagreement of 6.535e-12 on the dense fixture and
+/// 3.859e-12 on the sparse one — the `q` gradient in each, since the check stops
+/// at the first operand that exceeds the bound.
+///
+/// 1e-7 therefore sits about four orders above what the arithmetic actually
+/// produces and five or more below what any of the mutants in
+/// `crates/aether-core/mutants.sh` produce, each of which moves entries by O(0.1)
+/// or more. An earlier version of this comment claimed "below 1e-9" without
+/// having run the measurement; it was true and had no business being stated as
+/// though it were known.
 const TOL: f64 = 1e-7;
 
 fn check_operand(case: &Case, schedule: &BlockSchedule, which: Operand) {
