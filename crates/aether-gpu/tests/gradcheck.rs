@@ -254,6 +254,106 @@ impl Net {
     }
 }
 
+/// Reject a fixture whose gradients cannot discriminate a correct backward pass
+/// from a broken one.
+///
+/// Every check in this file compares two computations of the same gradient. If
+/// that gradient is near zero, or constant across parameters, both sides agree
+/// trivially and the test passes without testing: all-zero weights give all-zero
+/// gradients, and a comparison of zero against zero holds for any implementation
+/// including a wrong one.
+///
+/// The fixtures are seeded, so this cannot fail today. It exists because
+/// `stage1` and `stage2` share their fixture by *seed* rather than by value — a
+/// change to `Net::new` moves both together, and neither would notice the
+/// fixture going degenerate. This is the check that would.
+fn assert_fixture_discriminates(label: &str, dw: &[Vec<f64>], db: &[Vec<f64>]) {
+    let all: Vec<f64> = dw
+        .iter()
+        .chain(db.iter())
+        .flat_map(|v| v.iter().copied())
+        .collect();
+
+    let largest = all.iter().fold(0.0f64, |m, v| m.max(v.abs()));
+    assert!(
+        largest > 1e-6,
+        "{label}: largest gradient magnitude is {largest:e}. Every comparison in \
+         this file would agree trivially, so the fixture proves nothing."
+    );
+
+    // The maximum alone is weak, and a stronger check was attempted and
+    // abandoned. Both facts are recorded because the second is the useful one.
+    //
+    // Zeroing every weight in `Net::new` leaves the bias-driven gradients
+    // non-zero, so a fixture with most of its gradients identically zero passes
+    // a maximum check unchanged. The obvious fix is to assert the *fraction* of
+    // gradients distinguishable from zero. Measured:
+    //
+    //     clean, 2-layer sigmoid 5x3x4x4        41% informative
+    //     zeroed weights                  3%, 24%, 29% informative
+    //
+    // Twelve points separate the healthy fixture from the degenerate one, and
+    // any threshold placed in that gap is chosen to fit the numbers rather than
+    // derived from anything. The reason the ranges overlap is structural: a dead
+    // ReLU unit has an exactly-zero gradient by definition, so legitimate ReLU
+    // sparsity and a zeroed weight matrix produce the identical signature. The
+    // fraction cannot tell them apart, and a threshold that appears to is
+    // reporting the seed.
+    //
+    // So the floor below only catches gross degeneracy. It would catch the 3%
+    // case and not the 24% one, and that limit is stated rather than hidden
+    // behind a tuned constant.
+    let informative = all.iter().filter(|v| v.abs() > largest * 1e-9).count();
+    let fraction = informative as f64 / all.len() as f64;
+
+    assert!(
+        fraction > 0.10,
+        "{label}: only {informative} of {} gradients ({:.0}%) are distinguishable \
+         from zero, which is below anything ReLU sparsity explains.",
+        all.len(),
+        100.0 * fraction
+    );
+}
+
+/// What the fraction above means for the suite, since it is worth stating
+/// plainly: in a healthy two-layer fixture **59% of the gradient entries are
+/// exactly zero**, because their ReLU units are inactive. Those comparisons hold
+/// for any backward pass, correct or not.
+///
+/// The test counts in this file are therefore an overstatement of what is
+/// verified. `two_layer_sigmoid_small_gpu` compares 41 entries and only 17 of
+/// them can distinguish anything. That is not a defect to fix — a gradient
+/// through a dead unit *is* zero, and asserting it is correct — but it does mean
+/// "41 gradients matched" describes less work than it sounds like.
+#[test]
+fn the_gradient_suite_states_how_much_of_it_is_comparing_zero_to_zero() {
+    let net = Net::new(5, &[3, 4, 4, 1], Head::Sigmoid, 11);
+    let x = fill(5 * 3, 11);
+    let y = targets(&net);
+    let (dw, db) = net.grads(&x, &y);
+
+    let all: Vec<f64> = dw
+        .iter()
+        .chain(db.iter())
+        .flat_map(|v| v.iter().copied())
+        .collect();
+    let largest = all.iter().fold(0.0f64, |m, v| m.max(v.abs()));
+    let informative = all.iter().filter(|v| v.abs() > largest * 1e-9).count();
+
+    println!(
+        "2-layer sigmoid 5x3x4x4: {informative} of {} gradients are non-zero ({:.0}%)",
+        all.len(),
+        100.0 * informative as f64 / all.len() as f64
+    );
+
+    // Pinned so a future change to the fixture cannot quietly reduce the
+    // informative share without anyone noticing.
+    assert!(
+        informative >= 15,
+        "only {informative} informative gradients; the fixture has drifted"
+    );
+}
+
 /// Targets: alternating labels for the sigmoid head, one-hot for softmax.
 fn targets(net: &Net) -> Vec<f64> {
     match net.head {
@@ -308,6 +408,7 @@ fn stage1(label: &str, rows: usize, dims: &[usize], head: Head, seed: u64, max_c
     }
 
     let (dw, db) = net.grads(&x, &y);
+    assert_fixture_discriminates(label, &dw, &db);
     let h = 1e-6;
 
     let total: usize =
@@ -389,6 +490,7 @@ fn stage2(
     let x64 = fill(rows * dims[0], seed);
     let y64 = targets(&net);
     let (r_dw, r_db) = net.grads(&x64, &y64);
+    assert_fixture_discriminates(label, &r_dw, &r_db);
 
     let f32v = |v: &[f64]| -> Vec<f32> { v.iter().map(|x| *x as f32).collect() };
     let layers = net.layers();
