@@ -62,22 +62,27 @@ jobs:
           -A clippy::complexity
           -A clippy::perf
 
-      # These runners have no GPU, so every test in `aether-gpu` that needs an
-      # adapter returns early — and an early return is a pass. This job
-      # therefore reports the GPU suites green while running none of them.
+      # The aether-gpu hardware tests are #[ignore]d unless its `gpu` feature is
+      # on, so this run reports them as "ignored" rather than "passed". That
+      # matters: they used to return early on a missing adapter, and an early
+      # return is a pass, so this job reported roughly forty GPU tests green
+      # while executing none of them.
       #
-      # `AETHER_REQUIRE_GPU=1` turns a missing adapter into a failure. It is
-      # deliberately NOT set here, because it would fail every run on hardware
-      # that cannot satisfy it. Set it on a GPU-equipped runner, or locally, to
-      # assert that the hardware path was actually exercised:
+      # To actually run them, on a runner that has a GPU:
       #
-      #   AETHER_REQUIRE_GPU=1 cargo test -p aether-gpu --release
+      #   AETHER_REQUIRE_GPU=1 cargo test -p aether-gpu --features gpu --release
       #
-      # Until such a runner exists, the GPU rows in the README's status
-      # dashboard are marked as verified on developer hardware rather than in
-      # CI, which is a weaker claim than the other rows carry.
+      # AETHER_REQUIRE_GPU turns a missing adapter into a failure, so the run
+      # cannot silently degrade back to skipping.
       - name: Run Tests
         run: cargo test --workspace --exclude aether-kernel
+
+      # Compile the hardware tests even though they cannot run here, so a
+      # compile error in them is caught rather than hidden behind the ignore.
+      # This is the cost of the ignore: without it, a broken GPU test would sit
+      # unnoticed until someone with an adapter ran the suite.
+      - name: Build GPU tests (compile only, no adapter on runners)
+        run: cargo build -p aether-gpu --tests --features gpu
 
   # ═══════════════════════════════════════════════════════════════════════════
   # Topological correctness gate

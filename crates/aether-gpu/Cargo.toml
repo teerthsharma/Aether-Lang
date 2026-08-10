@@ -24,6 +24,21 @@ description = "AETHER GPU: wgpu compute backend for aether-core tensor operation
 # never at the 1e-12 used elsewhere in this workspace.
 # ═══════════════════════════════════════════════════════════════════════════════
 
+[features]
+# Tests that need a real adapter are `#[ignore]`d unless this is on.
+#
+# Not because they are slow or flaky, but because without it they would *pass*
+# without running. A test that returns early on a missing adapter reports
+# success, so `cargo test --workspace` on a GPU-less runner shows the whole
+# hardware suite green while executing none of it. Marked ignored, the same run
+# prints "N ignored" instead, which is the difference between a report and a
+# lie.
+#
+# Off by default so CI is honest without configuration. Turn it on to run them:
+#
+#   cargo test -p aether-gpu --features gpu --release
+gpu = []
+
 [dependencies]
 aether-core = { path = "../aether-core" }
 wgpu = "27.0"

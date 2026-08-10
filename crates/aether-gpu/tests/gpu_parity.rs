@@ -6,10 +6,24 @@
 //! comparison, before anything interesting is attempted. Everything below it
 //! catches a narrower class of bug.
 //!
-//! Every test skips rather than fails when no adapter exists, so the suite is
-//! meaningful on a developer box with a GPU and honest on a headless runner
-//! without one. A skipped test prints why. It never reports success for work
-//! that did not happen.
+//! # Running these
+//!
+//! Every test here needs an adapter and is `#[ignore]`d unless the `gpu`
+//! feature is on:
+//!
+//! ```text
+//! cargo test -p aether-gpu --features gpu --release
+//! ```
+//!
+//! This paragraph used to claim the suite "never reports success for work that
+//! did not happen". That was false. The tests returned early on a missing
+//! adapter, and an early return is a pass, so `cargo test --workspace` on a
+//! GPU-less runner reported all of them green while running none. Marked
+//! ignored, the same run prints `0 passed; 38 ignored`, which is the state the
+//! sentence was describing rather than producing.
+//!
+//! `AETHER_REQUIRE_GPU=1` additionally turns a missing adapter into a failure,
+//! for a run that must prove the hardware path was exercised.
 
 use aether_gpu::{cpu_matmul, cpu_pairwise_sqdist, GpuContext};
 
@@ -65,6 +79,7 @@ fn fill(n: usize, seed: u64) -> Vec<f32> {
 }
 
 #[test]
+#[cfg_attr(not(feature = "gpu"), ignore = "needs a GPU adapter: --features gpu")]
 fn the_gpu_reports_which_adapter_it_is_using() {
     let Some(ctx) = context() else { return };
     let info = ctx.adapter_info();
@@ -84,6 +99,7 @@ fn the_gpu_reports_which_adapter_it_is_using() {
 /// machine without real hardware produces a visible skip rather than a quiet
 /// pass that gets reported as a GPU result.
 #[test]
+#[cfg_attr(not(feature = "gpu"), ignore = "needs a GPU adapter: --features gpu")]
 fn the_selected_adapter_is_real_hardware_not_a_software_rasterizer() {
     let Some(ctx) = context() else { return };
     let info = ctx.adapter_info();
@@ -105,6 +121,7 @@ fn the_selected_adapter_is_real_hardware_not_a_software_rasterizer() {
 
 /// The load-bearing test. GPU matmul must equal the CPU reference.
 #[test]
+#[cfg_attr(not(feature = "gpu"), ignore = "needs a GPU adapter: --features gpu")]
 fn gpu_matmul_matches_the_cpu_reference() {
     let Some(ctx) = context() else { return };
 
@@ -134,6 +151,7 @@ fn gpu_matmul_matches_the_cpu_reference() {
 
 /// The tail tile is where dispatch arithmetic fails. 16 is the workgroup edge.
 #[test]
+#[cfg_attr(not(feature = "gpu"), ignore = "needs a GPU adapter: --features gpu")]
 fn shapes_around_the_workgroup_boundary_are_handled() {
     let Some(ctx) = context() else { return };
 
@@ -157,6 +175,7 @@ fn shapes_around_the_workgroup_boundary_are_handled() {
 
 /// A non-square case catches an m/n transposition that square inputs hide.
 #[test]
+#[cfg_attr(not(feature = "gpu"), ignore = "needs a GPU adapter: --features gpu")]
 fn a_rectangular_product_is_not_transposed() {
     let Some(ctx) = context() else { return };
 
@@ -177,6 +196,7 @@ fn a_rectangular_product_is_not_transposed() {
 /// Non-determinism invalidates every A/B measurement downstream, because part
 /// of the variance being attributed to a change is the kernel's own.
 #[test]
+#[cfg_attr(not(feature = "gpu"), ignore = "needs a GPU adapter: --features gpu")]
 fn repeated_dispatches_are_bitwise_identical() {
     let Some(ctx) = context() else { return };
 
@@ -192,6 +212,7 @@ fn repeated_dispatches_are_bitwise_identical() {
 }
 
 #[test]
+#[cfg_attr(not(feature = "gpu"), ignore = "needs a GPU adapter: --features gpu")]
 fn bias_is_broadcast_across_rows_not_down_columns() {
     let Some(ctx) = context() else { return };
 
@@ -206,6 +227,7 @@ fn bias_is_broadcast_across_rows_not_down_columns() {
 }
 
 #[test]
+#[cfg_attr(not(feature = "gpu"), ignore = "needs a GPU adapter: --features gpu")]
 fn relu_clamps_negatives_and_leaves_positives_alone() {
     let Some(ctx) = context() else { return };
 
@@ -219,6 +241,7 @@ fn relu_clamps_negatives_and_leaves_positives_alone() {
 /// treats it as inactive trains to a different optimum, and the loss curve
 /// looks fine while it happens.
 #[test]
+#[cfg_attr(not(feature = "gpu"), ignore = "needs a GPU adapter: --features gpu")]
 fn relu_backward_is_zero_at_exactly_zero() {
     let Some(ctx) = context() else { return };
 
@@ -240,6 +263,7 @@ fn relu_backward_is_zero_at_exactly_zero() {
 /// reference. It must still land inside tolerance -- a tiling bug shows up as
 /// a result that is wrong by far more than rounding, usually on the tail tile.
 #[test]
+#[cfg_attr(not(feature = "gpu"), ignore = "needs a GPU adapter: --features gpu")]
 fn the_tiled_kernel_matches_the_cpu_reference() {
     let Some(ctx) = context() else { return };
 
@@ -285,6 +309,7 @@ fn the_tiled_kernel_matches_the_cpu_reference() {
 /// undefined behaviour, and this test is evidence of the defect, not a licence
 /// to rely on the omission being detectable everywhere.
 #[test]
+#[cfg_attr(not(feature = "gpu"), ignore = "needs a GPU adapter: --features gpu")]
 fn the_tiled_kernel_is_correct_across_many_tile_iterations() {
     let Some(ctx) = context() else { return };
 
@@ -325,6 +350,7 @@ fn the_tiled_kernel_is_correct_across_many_tile_iterations() {
 /// upload-and-read-back API. This is what licenses the training loop to keep
 /// intermediates on the device.
 #[test]
+#[cfg_attr(not(feature = "gpu"), ignore = "needs a GPU adapter: --features gpu")]
 fn a_resident_chain_equals_the_same_chain_with_readbacks() {
     let Some(ctx) = context() else { return };
 
@@ -360,6 +386,7 @@ fn a_resident_chain_equals_the_same_chain_with_readbacks() {
 }
 
 #[test]
+#[cfg_attr(not(feature = "gpu"), ignore = "needs a GPU adapter: --features gpu")]
 fn a_resident_matmul_rejects_disagreeing_inner_dimensions() {
     let Some(ctx) = context() else { return };
 
@@ -412,6 +439,7 @@ fn f64_matmul(a: &[f64], b: &[f64], n: usize) -> Vec<f64> {
 /// growth rather than a single tolerance is what distinguishes "f32 behaves like
 /// f32" from "f32 behaves like something is wrong".
 #[test]
+#[cfg_attr(not(feature = "gpu"), ignore = "needs a GPU adapter: --features gpu")]
 fn f32_matmul_error_grows_like_the_square_root_of_the_reduction_depth() {
     let Some(ctx) = context() else { return };
 
@@ -477,6 +505,7 @@ fn f32_matmul_error_grows_like_the_square_root_of_the_reduction_depth() {
 /// pins the number the recommendation rests on rather than leaving it in a
 /// comment that drifts.
 #[test]
+#[cfg_attr(not(feature = "gpu"), ignore = "needs a GPU adapter: --features gpu")]
 fn f32_matmul_precision_is_stated_as_a_number_not_an_adjective() {
     let Some(ctx) = context() else { return };
 
@@ -527,6 +556,7 @@ fn f32_matmul_precision_is_stated_as_a_number_not_an_adjective() {
 // ═══════════════════════════════════════════════════════════════════════════════
 
 #[test]
+#[cfg_attr(not(feature = "gpu"), ignore = "needs a GPU adapter: --features gpu")]
 fn sgd_subtracts_the_scaled_gradient() {
     let Some(ctx) = context() else { return };
 
@@ -558,6 +588,7 @@ fn sgd_subtracts_the_scaled_gradient() {
 /// The update must move against the gradient, for any gradient. Stated as a
 /// property rather than a fixture so it holds beyond the four values above.
 #[test]
+#[cfg_attr(not(feature = "gpu"), ignore = "needs a GPU adapter: --features gpu")]
 fn sgd_moves_every_parameter_against_its_gradient() {
     let Some(ctx) = context() else { return };
 
@@ -588,6 +619,7 @@ fn sgd_moves_every_parameter_against_its_gradient() {
 /// A zero learning rate must be a no-op. Catches a rate that is ignored or
 /// hardcoded, which a single non-zero rate cannot distinguish from correct.
 #[test]
+#[cfg_attr(not(feature = "gpu"), ignore = "needs a GPU adapter: --features gpu")]
 fn a_zero_learning_rate_leaves_parameters_untouched() {
     let Some(ctx) = context() else { return };
 
@@ -606,6 +638,7 @@ fn a_zero_learning_rate_leaves_parameters_untouched() {
 /// Doubling the rate must double the step. Catches a rate applied at the wrong
 /// magnitude, which the direction property above cannot see.
 #[test]
+#[cfg_attr(not(feature = "gpu"), ignore = "needs a GPU adapter: --features gpu")]
 fn the_step_scales_linearly_with_the_learning_rate() {
     let Some(ctx) = context() else { return };
 
@@ -631,6 +664,7 @@ fn the_step_scales_linearly_with_the_learning_rate() {
 }
 
 #[test]
+#[cfg_attr(not(feature = "gpu"), ignore = "needs a GPU adapter: --features gpu")]
 fn sgd_rejects_a_gradient_of_the_wrong_length() {
     let Some(ctx) = context() else { return };
 
@@ -669,6 +703,7 @@ fn adam_cpu(params: &mut [f64], grads: &[f64], m: &mut [f64], v: &mut [f64], t: 
 }
 
 #[test]
+#[cfg_attr(not(feature = "gpu"), ignore = "needs a GPU adapter: --features gpu")]
 fn adam_matches_a_cpu_reference_over_many_steps() {
     let Some(ctx) = context() else { return };
 
@@ -718,6 +753,7 @@ fn adam_matches_a_cpu_reference_over_many_steps() {
 /// correction decays as `t` grows, so a comparison after many steps cannot see
 /// whether it is there.
 #[test]
+#[cfg_attr(not(feature = "gpu"), ignore = "needs a GPU adapter: --features gpu")]
 fn the_first_adam_step_applies_bias_correction() {
     let Some(ctx) = context() else { return };
 
@@ -749,6 +785,7 @@ fn the_first_adam_step_applies_bias_correction() {
 /// property that distinguishes it from SGD. Scaling every gradient by 100 must
 /// not scale the step by 100.
 #[test]
+#[cfg_attr(not(feature = "gpu"), ignore = "needs a GPU adapter: --features gpu")]
 fn adam_normalises_away_the_gradient_scale() {
     let Some(ctx) = context() else { return };
 
@@ -793,6 +830,7 @@ fn adam_normalises_away_the_gradient_scale() {
 /// This is the general shape of an epsilon-placement bug: invisible in the
 /// regime the code normally runs in, decisive in the regime epsilon exists for.
 #[test]
+#[cfg_attr(not(feature = "gpu"), ignore = "needs a GPU adapter: --features gpu")]
 fn adams_epsilon_sits_outside_the_square_root() {
     let Some(ctx) = context() else { return };
 
@@ -829,6 +867,7 @@ fn adams_epsilon_sits_outside_the_square_root() {
 }
 
 #[test]
+#[cfg_attr(not(feature = "gpu"), ignore = "needs a GPU adapter: --features gpu")]
 fn adam_rejects_state_sized_for_a_different_parameter_count() {
     let Some(ctx) = context() else { return };
 
@@ -845,6 +884,7 @@ fn adam_rejects_state_sized_for_a_different_parameter_count() {
 // ═══════════════════════════════════════════════════════════════════════════════
 
 #[test]
+#[cfg_attr(not(feature = "gpu"), ignore = "needs a GPU adapter: --features gpu")]
 fn softmax_rows_are_probability_distributions() {
     let Some(ctx) = context() else { return };
 
@@ -876,6 +916,7 @@ fn softmax_rows_are_probability_distributions() {
 /// the identity the max-subtraction relies on, so it is asserted rather than
 /// assumed.
 #[test]
+#[cfg_attr(not(feature = "gpu"), ignore = "needs a GPU adapter: --features gpu")]
 fn softmax_is_invariant_to_a_constant_shift() {
     let Some(ctx) = context() else { return };
 
@@ -905,6 +946,7 @@ fn softmax_is_invariant_to_a_constant_shift() {
 /// to inf, and inf/inf is NaN. This is the test that would fail if someone
 /// simplified the kernel back to the naive form.
 #[test]
+#[cfg_attr(not(feature = "gpu"), ignore = "needs a GPU adapter: --features gpu")]
 fn large_logits_do_not_produce_nan_in_softmax() {
     let Some(ctx) = context() else { return };
 
@@ -931,6 +973,7 @@ fn large_logits_do_not_produce_nan_in_softmax() {
 /// Computed here from the separately-tested softmax kernel, so the two paths
 /// have to agree.
 #[test]
+#[cfg_attr(not(feature = "gpu"), ignore = "needs a GPU adapter: --features gpu")]
 fn the_fused_softmax_gradient_equals_softmax_minus_target() {
     let Some(ctx) = context() else { return };
 
@@ -967,6 +1010,7 @@ fn the_fused_softmax_gradient_equals_softmax_minus_target() {
 /// softmax probabilities sum to one and the one-hot target sums to one. This
 /// catches a missing or doubled target term that a magnitude check would not.
 #[test]
+#[cfg_attr(not(feature = "gpu"), ignore = "needs a GPU adapter: --features gpu")]
 fn the_softmax_gradient_sums_to_zero_across_each_row() {
     let Some(ctx) = context() else { return };
 
@@ -993,6 +1037,7 @@ fn the_softmax_gradient_sums_to_zero_across_each_row() {
 }
 
 #[test]
+#[cfg_attr(not(feature = "gpu"), ignore = "needs a GPU adapter: --features gpu")]
 fn the_softmax_gradient_rejects_mismatched_target_shapes() {
     let Some(ctx) = context() else { return };
 
@@ -1010,6 +1055,7 @@ fn the_softmax_gradient_rejects_mismatched_target_shapes() {
 /// by observing that something got faster. A faster kernel would also produce
 /// a timing improvement, so timing alone cannot distinguish the two.
 #[test]
+#[cfg_attr(not(feature = "gpu"), ignore = "needs a GPU adapter: --features gpu")]
 fn resident_operations_accumulate_into_one_submission() {
     let Some(ctx) = context() else { return };
 
@@ -1045,6 +1091,7 @@ fn resident_operations_accumulate_into_one_submission() {
 /// Deferring work must not change it. Same chain, forced to submit after every
 /// step, has to produce the same bytes as the batched version.
 #[test]
+#[cfg_attr(not(feature = "gpu"), ignore = "needs a GPU adapter: --features gpu")]
 fn batching_does_not_change_the_result() {
     let Some(ctx) = context() else { return };
 
@@ -1075,6 +1122,7 @@ fn batching_does_not_change_the_result() {
 /// deliberate property of the design and is pinned so it cannot regress into
 /// an implicit flush that silently costs a submission per operation.
 #[test]
+#[cfg_attr(not(feature = "gpu"), ignore = "needs a GPU adapter: --features gpu")]
 fn flush_is_required_for_recorded_work_to_execute() {
     let Some(ctx) = context() else { return };
 
@@ -1097,6 +1145,7 @@ fn flush_is_required_for_recorded_work_to_execute() {
 // ═══════════════════════════════════════════════════════════════════════════════
 
 #[test]
+#[cfg_attr(not(feature = "gpu"), ignore = "needs a GPU adapter: --features gpu")]
 fn the_distance_matrix_matches_the_cpu_reference() {
     let Some(ctx) = context() else { return };
 
@@ -1123,6 +1172,7 @@ fn the_distance_matrix_matches_the_cpu_reference() {
 /// free to check and both fail loudly on an index transposition, which is the
 /// bug this kernel is most likely to have.
 #[test]
+#[cfg_attr(not(feature = "gpu"), ignore = "needs a GPU adapter: --features gpu")]
 fn the_distance_matrix_is_symmetric_with_a_zero_diagonal() {
     let Some(ctx) = context() else { return };
 
@@ -1165,6 +1215,7 @@ fn the_distance_matrix_is_symmetric_with_a_zero_diagonal() {
 /// un-squared metric. Checked on the root, since the squared form does not
 /// satisfy the triangle inequality.
 #[test]
+#[cfg_attr(not(feature = "gpu"), ignore = "needs a GPU adapter: --features gpu")]
 fn distances_are_non_negative_and_satisfy_the_triangle_inequality() {
     let Some(ctx) = context() else { return };
 
@@ -1194,6 +1245,7 @@ fn distances_are_non_negative_and_satisfy_the_triangle_inequality() {
 }
 
 #[test]
+#[cfg_attr(not(feature = "gpu"), ignore = "needs a GPU adapter: --features gpu")]
 fn mismatched_shapes_are_rejected_rather_than_dispatched() {
     let Some(ctx) = context() else { return };
 

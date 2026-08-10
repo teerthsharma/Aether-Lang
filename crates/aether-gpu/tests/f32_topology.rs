@@ -285,6 +285,7 @@ fn exact_distances(points: &[ManifoldPoint<3>]) -> Vec<f64> {
 /// bottleneck distance. Bars shift by 1e-7; whether a bar appears or disappears
 /// is no longer guaranteed either way.
 #[test]
+#[cfg_attr(not(feature = "gpu"), ignore = "needs a GPU adapter: --features gpu")]
 fn the_filtration_ordering_guarantee_fails_as_the_cloud_grows() {
     let Some(ctx) = context() else { return };
 
@@ -364,6 +365,7 @@ fn the_filtration_ordering_guarantee_fails_as_the_cloud_grows() {
 /// and a reader needs the kernel's own error to judge whether that will hold
 /// on a different cloud.
 #[test]
+#[cfg_attr(not(feature = "gpu"), ignore = "needs a GPU adapter: --features gpu")]
 fn the_distance_kernel_error_is_bounded_by_f32_epsilon() {
     let Some(ctx) = context() else { return };
 
@@ -657,6 +659,7 @@ fn the_distance_matrix_path_rejects_matrices_that_are_not_metrics() {
 /// kernel's error. This runs `pairwise_sqdist`, takes the square root, and hands
 /// the result to the persistence engine.
 #[test]
+#[cfg_attr(not(feature = "gpu"), ignore = "needs a GPU adapter: --features gpu")]
 fn a_diagram_built_from_gpu_distances_matches_one_built_from_exact_distances() {
     let Some(ctx) = context() else { return };
 
