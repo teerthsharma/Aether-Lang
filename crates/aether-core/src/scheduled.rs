@@ -512,3 +512,224 @@ pub fn dense_masked_attention(
         q, k, v, seq, head_dim, &allow,
     ))
 }
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// Same-budget baselines
+//
+// A sparse attention schedule is easy to make look good. It runs faster than
+// dense because it does less work, and the model it feeds still trains. Neither
+// fact says the *selection* is doing anything: a schedule picking blocks at
+// random is also faster, and also trains.
+//
+// What separates them is how much of the true attention mass each schedule
+// captures at an identical budget. Three schedules bracket the answer:
+//
+//   - **random** at the same budget. If the topological schedule matches this,
+//     the mechanism contributes nothing and any gain is sparsity acting as
+//     regularisation.
+//   - **oracle** at the same budget, selecting the blocks with genuinely the
+//     largest attention mass. Unimplementable in production, since it needs the
+//     dense scores the schedule exists to avoid, but as a diagnostic it is the
+//     ceiling.
+//   - the topological schedule, whose position between those two *is* the
+//     result. Reporting that fraction is a stronger claim than any speedup, and
+//     it is what a reviewer asks for first.
+//
+// Budget is matched per row, not on average. A schedule that spends its blocks
+// unevenly could otherwise win by spending more of them where they matter, which
+// is a different mechanism from the one under test.
+// ═══════════════════════════════════════════════════════════════════════════════
+
+/// Per-row normalised attention mass of each causal key block.
+///
+/// Entry `(q_block, k_block)` is the total softmax weight that the rows of
+/// `q_block` place on the columns of `k_block`, with each row normalised over
+/// all its causally legal keys. Future blocks score zero.
+///
+/// The quantity is *additive over key blocks*, which is what makes an exact
+/// oracle possible: a schedule's recovered mass is the sum of the scores of the
+/// blocks it selects, so maximising it is choosing the largest scores rather
+/// than searching over subsets.
+fn block_mass_table(
+    q: &[f64],
+    k: &[f64],
+    seq: usize,
+    head_dim: usize,
+    block_size: usize,
+) -> Result<Vec<f64>, ScheduleError> {
+    let num_blocks = validate_blocking(seq, block_size)?;
+    if q.len() != seq * head_dim || k.len() != seq * head_dim {
+        return Err(ScheduleError::ShapeMismatch);
+    }
+
+    let scale = 1.0 / sqrt(head_dim as f64);
+    let mut table = vec![0.0f64; num_blocks * num_blocks];
+
+    for row in 0..seq {
+        let q_block = row / block_size;
+        let legal = row + 1;
+
+        let mut logits = vec![0.0f64; legal];
+        let mut max_logit = f64::NEG_INFINITY;
+        for (col, logit) in logits.iter_mut().enumerate() {
+            let mut dot = 0.0;
+            for d in 0..head_dim {
+                dot += q[row * head_dim + d] * k[col * head_dim + d];
+            }
+            *logit = dot * scale;
+            if *logit > max_logit {
+                max_logit = *logit;
+            }
+        }
+
+        let denominator: f64 = logits.iter().map(|&l| exp(l - max_logit)).sum();
+        for (col, &logit) in logits.iter().enumerate() {
+            let k_block = col / block_size;
+            table[q_block * num_blocks + k_block] += exp(logit - max_logit) / denominator;
+        }
+    }
+
+    // Each row contributes a total of 1.0 spread across its blocks, so dividing
+    // by the rows per block puts the table on the same scale as the per-row
+    // average that `block_mass_recovered` reports.
+    for entry in table.iter_mut() {
+        *entry /= block_size as f64;
+    }
+    Ok(table)
+}
+
+/// Fraction of the true attention mass a schedule captures, averaged over rows.
+///
+/// 1.0 means the schedule loses nothing against dense causal attention, and is
+/// exactly what [`dense_causal_block_schedule`] scores. This is the axis every
+/// selector is compared on.
+pub fn block_mass_recovered(
+    schedule: &BlockSchedule,
+    q: &[f64],
+    k: &[f64],
+    seq: usize,
+    head_dim: usize,
+    block_size: usize,
+) -> Result<f64, ScheduleError> {
+    let num_blocks = validate_blocking(seq, block_size)?;
+    if schedule.num_blocks() != num_blocks {
+        return Err(ScheduleError::ShapeMismatch);
+    }
+    let table = block_mass_table(q, k, seq, head_dim, block_size)?;
+
+    let mut total = 0.0;
+    for q_block in 0..num_blocks {
+        for &k_block in schedule.row(q_block) {
+            total += table[q_block * num_blocks + k_block];
+        }
+    }
+    Ok(total / num_blocks as f64)
+}
+
+/// Blocks each query block spends, read off an existing schedule.
+///
+/// The budget a baseline must match. Returned rather than assumed because the
+/// topological schedule's row lengths vary: a row near the start of the sequence
+/// has fewer causal blocks to choose from than the config would otherwise admit.
+pub fn schedule_budget(schedule: &BlockSchedule) -> Vec<usize> {
+    (0..schedule.num_blocks())
+        .map(|q_block| schedule.row(q_block).len())
+        .collect()
+}
+
+/// A uniformly random causal schedule spending exactly `budget` blocks per row.
+///
+/// The baseline that answers whether selection matters at all. Deterministic in
+/// `seed`, because a baseline that changes between runs cannot be compared
+/// against anything.
+///
+/// Sampling is a partial Fisher-Yates over the causal candidates, which draws
+/// without replacement in one pass. Rejection sampling would be shorter and
+/// degrades exactly where this is most used: when the budget approaches the
+/// number of candidates, as it does for every early query block.
+pub fn random_block_schedule(budget: &[usize], seed: u64) -> Result<BlockSchedule, ScheduleError> {
+    let num_blocks = budget.len();
+    let mut state = seed
+        .wrapping_mul(6364136223846793005)
+        .wrapping_add(1442695040888963407);
+    let mut next = move || {
+        state = state
+            .wrapping_mul(6364136223846793005)
+            .wrapping_add(1442695040888963407);
+        state >> 33
+    };
+
+    let mut rows = Vec::with_capacity(num_blocks);
+    for (q_block, &want) in budget.iter().enumerate() {
+        let candidates = q_block + 1;
+        if want == 0 {
+            return Err(ScheduleError::EmptyRow { q_block });
+        }
+        // More blocks than exist causally cannot be spent. Clamping rather than
+        // erroring keeps a baseline usable against any reference schedule, and a
+        // valid reference can never ask for more than this anyway.
+        let take = if want > candidates { candidates } else { want };
+
+        let mut pool: Vec<usize> = (0..candidates).collect();
+        for i in 0..take {
+            let j = i + (next() as usize) % (candidates - i);
+            pool.swap(i, j);
+        }
+        let mut row: Vec<usize> = pool[..take].to_vec();
+        row.sort_unstable();
+        rows.push(row);
+    }
+
+    BlockSchedule::from_rows(&rows)
+}
+
+/// The highest-mass causal schedule at a given per-row budget.
+///
+/// Not implementable in production: it reads the dense scores that a sparse
+/// schedule exists to avoid computing. As a diagnostic it is the ceiling, and it
+/// is *exactly* the ceiling rather than an approximation of one — recovered mass
+/// is additive over key blocks, so taking the largest per-block scores is optimal
+/// by construction rather than by search.
+///
+/// That optimality is asserted as a property rather than trusted. A schedule that
+/// ever recovers more mass than this at the same budget would mean the table this
+/// ranks by is not measuring what the recovery measures.
+pub fn oracle_block_schedule(
+    q: &[f64],
+    k: &[f64],
+    seq: usize,
+    head_dim: usize,
+    block_size: usize,
+    budget: &[usize],
+) -> Result<BlockSchedule, ScheduleError> {
+    let num_blocks = validate_blocking(seq, block_size)?;
+    if budget.len() != num_blocks {
+        return Err(ScheduleError::ShapeMismatch);
+    }
+    let table = block_mass_table(q, k, seq, head_dim, block_size)?;
+
+    let mut rows = Vec::with_capacity(num_blocks);
+    for (q_block, &want) in budget.iter().enumerate() {
+        let candidates = q_block + 1;
+        if want == 0 {
+            return Err(ScheduleError::EmptyRow { q_block });
+        }
+        let take = if want > candidates { candidates } else { want };
+
+        let mut ranked: Vec<usize> = (0..candidates).collect();
+        // Descending by mass. Ties break on the lower block index so the result
+        // does not depend on the sort's stability guarantees.
+        ranked.sort_by(|&a, &b| {
+            let ma = table[q_block * num_blocks + a];
+            let mb = table[q_block * num_blocks + b];
+            mb.partial_cmp(&ma)
+                .unwrap_or(core::cmp::Ordering::Equal)
+                .then(a.cmp(&b))
+        });
+        let mut row: Vec<usize> = ranked[..take].to_vec();
+        row.sort_unstable();
+        rows.push(row);
+    }
+
+    BlockSchedule::from_rows(&rows)
+}
