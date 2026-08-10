@@ -19,10 +19,10 @@
 #[cfg(feature = "alloc")]
 use alloc::vec::Vec;
 
-#[cfg(not(feature = "std"))]
-use libm::fabs; // Adjust based on usage
-#[cfg(feature = "std")]
-use std::f64;
+// No `use std::f64;` here on purpose. Importing the module shadows the `f64`
+// primitive at path position, so `f64::MAX` resolves to the deprecated module
+// constant `std::f64::MAX` instead of the associated constant on the type, and
+// `-D warnings` turns that into a build failure on current nightly.
 
 use super::linalg::LossConfig;
 use super::tensor::Tensor;
