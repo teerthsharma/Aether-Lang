@@ -206,6 +206,83 @@ fn the_inverted_selector_ignores_the_block_with_no_finite_death() {
     }
 }
 
+/// The reported budget must be what the schedule actually spends.
+///
+/// This test exists because a mutant that made `schedule_budget` report one
+/// block too many per row survived every other test in this file.
+///
+/// Nothing else covers it, and it is the function the whole ablation rests on.
+/// Every baseline is constructed from its output, so an inflated budget hands
+/// random and oracle selection blocks the topological schedule never spent, and
+/// the comparison stops being same-budget while still being labelled one. The
+/// bias has a direction: the baselines get stronger and the selector looks
+/// worse, which is the direction of the conclusion this repository has already
+/// drawn from these numbers. A defect that pushes a result the way the result
+/// already went is the one least likely to be questioned.
+///
+/// Checked against the schedule's own CSR structure rather than against a
+/// recomputed expectation, since a recomputation would repeat whatever mistake
+/// the function makes.
+#[test]
+fn the_reported_budget_is_what_the_schedule_spends() {
+    let case = Case::new(64, 16, 8, 47);
+    let num_blocks = case.seq / case.block_size;
+
+    let config = TopologyScheduleConfig {
+        block_size: case.block_size,
+        local_radius_blocks: 1,
+        sink_blocks: 1,
+        topk_topology_blocks: 2,
+    };
+    let topological =
+        topology_block_schedule(&case.k, case.seq, case.head_dim, config).expect("valid config");
+    let dense = dense_causal_block_schedule(num_blocks);
+
+    for (label, schedule) in [("topological", &topological), ("dense", &dense)] {
+        let budget = schedule_budget(schedule);
+
+        assert_eq!(
+            budget.len(),
+            num_blocks,
+            "{label}: budget covers {} query blocks, schedule has {num_blocks}",
+            budget.len()
+        );
+
+        for (q_block, &spent) in budget.iter().enumerate() {
+            assert_eq!(
+                spent,
+                schedule.row(q_block).len(),
+                "{label}: row {q_block} reported {spent} blocks but holds {}",
+                schedule.row(q_block).len()
+            );
+        }
+
+        // The totals must agree with the flat index array, which catches a
+        // per-row count that is individually right and collectively wrong.
+        assert_eq!(
+            budget.iter().sum::<usize>(),
+            schedule.indices.len(),
+            "{label}: budget totals {} against {} scheduled blocks",
+            budget.iter().sum::<usize>(),
+            schedule.indices.len()
+        );
+    }
+
+    // The dense schedule's budget is known in closed form: query block q sees
+    // q + 1 causal blocks. An independent value, not a restatement of the
+    // structure just checked.
+    let dense_budget = schedule_budget(&dense);
+    for (q_block, &spent) in dense_budget.iter().enumerate() {
+        assert_eq!(
+            spent,
+            q_block + 1,
+            "dense row {q_block} spends {spent} blocks, not the {} causal blocks \
+             that exist",
+            q_block + 1
+        );
+    }
+}
+
 /// A baseline must spend exactly the budget it was given, per row.
 ///
 /// The comparison is only about selection if the two schedules cost the same.
