@@ -24,6 +24,56 @@ the CPU while the GPU did generic MLP work. It is still not called from
 `aether-core` — the sentence above holds — but it is the first kernel here that
 implements the thing the project is about rather than a primitive it needs.
 
+### The selector recovers less attention mass than random selection
+
+The first same-budget ablation of the topological schedule, and it does not
+support the mechanism. Recovered attention mass, per-row budget matched exactly,
+`cargo run -p aether-gpu --example selector_ablation --release`:
+
+| seq | density | random | topological | oracle | position |
+|---:|---:|---:|---:|---:|---:|
+| 64 | 72.2% | 0.8151 | 0.8475 | 0.9483 | 24.3% |
+| 128 | 36.8% | 0.4976 | 0.5674 | 0.6799 | 38.3% |
+| 256 | 20.8% | 0.3208 | 0.3711 | 0.4728 | 33.1% |
+| 512 | 12.0% | 0.2281 | 0.2337 | 0.3272 | 5.6% |
+
+Position is `(topological - random) / (oracle - random)`: the share of the
+achievable gain the selector captures. It collapses as the sequence lengthens,
+which is the regime sparse attention exists for.
+
+Two explanations fitted, and they separate cleanly. Holding `seq` at 512 and
+raising only `topk_topology_blocks` does not recover the position — it drives it
+**negative**, to −109% at top-k 32, where the selector recovers 0.7446 against
+random's 0.8643. More budget spent on topology makes the schedule worse. On iid
+keys, the control for the drifting fixture rewarding locality, position is
+negative at every allowance.
+
+**The signal is real and its sign is reversed.** `block_salience` scores a block
+by H0 death time under single-linkage merging, which measures how *isolated* it
+is. Attention mass concentrates where a key resembles the query, and a block
+unlike everything else is unlike the typical query too. Selecting the
+*lowest*-salience blocks instead, at an identical budget:
+
+| top-k | random | highest | lowest | oracle | lowest position |
+|---:|---:|---:|---:|---:|---:|
+| 2 | 0.2281 | 0.2337 | 0.2547 | 0.3272 | 26.9% |
+| 4 | 0.3089 | 0.2932 | 0.3521 | 0.4383 | 33.4% |
+| 8 | 0.4404 | 0.3882 | 0.5053 | 0.6097 | 38.3% |
+| 16 | 0.6337 | 0.5308 | 0.7177 | 0.8218 | 44.7% |
+
+Inverted, the selector beats random by a margin that *grows* with budget, which
+is what an informative signal looks like. `topology_block_schedule` is left
+unchanged: flipping the ranking changes what the method is, and that is a
+decision to take deliberately rather than as a side effect of an ablation.
+
+Limits: two synthetic fixtures on one machine, `head_dim` 32 and `block_size` 8
+throughout. The iid position percentages divide by a headroom of about 0.008 and
+are unstable as ratios — the absolute deficit there is 0.0148, small but
+consistently negative across every allowance. No trained model is involved; this
+measures the schedule against the attention it approximates, not downstream task
+performance, and a selector can in principle lose mass and still serve a model
+well.
+
 **Both integrations are measured; neither is made.**
 
 | candidate | verdict | why |
