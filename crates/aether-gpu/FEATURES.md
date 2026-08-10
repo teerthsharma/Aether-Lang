@@ -83,6 +83,34 @@ measures the schedule against the attention it approximates, not downstream task
 performance, and a selector can in principle lose mass and still serve a model
 well.
 
+### The function that makes the ablation fair had no test
+
+The selection code in `aether-core` produces every number in the two sections
+below, and none of those numbers is checked against an external reference — they
+are computed. A mutation harness at `crates/aether-core/mutants.sh` measures
+whether the eight contract tests could tell if the computation were wrong. Six of
+seven mutants died. One survived:
+
+```
+schedule_budget: reports one block too many          survives  <- ESCAPED
+```
+
+`schedule_budget` reads the per-row block counts off the topological schedule,
+and every baseline is built from its output. Inflating it hands random and oracle
+selection blocks the topological schedule never spent, so the comparison stops
+being same-budget while still being labelled one. The bias has a direction: the
+baselines get stronger and the selector looks worse, which is the direction of
+the conclusion already drawn here. A defect that pushes a result the way the
+result already went is the one least likely to be questioned, and it was the one
+with no coverage.
+
+The shipped code is correct — the mutant is a deliberate injection, not a bug
+found — so the tables below stand. What was missing was any test that would have
+noticed otherwise. `the_reported_budget_is_what_the_schedule_spends` now checks
+the reported counts against the schedule's own CSR rows, against the flat index
+total, and against the closed form `q + 1` for the dense schedule. With it, 0 of
+7 escape.
+
 ### A trained model finds no advantage either, and the first run of it was noise
 
 The mass measurement above compares a schedule against the attention it
