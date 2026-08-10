@@ -1,6 +1,7 @@
 [workspace]
 members = [
     "crates/aether-core",
+    "crates/aether-gpu",
     "crates/aether-lang",
     "crates/aether-kernel",
     "crates/aether-cli",

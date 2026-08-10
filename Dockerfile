@@ -9,7 +9,13 @@
 FROM rust:1-bookworm AS builder
 
 # rust-toolchain.toml pins nightly; rustup honours it on first cargo invocation.
-RUN rustup toolchain install nightly --component rust-src llvm-tools-preview
+#
+# `--component` takes one value per flag. Passing two names after a single flag
+# made rustup read the second as a toolchain:
+#   error: invalid value 'llvm-tools-preview' for '[TOOLCHAIN]...'
+RUN rustup toolchain install nightly \
+    --component rust-src \
+    --component llvm-tools-preview
 
 WORKDIR /build
 
