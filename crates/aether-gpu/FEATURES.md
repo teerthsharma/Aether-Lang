@@ -494,9 +494,40 @@ distance path is viable here in practice; it just cannot be *proved* viable by
 the ordering argument, and a caller who needs a guarantee rather than evidence
 does not have one.
 
+### End to end, through the engine
+
+Every result above was a proxy. The coordinate test rounded inputs and computed
+in f64; the perturbation study displaced points to *model* the kernel's error.
+Neither ran a diagram through actual kernel output, because the engine took
+points rather than a distance matrix.
+
+`aether_core::persistence::persistent_homology_from_distances` closes that. It
+builds a Rips filtration from a supplied `[n, n]` matrix, sharing the simplex
+enumeration with the point-based path rather than duplicating it, and validates
+that the matrix is square, symmetric, zero-diagonal, non-negative and finite —
+because an asymmetric matrix still produces a barcode, silently, and that
+barcode answers no question. The triangle inequality is deliberately not
+checked: Rips is defined for any symmetric non-negative dissimilarity.
+
+Diagrams from real `pairwise_sqdist` output against exact f64 distances:
+
+| n | homology | distance error | bottleneck | Betti |
+|---:|---|---:|---:|---|
+| 32 | H₁ | — | — | identical |
+| 64 | H₁ | 9.435e-8 | 3.389e-8 | identical |
+| 128 | H₀ | 1.127e-7 | 2.384e-8 | identical |
+
+The bottleneck distance comes in *below* the distance error every time, which is
+what the bound predicts: perturbing every filtration value by at most δ moves
+the diagram by at most δ.
+
+The matrix path is also asserted to reproduce the point path bar for bar on
+identical input, to 1e-15. An entry point that generalises another one owes that
+first — otherwise every result obtained through it describes a different engine.
+
 None of which makes the kernel worth using: it still measures 0.52× the CPU
-reference at n=512. The precision objection is answered and the performance one
-is not.
+reference at n=512. The precision objection is now answered end to end, at every
+level from coordinates to barcode. The performance one is untouched.
 
 ## Negative results
 
