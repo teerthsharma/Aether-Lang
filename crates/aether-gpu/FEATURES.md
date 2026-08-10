@@ -421,6 +421,43 @@ distance **exceeds ε** while staying under 2ε. The factor of 2 in the theorem 
 load-bearing here, not slack — a test written against ε rather than 2ε would
 fail on real data and look like a precision bug.
 
+### The accumulation half, which is worse
+
+Everything above rounds the *coordinates* and then computes in f64. A real
+kernel also rounds every subtraction, square and partial sum, and that error is
+not bounded by the coordinate displacement. Running the actual kernel:
+
+```
+kernel vs f32 CPU reference   2.384e-7 (squared units)
+kernel vs exact f64           3.671e-7 relative
+```
+
+A Vietoris–Rips filtration is determined by the **order** simplices enter, not
+their values. If every distance moves by less than half the smallest gap between
+two distinct distances, no pair can swap and the combinatorics are identical by
+construction. Measured:
+
+| n | distance error | smallest distinct gap | ratio | ordering |
+|---:|---:|---:|---:|---|
+| 16 | 5.013e-8 | 3.014e-6 | 0.017 | guaranteed |
+| 32 | 6.690e-8 | 3.857e-6 | 0.017 | guaranteed |
+| 64 | 1.099e-7 | 9.380e-9 | **11.7** | **not guaranteed** |
+| 96 | 8.323e-8 | 7.318e-8 | **1.14** | **not guaranteed** |
+
+**The guarantee fails at n=64** — an eighth of the 512 points `h0_only` admits.
+The kernel's error is roughly constant at f32 epsilon, but n points carry
+n(n−1)/2 distances inside a bounded range, so the smallest gap shrinks
+quadratically. The two curves cross between 32 and 64 and never come back.
+
+So the iteration-14 conclusion needs narrowing. An f32 distance path **cannot
+promise identical combinatorics at the sizes this engine is configured for**.
+What survives is the weaker bound: filtration values move by at most the
+distance error, so bars shift by about 1e-7. Whether a bar appears or disappears
+is no longer settled by construction, and would have to be measured per cloud.
+
+Combined with the kernel measuring 0.52× the CPU reference at n=512, the case
+for routing `aether-core` through it is now weaker than it looked, not stronger.
+
 ## Negative results
 
 **The distance kernel does not currently help the persistence engine.**
