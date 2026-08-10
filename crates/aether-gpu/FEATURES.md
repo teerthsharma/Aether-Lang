@@ -15,7 +15,7 @@ wrong answer is worth keeping — but it means the current state has to be
 reconstructed from a sequence of corrections. This section is the state.
 
 **The backend works and nothing uses it.** 14 WGSL kernels, resident tensors,
-batched submission, 80 tests, measured against 15 mutants. No line of
+batched submission, 81 tests, 0 of 15 mutants escaping. No line of
 `aether-core` or `aether-lang` calls it.
 
 The newest kernel is the exception worth naming: `scheduled_attention` is the

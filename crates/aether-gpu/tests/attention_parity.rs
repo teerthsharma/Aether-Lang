@@ -432,6 +432,89 @@ fn launches_beyond_the_kernel_ceilings_are_rejected() {
     );
 }
 
+/// Scores large enough to overflow `exp` must still produce finite output.
+///
+/// This test exists because a mutant escaped every other test in this file. The
+/// running max was replaced by the current tile's max — `new_max = tile_max`
+/// instead of `max(previous_max, tile_max)` — and nothing here noticed.
+///
+/// Nothing noticed because the mutation is algebraically equivalent. The online
+/// rescale is exact: multiplying the accumulator by `exp(old_m - new_m)` and the
+/// new weights by `exp(score - new_m)` leaves `acc / denom` unchanged for *any*
+/// choice of `m`. Subtracting the running max is not what makes the result
+/// correct, it is what keeps the intermediate values inside the type. With
+/// well-conditioned inputs the two versions agree to the last bit, so no
+/// comparison against a reference can separate them.
+///
+/// What separates them is an input where the difference matters. The first key
+/// block is scaled so its scores exceed later blocks by more than 88, the point
+/// at which `exp` overflows f32. The correct kernel meets the large block first,
+/// keeps its max, and rescales later blocks *down*. The mutant adopts each
+/// tile's own max, so it rescales the accumulator *up* by `exp(previous - tile)`
+/// and overflows to infinity, then to NaN on the division.
+///
+/// The lesson generalises past this kernel: a numerical-stability guard cannot
+/// be tested on numerically comfortable inputs, and a suite that only uses them
+/// will report full coverage of code it never exercised.
+#[test]
+#[cfg_attr(not(feature = "gpu"), ignore)]
+fn scores_large_enough_to_overflow_exp_stay_finite() {
+    let ctx = require_context();
+    let block_size = 8;
+    let head_dim = 16;
+    let seq = 32;
+    let mut fixture = Fixture::new(seq, head_dim, 31);
+
+    // All-positive queries, so the dot product with a large positive key block
+    // cannot cancel to something small.
+    for value in fixture.q.iter_mut() {
+        *value += 1.0;
+    }
+    // The first key block alone is large. Later blocks keep their small scores,
+    // which is what makes the gap — a uniformly large input would raise every
+    // tile max together and rescale to nothing.
+    for row in 0..block_size {
+        for d in 0..head_dim {
+            fixture.k[row * head_dim + d] = 50.0;
+        }
+    }
+
+    let schedule = dense_causal_block_schedule(seq / block_size);
+    let gpu = fixture
+        .on_gpu(&ctx, &schedule, block_size)
+        .expect("dispatch");
+
+    for (i, &value) in gpu.iter().enumerate() {
+        assert!(
+            value.is_finite(),
+            "output {i} is {value}: an intermediate overflowed, which is what \
+             subtracting the running max exists to prevent"
+        );
+    }
+
+    let cpu = fixture.on_cpu(&schedule, block_size);
+    assert_close(&gpu, &cpu, "large-logit input");
+
+    // The control. If the constructed scores were not actually far enough apart,
+    // every assertion above would hold on a kernel with no overflow guard at all.
+    let scale = 1.0 / (head_dim as f64).sqrt();
+    let late_row = seq - 1;
+    let big: f64 = (0..head_dim)
+        .map(|d| fixture.q[late_row * head_dim + d] * fixture.k[d])
+        .sum::<f64>()
+        * scale;
+    let small: f64 = (0..head_dim)
+        .map(|d| fixture.q[late_row * head_dim + d] * fixture.k[late_row * head_dim + d])
+        .sum::<f64>()
+        * scale;
+    assert!(
+        big - small > 88.0,
+        "the score gap is {:.1}, below the ~88 at which exp overflows f32, so \
+         this input does not exercise the guard it was built for",
+        big - small
+    );
+}
+
 /// The host's ceilings must equal the shader's.
 ///
 /// They are declared twice because WGSL cannot import a Rust constant. If they
