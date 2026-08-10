@@ -423,20 +423,44 @@ dispatches at all — it only uploads large buffers and drops them. Whatever the
 fault is, it is not recorded-but-unread work referencing freed buffers, which
 was the hypothesis the previous entry recorded.
 
-That leaves allocation churn itself. `alloc` moves roughly 1.6 GB through
-create-and-drop on an 8 GB adapter, using nothing but `upload` and `Drop`. This
-crate contains no `unsafe` and does no manual lifetime management on the wgpu
-side, so the fault is below the level this code operates at.
-
 The rate differences between the first three patterns are **not** statistically
 resolved at 30 runs — 2/30 against 0/30 is nowhere near significant, and reading
 a ranking into them would be over-interpreting. Only the qualitative result is
 solid, and it does not depend on the rates: a pattern with zero dispatches
 crashes, so dispatch handling is not the mechanism.
 
-Left open, and left below rather than in **Shipped**. The next step is a report
-against wgpu with `teardown_repro` as the reproduction, not further changes
-here.
+### It is the multi-backend instance
+
+The next two questions were backend and size dependence, both unmeasured.
+Answering them needed `WGPU_BACKEND` support in `GpuContext` first:
+`InstanceDescriptor::default()` does not read that variable, so setting it
+without this change measures whatever backend would have been chosen anyway.
+
+| backend | n=512 | n=1024 | n=2048 |
+|---|---:|---:|---:|
+| Vulkan pinned | 0/30 | 0/30 | 0/30 |
+| DX12 pinned | 0/30 | 0/30 | 0/30 |
+
+Zero everywhere — including the cell that had produced 6/30. A crash that
+disappears as soon as it is measured is not a result, so the original condition
+was re-run as a control: same binary, `WGPU_BACKEND` unset, n=2048, **2/30**.
+
+Pooling every observation by whether a backend was pinned:
+
+| instance | crashes |
+|---|---:|
+| all backends (`Backends::default()`, no env var) | **8 / 60** |
+| a single backend pinned, either one | **0 / 180** |
+
+8/60 against 0/180 is significant where the individual cells were not. The fault
+tracks **instantiating every backend at once**. Not buffer size — nothing at
+512, 1024 or 2048 with a backend pinned. Not allocation volume. Not the choice
+between Vulkan and DX12, since either alone is clean.
+
+Left open here because the mechanism sits in wgpu's multi-backend instance
+teardown, below anything this crate controls. `teardown_repro` is the
+reproduction to attach to a report, and the useful sentence for it is that
+pinning a backend is a complete workaround.
 
 The `Drop` impl earns its place regardless of this: without it, work recorded
 and never flushed is discarded silently, so a caller that updates parameters and
