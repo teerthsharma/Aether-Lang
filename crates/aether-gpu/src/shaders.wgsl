@@ -127,6 +127,108 @@ fn pairwise_sqdist(@builtin(global_invocation_id) gid: vec3<u32>) {
     c[i * dims.m + j] = sum;
 }
 
+// Logistic sigmoid, elementwise.
+//
+// Computed in the branch form rather than as 1/(1+exp(-x)) directly: exp of a
+// large positive magnitude overflows f32 at around 88, and the naive form hits
+// that for x <= -88 while the algebraically identical exp(x)/(1+exp(x)) is
+// stable there. Each branch uses whichever form keeps the exponent negative.
+@compute @workgroup_size(256, 1, 1)
+fn sigmoid(@builtin(global_invocation_id) gid: vec3<u32>) {
+    let idx = gid.x;
+    let total = dims.m * dims.n;
+
+    if (idx >= total) {
+        return;
+    }
+
+    let x = a[idx];
+    if (x >= 0.0) {
+        c[idx] = 1.0 / (1.0 + exp(-x));
+    } else {
+        let e = exp(x);
+        c[idx] = e / (1.0 + e);
+    }
+}
+
+// Fused gradient of binary cross-entropy through a sigmoid: (sigmoid(z) - y)/m.
+//
+// Fused because the composition collapses. Computing sigmoid, then the BCE
+// derivative, then the sigmoid derivative separately would evaluate
+// p*(1-p) explicitly, which underflows to zero once p saturates and silently
+// kills the gradient. The collapsed form never forms that product.
+@compute @workgroup_size(256, 1, 1)
+fn sigmoid_bce_grad(@builtin(global_invocation_id) gid: vec3<u32>) {
+    let idx = gid.x;
+    let total = dims.m * dims.n;
+
+    if (idx >= total) {
+        return;
+    }
+
+    let z = a[idx];
+    var p: f32;
+    if (z >= 0.0) {
+        p = 1.0 / (1.0 + exp(-z));
+    } else {
+        let e = exp(z);
+        p = e / (1.0 + e);
+    }
+
+    c[idx] = (p - b[idx]) / f32(dims.m);
+}
+
+// C = transpose(A), where A is [m, n] and C is [n, m].
+//
+// A transpose is pure data movement, so on its own it is not worth a dispatch.
+// It earns one here only because the alternative inside a training step is a
+// readback: the backward pass needs A^T for a matmul whose operands are already
+// resident, and doing the transpose on the host would drag the whole tensor
+// across the bus and back to avoid a few microseconds of arithmetic.
+@compute @workgroup_size(16, 16, 1)
+fn transpose(@builtin(global_invocation_id) gid: vec3<u32>) {
+    let row = gid.x;
+    let col = gid.y;
+
+    if (row >= dims.m || col >= dims.n) {
+        return;
+    }
+
+    c[col * dims.m + row] = a[row * dims.n + col];
+}
+
+// Column sums of an [m, n] matrix, one invocation per column. Used for the bias
+// gradient, which is the sum of the incoming gradient down the batch axis.
+@compute @workgroup_size(256, 1, 1)
+fn column_sums(@builtin(global_invocation_id) gid: vec3<u32>) {
+    let col = gid.x;
+
+    if (col >= dims.n) {
+        return;
+    }
+
+    var sum = 0.0;
+    for (var r: u32 = 0u; r < dims.m; r = r + 1u) {
+        sum = sum + a[r * dims.n + col];
+    }
+    c[col] = sum;
+}
+
+// SGD update in place: c = a - lr * b, with lr passed in the unused dims slot
+// reinterpreted as a float. Keeps the parameter update on the device so weights
+// never leave it across an epoch.
+@compute @workgroup_size(256, 1, 1)
+fn sgd_update(@builtin(global_invocation_id) gid: vec3<u32>) {
+    let idx = gid.x;
+    let total = dims.m * dims.n;
+
+    if (idx >= total) {
+        return;
+    }
+
+    c[idx] = a[idx] - bitcast<f32>(dims._pad) * b[idx];
+}
+
 // Elementwise C = A + B, with B broadcast over rows when it holds a single row.
 // Bias addition in a dense layer is the broadcast case.
 @compute @workgroup_size(256, 1, 1)

@@ -107,6 +107,11 @@ pub struct GpuContext {
     add_broadcast_row: wgpu::ComputePipeline,
     relu: wgpu::ComputePipeline,
     relu_backward: wgpu::ComputePipeline,
+    transpose: wgpu::ComputePipeline,
+    column_sums: wgpu::ComputePipeline,
+    sgd_update: wgpu::ComputePipeline,
+    sigmoid: wgpu::ComputePipeline,
+    sigmoid_bce_grad: wgpu::ComputePipeline,
     layout: wgpu::BindGroupLayout,
 }
 
@@ -232,6 +237,11 @@ impl GpuContext {
             add_broadcast_row: build("add_broadcast_row"),
             relu: build("relu"),
             relu_backward: build("relu_backward"),
+            transpose: build("transpose"),
+            column_sums: build("column_sums"),
+            sgd_update: build("sgd_update"),
+            sigmoid: build("sigmoid"),
+            sigmoid_bce_grad: build("sigmoid_bce_grad"),
             device,
             queue,
             info,
@@ -360,6 +370,199 @@ impl GpuContext {
         );
 
         Ok(out)
+    }
+
+    /// `C[m,n] = A[m,n] + bias[n]`, both resident, result resident.
+    pub fn add_bias_resident(
+        &self,
+        a: &GpuTensor,
+        bias: &GpuTensor,
+    ) -> Result<GpuTensor, GpuError> {
+        if bias.len() != a.cols {
+            return Err(GpuError::ShapeMismatch(format!(
+                "bias has {} elements, expected {} columns",
+                bias.len(),
+                a.cols
+            )));
+        }
+
+        let out = self.alloc(a.rows, a.cols);
+        self.dispatch_resident(
+            &self.add_broadcast_row,
+            &a.buffer,
+            &bias.buffer,
+            &out.buffer,
+            self.dims_of(a),
+            (a.len().div_ceil(256).max(1) as u32, 1, 1),
+        );
+        Ok(out)
+    }
+
+    /// Elementwise ReLU, resident.
+    pub fn relu_resident(&self, a: &GpuTensor) -> Result<GpuTensor, GpuError> {
+        let out = self.alloc(a.rows, a.cols);
+        self.dispatch_resident(
+            &self.relu,
+            &a.buffer,
+            &a.buffer,
+            &out.buffer,
+            self.dims_of(a),
+            (a.len().div_ceil(256).max(1) as u32, 1, 1),
+        );
+        Ok(out)
+    }
+
+    /// `grad * (pre > 0)`, resident. Zero at exactly zero, matching the
+    /// forward pass and `aether_core::ml::neural::Activation::derivative`.
+    pub fn relu_backward_resident(
+        &self,
+        pre: &GpuTensor,
+        grad: &GpuTensor,
+    ) -> Result<GpuTensor, GpuError> {
+        if pre.len() != grad.len() {
+            return Err(GpuError::ShapeMismatch(format!(
+                "pre has {} elements, grad has {}",
+                pre.len(),
+                grad.len()
+            )));
+        }
+
+        let out = self.alloc(pre.rows, pre.cols);
+        self.dispatch_resident(
+            &self.relu_backward,
+            &pre.buffer,
+            &grad.buffer,
+            &out.buffer,
+            self.dims_of(pre),
+            (pre.len().div_ceil(256).max(1) as u32, 1, 1),
+        );
+        Ok(out)
+    }
+
+    /// `[m, n]` to `[n, m]`, resident.
+    pub fn transpose_resident(&self, a: &GpuTensor) -> Result<GpuTensor, GpuError> {
+        let out = self.alloc(a.cols, a.rows);
+        self.dispatch_resident(
+            &self.transpose,
+            &a.buffer,
+            &a.buffer,
+            &out.buffer,
+            self.dims_of(a),
+            (
+                a.rows.div_ceil(16).max(1) as u32,
+                a.cols.div_ceil(16).max(1) as u32,
+                1,
+            ),
+        );
+        Ok(out)
+    }
+
+    /// Column sums of an `[m, n]` tensor, giving `[1, n]`. The bias gradient.
+    pub fn column_sums_resident(&self, a: &GpuTensor) -> Result<GpuTensor, GpuError> {
+        let out = self.alloc(1, a.cols);
+        self.dispatch_resident(
+            &self.column_sums,
+            &a.buffer,
+            &a.buffer,
+            &out.buffer,
+            self.dims_of(a),
+            (a.cols.div_ceil(256).max(1) as u32, 1, 1),
+        );
+        Ok(out)
+    }
+
+    /// `param - lr * grad`, resident. Keeps weights on the device across epochs.
+    pub fn sgd_update_resident(
+        &self,
+        param: &GpuTensor,
+        grad: &GpuTensor,
+        lr: f32,
+    ) -> Result<GpuTensor, GpuError> {
+        if param.len() != grad.len() {
+            return Err(GpuError::ShapeMismatch(format!(
+                "param has {} elements, grad has {}",
+                param.len(),
+                grad.len()
+            )));
+        }
+
+        let out = self.alloc(param.rows, param.cols);
+        self.dispatch_resident(
+            &self.sgd_update,
+            &param.buffer,
+            &grad.buffer,
+            &out.buffer,
+            Dims {
+                m: param.rows as u32,
+                k: 0,
+                n: param.cols as u32,
+                // The shader bitcasts this slot back to f32. Passing the rate
+                // through the existing uniform avoids a second binding for one
+                // scalar; the bitcast is the price.
+                _pad: lr.to_bits(),
+            },
+            (param.len().div_ceil(256).max(1) as u32, 1, 1),
+        );
+        Ok(out)
+    }
+
+    /// Logistic sigmoid, resident.
+    pub fn sigmoid_resident(&self, a: &GpuTensor) -> Result<GpuTensor, GpuError> {
+        let out = self.alloc(a.rows, a.cols);
+        self.dispatch_resident(
+            &self.sigmoid,
+            &a.buffer,
+            &a.buffer,
+            &out.buffer,
+            self.dims_of(a),
+            (a.len().div_ceil(256).max(1) as u32, 1, 1),
+        );
+        Ok(out)
+    }
+
+    /// `(sigmoid(logits) - targets) / rows`, resident.
+    ///
+    /// The fused form of the binary-cross-entropy gradient through a sigmoid.
+    /// Fused because the composition collapses algebraically, and computing the
+    /// pieces separately forms `p*(1-p)`, which underflows to zero once the
+    /// sigmoid saturates and silently stops the network learning.
+    pub fn sigmoid_bce_grad_resident(
+        &self,
+        logits: &GpuTensor,
+        targets: &GpuTensor,
+    ) -> Result<GpuTensor, GpuError> {
+        if logits.len() != targets.len() {
+            return Err(GpuError::ShapeMismatch(format!(
+                "logits has {} elements, targets has {}",
+                logits.len(),
+                targets.len()
+            )));
+        }
+
+        let out = self.alloc(logits.rows, logits.cols);
+        self.dispatch_resident(
+            &self.sigmoid_bce_grad,
+            &logits.buffer,
+            &targets.buffer,
+            &out.buffer,
+            Dims {
+                m: logits.rows as u32,
+                k: logits.cols as u32,
+                n: logits.cols as u32,
+                _pad: 0,
+            },
+            (logits.len().div_ceil(256).max(1) as u32, 1, 1),
+        );
+        Ok(out)
+    }
+
+    fn dims_of(&self, t: &GpuTensor) -> Dims {
+        Dims {
+            m: t.rows as u32,
+            k: t.cols as u32,
+            n: t.cols as u32,
+            _pad: 0,
+        }
     }
 
     /// Encode and submit one kernel over already-resident buffers. No upload,
