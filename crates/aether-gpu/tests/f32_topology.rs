@@ -664,19 +664,18 @@ fn a_diagram_built_from_gpu_distances_matches_one_built_from_exact_distances() {
             .expect("read");
 
         // The kernel returns squared distances; the filtration wants distances.
-        // Symmetrised because f32 rounding can make d(i,j) and d(j,i) differ in
-        // the last bit, which the entry point rejects -- correctly, since an
-        // asymmetric matrix is not a distance matrix.
-        let mut gpu = vec![0.0f64; n * n];
-        for i in 0..n {
-            for j in (i + 1)..n {
-                let a = (sq[i * n + j].max(0.0) as f64).sqrt();
-                let b = (sq[j * n + i].max(0.0) as f64).sqrt();
-                let d = 0.5 * (a + b);
-                gpu[i * n + j] = d;
-                gpu[j * n + i] = d;
-            }
-        }
+        //
+        // Taken directly, with no symmetrisation. An earlier version averaged
+        // d(i,j) with d(j,i) on the assumption that f32 rounding made them
+        // differ in the last bit. It does not: IEEE-754 subtraction is exactly
+        // antisymmetric, so `a - b` and `b - a` differ only in sign bit, their
+        // squares are bitwise identical, and the kernel accumulates both orders
+        // over the same range. `the_distance_matrix_is_symmetric_with_a_zero_diagonal`
+        // now asserts that bitwise rather than to a tolerance.
+        //
+        // The averaging was harmless and wrong: it hid the property instead of
+        // relying on it, and would have masked a genuine indexing bug.
+        let gpu: Vec<f64> = sq.iter().map(|v| (v.max(0.0) as f64).sqrt()).collect();
 
         let exact = exact_distances(&points);
 

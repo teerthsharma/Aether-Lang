@@ -970,14 +970,29 @@ fn the_distance_matrix_is_symmetric_with_a_zero_diagonal() {
     let m = ctx.read(&gd).expect("readback");
 
     for i in 0..n {
-        assert!(
-            m[i * n + i].abs() < 1e-6,
-            "diagonal at {i} is {}, expected 0",
+        assert_eq!(
+            m[i * n + i],
+            0.0,
+            "diagonal at {i} is {}, expected exactly 0",
             m[i * n + i]
         );
         for j in 0..n {
-            let diff = (m[i * n + j] - m[j * n + i]).abs();
-            assert!(diff < 1e-5, "asymmetry at ({i},{j}): {diff:e}");
+            // Bitwise, not within a tolerance.
+            //
+            // IEEE-754 subtraction is exactly antisymmetric: `a - b` and `b - a`
+            // differ only in sign bit, so their squares are bitwise identical,
+            // and the kernel accumulates both orders over the same `d` range.
+            // Symmetry is therefore a property of the arithmetic rather than an
+            // approximation, and asserting it to 1e-5 -- as this test did
+            // originally -- would accept a real indexing bug that produced
+            // slightly different entries.
+            assert_eq!(
+                m[i * n + j].to_bits(),
+                m[j * n + i].to_bits(),
+                "asymmetry at ({i},{j}): {} vs {}",
+                m[i * n + j],
+                m[j * n + i]
+            );
         }
     }
 }
