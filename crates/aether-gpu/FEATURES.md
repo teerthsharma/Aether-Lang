@@ -404,11 +404,45 @@ and the only question is whether the CPU's work grows fast enough to exceed it.
 **This is why the two integration recommendations differ**, and neither is a
 judgement about kernel quality:
 
-- `Tensor::matmul` is worth routing to the GPU **above n≈150**, and the resident
+- `Tensor::matmul` is worth routing to the GPU **above n=128**, and the resident
   API makes it much better than that when calls chain.
 - `pairwise_sqdist` is not worth routing at any size, because the persistence
   reduction is CPU-side and sequential, so the matrix must come back. Fixing
   that needs the *consumer* on the GPU, not a better kernel.
+
+### Checked against the real code, with conversion counted
+
+The crossover above is measured against this crate's naive f32 reference, which
+is a stand-in. The code an integration would replace is
+`aether_core::ml::Tensor::matmul`: f64, strided indexing, a `RefCell` borrow per
+access. And `Tensor` being f64 while WGSL is f32 means a real call converts both
+operands down and the result back up — three O(n²) passes that no measurement so
+far included.
+
+| n | `Tensor::matmul` | GPU raw | GPU + conversion | ratio |
+|---:|---:|---:|---:|---:|
+| 64 | 0.168 | 0.695 | 0.650 | 0.26× |
+| **128** | 2.012 | 0.997 | 0.827 | **2.43×** |
+| 192 | 6.869 | 0.828 | 0.830 | 8.27× |
+| 256 | 18.028 | 1.130 | 1.300 | 13.86× |
+| 384 | 61.803 | 2.368 | 3.057 | 20.22× |
+| 512 | 158.570 | 3.280 | 4.153 | **38.18×** |
+
+The n≈150 estimate was conservative in the right direction: the real crossover
+is **n=128 with conversion included**, and the advantage at 512 is 38× rather
+than the 4.5× the stand-in suggested at 256.
+
+The reason is that `Tensor::matmul` is substantially slower than the stand-in —
+18.0 ms against 10.1 ms at n=256 — because it carries f64, stride arithmetic and
+interior-mutability borrows the reference does not. Conversion costs real time
+but not decisive time: about 0.87 ms at n=512, roughly a quarter of the raw
+figure.
+
+At n=128 and n=192 the conversion column reads at or below the raw column, which
+is impossible and is measurement noise at the sub-millisecond scale these
+medians sit at. It is left as measured rather than smoothed, since the honest
+reading is that the two are indistinguishable there, not that conversion is
+free.
 
 ## Why the distance kernel loses: it is the bus, not the kernel
 
