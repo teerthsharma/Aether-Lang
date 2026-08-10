@@ -184,6 +184,60 @@ fn main() {
         );
     }
 
+    // ── Where the distance kernel's time actually goes ────────────────────────
+    //
+    // The kernel measures 0.52x the CPU reference at n=512, and the obvious
+    // question is whether that is the kernel or the bus. At n=512 with d=3 the
+    // arithmetic is 512^2 * 3 = 786k multiply-adds, which is nothing, while the
+    // readback is a 1 MB transfer. If the time is transfer, no amount of kernel
+    // work fixes it and the limit is architectural: the persistence engine runs
+    // on the CPU, so the matrix has to come back.
+    //
+    // Compute is isolated by timing one dispatch against ten. The transfers are
+    // identical in both, so the difference divided by nine is the marginal cost
+    // of a dispatch, and everything else is overhead.
+    println!();
+    println!("  Distance kernel: compute vs transfer, median of 10");
+    println!(
+        "  {:>6}  {:>11}  {:>11}  {:>11}  {:>9}",
+        "n", "total ms", "compute ms", "transfer ms", "transfer%"
+    );
+    println!(
+        "  {:->6}  {:->11}  {:->11}  {:->11}  {:->9}",
+        "", "", "", "", ""
+    );
+
+    for n in [256usize, 512, 1024, 2048] {
+        let pts = fill(n * 3, 9);
+        let g = ctx.upload(&pts, n, 3).expect("upload");
+        let _ = ctx.pairwise_sqdist_resident(&g).expect("warmup");
+        let _ = ctx
+            .read(&ctx.pairwise_sqdist_resident(&g).expect("w"))
+            .expect("w");
+
+        let one = median_ms(10, || {
+            let m = ctx.pairwise_sqdist_resident(&g).expect("sqdist");
+            let _ = ctx.read(&m).expect("read");
+        });
+
+        let ten = median_ms(10, || {
+            let mut last = ctx.pairwise_sqdist_resident(&g).expect("sqdist");
+            for _ in 1..10 {
+                last = ctx.pairwise_sqdist_resident(&g).expect("sqdist");
+            }
+            let _ = ctx.read(&last).expect("read");
+        });
+
+        // Nine extra dispatches, same transfers.
+        let compute = (ten - one) / 9.0;
+        let transfer = (one - compute).max(0.0);
+
+        println!(
+            "  {n:>6}  {one:>11.3}  {compute:>11.3}  {transfer:>11.3}  {:>8.1}%",
+            100.0 * transfer / one
+        );
+    }
+
     println!();
     println!("═══════════════════════════════════════════════════════════════════════");
     println!("  CPU columns are the naive single-threaded reference this crate ships");
