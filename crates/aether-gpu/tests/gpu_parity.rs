@@ -20,10 +20,30 @@ fn tolerance(k: usize) -> f32 {
     1e-5 * (k as f32).sqrt().max(1.0)
 }
 
+/// The GPU context, or `None` when no adapter exists.
+///
+/// # Why `AETHER_REQUIRE_GPU` exists
+///
+/// Returning `None` makes every test that needs hardware return early, and an
+/// early return is a **pass**. That is the right behaviour on a machine without
+/// a GPU and a trap everywhere else: `cargo test --workspace` includes this
+/// crate, so CI reports these tests green while running none of them. A suite
+/// that cannot distinguish "verified" from "not attempted" is the green
+/// checkmark this repository's README spends a section warning about.
+///
+/// Setting `AETHER_REQUIRE_GPU=1` turns a missing adapter into a failure, so a
+/// run can assert that the hardware path was actually exercised. Use it locally
+/// to prove a change was tested, and in CI on any runner that has a GPU.
 fn context() -> Option<GpuContext> {
     match GpuContext::new() {
         Ok(ctx) => Some(ctx),
         Err(e) => {
+            if std::env::var("AETHER_REQUIRE_GPU").is_ok() {
+                panic!(
+                    "AETHER_REQUIRE_GPU is set but no usable GPU adapter was found ({e}). \
+                     This test would otherwise have skipped and reported success."
+                );
+            }
             eprintln!("SKIP: no usable GPU adapter ({e})");
             None
         }

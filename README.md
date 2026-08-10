@@ -216,6 +216,8 @@ All fixed; receipts in [PR #177](https://github.com/teerthsharma/Aether-Lang/pul
 
 The rule: a row is **Active** only if a command in [`.github/workflows/ci.yml`](.github/workflows/ci.yml) produces its evidence. Test count in a file is not evidence if the file never runs.
 
+A third status was needed once the GPU backend arrived. 🖥️ **Hardware-gated** means the tests exist, pass, and are run by CI — and prove nothing there, because the runners have no GPU and every test needing an adapter returns early. **An early return is a pass.** So `cargo test --workspace` reports those suites green while executing none of them, which is precisely the green checkmark this document spends a section warning about, built by its own author. `AETHER_REQUIRE_GPU=1` turns a missing adapter into a failure, so a run can assert the hardware path was exercised; it is not set in CI because it would fail on every runner there. The honest reading of a hardware-gated row is "verified on one developer machine", which is weaker than every other Active row on this table.
+
 | Subsystem | Status | Evidence |
 |---|---|---|
 | Lexer, parser, AST | ✅ Active | 11 tests, `cargo test -p aether-lang` |
@@ -235,7 +237,7 @@ The rule: a row is **Active** only if a command in [`.github/workflows/ci.yml`](
 | Kernel *boots* | ⛔ Ungated | compiles ≠ boots; needs QEMU logs |
 | External TDA parity | ⛔ Ungated | no ripser/GUDHI fixture comparison |
 | Lean 4 formalization | ⛔ Ungated | 10,474 lines, 48 theorems, **no `lake build` in CI** |
-| GPU compute backend (`aether-gpu`) | ✅ Active | **60 tests**, RTX 4060 / Vulkan, `cargo test -p aether-gpu` |
+| GPU compute backend (`aether-gpu`) | 🖥️ **Hardware-gated** | **56 tests**, RTX 4060 / Vulkan. `AETHER_REQUIRE_GPU=1 cargo test -p aether-gpu --release`. **Green in CI proves nothing** — see below |
 | GPU used by `aether-core` | ⛔ **Ungated** | nothing routes through it; cost and precision measured, integration not made |
 | Attention backward pass | ❌ Does not exist | forward only; no gradcheck possible |
 | Wall-clock speedup claims | ❌ Withdrawn | see [What We Got Wrong](#what-we-got-wrong) |
