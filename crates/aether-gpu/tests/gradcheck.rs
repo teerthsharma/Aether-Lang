@@ -333,3 +333,273 @@ fn the_gradient_is_scaled_by_the_batch_size_not_merely_proportional() {
         db2[0]
     );
 }
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// Softmax and categorical cross-entropy
+//
+// The binary path above shares no code with this one past the matmuls: a
+// different output non-linearity, a different loss, and a different fused
+// gradient kernel. Verifying one says nothing about the other, so the whole
+// staged check is repeated rather than assumed to carry over.
+// ═══════════════════════════════════════════════════════════════════════════════
+
+const CLASSES: usize = 3;
+
+/// `x -> W1 -> +b1 -> relu -> W2 -> +b2 -> softmax -> mean categorical CE`.
+struct RefMc {
+    w1: Vec<f64>, // [IN, HID]
+    b1: Vec<f64>, // [HID]
+    w2: Vec<f64>, // [HID, CLASSES]
+    b2: Vec<f64>, // [CLASSES]
+}
+
+impl RefMc {
+    /// Returns `(z1, a1, probabilities)`.
+    fn forward(&self, x: &[f64]) -> (Vec<f64>, Vec<f64>, Vec<f64>) {
+        let mut z1 = vec![0.0; BATCH * HID];
+        for i in 0..BATCH {
+            for j in 0..HID {
+                let mut s = self.b1[j];
+                for k in 0..IN {
+                    s += x[i * IN + k] * self.w1[k * HID + j];
+                }
+                z1[i * HID + j] = s;
+            }
+        }
+
+        let a1: Vec<f64> = z1.iter().map(|v| v.max(0.0)).collect();
+
+        let mut p = vec![0.0; BATCH * CLASSES];
+        for i in 0..BATCH {
+            let mut logits = [0.0f64; CLASSES];
+            for (c, slot) in logits.iter_mut().enumerate() {
+                let mut s = self.b2[c];
+                for j in 0..HID {
+                    s += a1[i * HID + j] * self.w2[j * CLASSES + c];
+                }
+                *slot = s;
+            }
+
+            // Same max subtraction as the kernel, for the same reason.
+            let mx = logits.iter().cloned().fold(f64::NEG_INFINITY, f64::max);
+            let sum: f64 = logits.iter().map(|l| (l - mx).exp()).sum();
+            for c in 0..CLASSES {
+                p[i * CLASSES + c] = (logits[c] - mx).exp() / sum;
+            }
+        }
+
+        (z1, a1, p)
+    }
+
+    /// Mean categorical cross-entropy against one-hot targets.
+    fn loss(&self, x: &[f64], y: &[f64]) -> f64 {
+        let (_, _, p) = self.forward(x);
+        let mut total = 0.0;
+        for i in 0..BATCH {
+            for c in 0..CLASSES {
+                if y[i * CLASSES + c] > 0.5 {
+                    total -= p[i * CLASSES + c].clamp(1e-15, 1.0).ln();
+                }
+            }
+        }
+        total / BATCH as f64
+    }
+
+    fn grads(&self, x: &[f64], y: &[f64]) -> (Vec<f64>, Vec<f64>, Vec<f64>, Vec<f64>) {
+        let (z1, a1, p) = self.forward(x);
+
+        // Fused softmax + cross-entropy derivative, matching softmax_xent_grad.
+        let dz2: Vec<f64> = (0..BATCH * CLASSES)
+            .map(|i| (p[i] - y[i]) / BATCH as f64)
+            .collect();
+
+        let mut dw2 = vec![0.0; HID * CLASSES];
+        for j in 0..HID {
+            for c in 0..CLASSES {
+                for i in 0..BATCH {
+                    dw2[j * CLASSES + c] += a1[i * HID + j] * dz2[i * CLASSES + c];
+                }
+            }
+        }
+
+        let mut db2 = vec![0.0; CLASSES];
+        for c in 0..CLASSES {
+            for i in 0..BATCH {
+                db2[c] += dz2[i * CLASSES + c];
+            }
+        }
+
+        let mut dz1 = vec![0.0; BATCH * HID];
+        for i in 0..BATCH {
+            for j in 0..HID {
+                let mut s = 0.0;
+                for c in 0..CLASSES {
+                    s += dz2[i * CLASSES + c] * self.w2[j * CLASSES + c];
+                }
+                let gate = if z1[i * HID + j] > 0.0 { 1.0 } else { 0.0 };
+                dz1[i * HID + j] = s * gate;
+            }
+        }
+
+        let mut dw1 = vec![0.0; IN * HID];
+        for k in 0..IN {
+            for j in 0..HID {
+                for i in 0..BATCH {
+                    dw1[k * HID + j] += x[i * IN + k] * dz1[i * HID + j];
+                }
+            }
+        }
+
+        let mut db1 = vec![0.0; HID];
+        for j in 0..HID {
+            for i in 0..BATCH {
+                db1[j] += dz1[i * HID + j];
+            }
+        }
+
+        (dw1, db1, dw2, db2)
+    }
+}
+
+fn one_hot(labels: &[usize]) -> Vec<f64> {
+    let mut out = vec![0.0; labels.len() * CLASSES];
+    for (i, &c) in labels.iter().enumerate() {
+        out[i * CLASSES + c] = 1.0;
+    }
+    out
+}
+
+/// Stage 1 for the multi-class path.
+#[test]
+fn the_reference_softmax_gradient_matches_central_differences() {
+    let x = fill(BATCH * IN, 51);
+    let y = one_hot(&(0..BATCH).map(|i| i % CLASSES).collect::<Vec<_>>());
+
+    let mut net = RefMc {
+        w1: fill(IN * HID, 52),
+        b1: fill(HID, 53),
+        w2: fill(HID * CLASSES, 54),
+        b2: fill(CLASSES, 55),
+    };
+
+    let (dw1, db1, dw2, db2) = net.grads(&x, &y);
+    let h = 1e-6;
+
+    let (z1, _, _) = net.forward(&x);
+    assert!(
+        z1.iter().all(|z| z.abs() > 1e-3),
+        "a pre-activation sits on the ReLU kink; reseed rather than loosen the tolerance"
+    );
+
+    let mut checked = 0;
+    for (which, analytic) in [(0usize, &dw1), (1, &db1), (2, &dw2), (3, &db2)] {
+        for (idx, &a) in analytic.iter().enumerate() {
+            let orig = match which {
+                0 => net.w1[idx],
+                1 => net.b1[idx],
+                2 => net.w2[idx],
+                _ => net.b2[idx],
+            };
+
+            let set = |v: f64, net: &mut RefMc| match which {
+                0 => net.w1[idx] = v,
+                1 => net.b1[idx] = v,
+                2 => net.w2[idx] = v,
+                _ => net.b2[idx] = v,
+            };
+
+            set(orig + h, &mut net);
+            let up = net.loss(&x, &y);
+            set(orig - h, &mut net);
+            let down = net.loss(&x, &y);
+            set(orig, &mut net);
+
+            let fd = (up - down) / (2.0 * h);
+            let denom = a.abs().max(fd.abs()).max(1e-8);
+            let rel = (a - fd).abs() / denom;
+
+            assert!(
+                rel < 1e-5,
+                "group {which} index {idx}: analytic {a:.12e} vs finite diff {fd:.12e}, \
+                 relative error {rel:.3e}"
+            );
+            checked += 1;
+        }
+    }
+
+    assert_eq!(
+        checked,
+        IN * HID + HID + HID * CLASSES + CLASSES,
+        "every parameter must be checked"
+    );
+    println!("stage 1 (softmax): {checked} parameters matched central differences");
+}
+
+/// Stage 2 for the multi-class path: the GPU kernels against the verified
+/// f64 reference.
+#[test]
+fn the_gpu_softmax_backward_matches_the_reference_gradients() {
+    let Some(ctx) = context() else { return };
+
+    let x64 = fill(BATCH * IN, 61);
+    let y64 = one_hot(&(0..BATCH).map(|i| i % CLASSES).collect::<Vec<_>>());
+    let w1_64 = fill(IN * HID, 62);
+    let b1_64 = fill(HID, 63);
+    let w2_64 = fill(HID * CLASSES, 64);
+    let b2_64 = fill(CLASSES, 65);
+
+    let net = RefMc {
+        w1: w1_64.clone(),
+        b1: b1_64.clone(),
+        w2: w2_64.clone(),
+        b2: b2_64.clone(),
+    };
+    let (ref_dw1, ref_db1, ref_dw2, ref_db2) = net.grads(&x64, &y64);
+
+    let f32v = |v: &[f64]| -> Vec<f32> { v.iter().map(|x| *x as f32).collect() };
+
+    let gx = ctx.upload(&f32v(&x64), BATCH, IN).expect("x");
+    let gy = ctx.upload(&f32v(&y64), BATCH, CLASSES).expect("y");
+    let gw1 = ctx.upload(&f32v(&w1_64), IN, HID).expect("w1");
+    let gb1 = ctx.upload(&f32v(&b1_64), 1, HID).expect("b1");
+    let gw2 = ctx.upload(&f32v(&w2_64), HID, CLASSES).expect("w2");
+    let gb2 = ctx.upload(&f32v(&b2_64), 1, CLASSES).expect("b2");
+
+    let z1 = ctx.matmul_resident(&gx, &gw1).expect("z1");
+    let z1 = ctx.add_bias_resident(&z1, &gb1).expect("z1b");
+    let a1 = ctx.relu_resident(&z1).expect("a1");
+    let z2 = ctx.matmul_resident(&a1, &gw2).expect("z2");
+    let z2 = ctx.add_bias_resident(&z2, &gb2).expect("z2b");
+
+    let dz2 = ctx.softmax_xent_grad_resident(&z2, &gy).expect("dz2");
+    let a1t = ctx.transpose_resident(&a1).expect("a1t");
+    let dw2 = ctx.matmul_resident(&a1t, &dz2).expect("dw2");
+    let db2 = ctx.column_sums_resident(&dz2).expect("db2");
+
+    let w2t = ctx.transpose_resident(&gw2).expect("w2t");
+    let da1 = ctx.matmul_resident(&dz2, &w2t).expect("da1");
+    let dz1 = ctx.relu_backward_resident(&z1, &da1).expect("dz1");
+
+    let xt = ctx.transpose_resident(&gx).expect("xt");
+    let dw1 = ctx.matmul_resident(&xt, &dz1).expect("dw1");
+    let db1 = ctx.column_sums_resident(&dz1).expect("db1");
+
+    let cmp = |name: &str, got: &GpuTensor, want: &[f64]| {
+        let g = ctx.read(got).expect("readback");
+        assert_eq!(g.len(), want.len(), "{name}: length");
+        for (i, (a, b)) in g.iter().zip(want).enumerate() {
+            let denom = (*b).abs().max(1e-6);
+            let rel = ((*a as f64) - b).abs() / denom;
+            assert!(
+                rel < 2e-3,
+                "{name}[{i}]: gpu {a:.8e} vs reference {b:.8e}, relative error {rel:.3e}"
+            );
+        }
+        println!("{name}: {} entries matched the f64 reference", g.len());
+    };
+
+    cmp("dw1", &dw1, &ref_dw1);
+    cmp("db1", &db1, &ref_db1);
+    cmp("dw2", &dw2, &ref_dw2);
+    cmp("db2", &db2, &ref_db2);
+}
