@@ -366,6 +366,50 @@ the 0.65 s version, and the measurement is the only thing that contradicted it.
 Final: **0.27 s against the 7.76 s round-tripping baseline, 28.55x**, with the
 CV accuracy unchanged at 0.8220 +/- 0.0271.
 
+## The rule: arithmetic per byte returned
+
+Every performance result in this file follows from one ratio, and it is worth
+stating before the individual measurements because it predicts them.
+
+With a CPU consumer, an operation pays on the GPU according to how much
+arithmetic it does per byte that has to come back:
+
+| operation | work | bytes returned | ratio |
+|---|---|---|---|
+| matmul | O(n³) | O(n²) | **grows as n** |
+| pairwise distance | O(n²d) | O(n²) | **fixed at d** |
+
+So matmul must cross over at some size and stay crossed, while pairwise distance
+at d=3 must approach a constant and — if that constant is below one — never
+cross, no matter how good the kernel is. Both halves measured, round-trip GPU
+against the CPU reference:
+
+| n | matmul CPU | matmul GPU | ratio | dist CPU | dist GPU | ratio |
+|---:|---:|---:|---:|---:|---:|---:|
+| 32 | 0.014 | 1.907 | 0.01× | 0.001 | 1.869 | 0.00× |
+| 64 | 0.105 | 1.893 | 0.06× | 0.005 | 1.960 | 0.00× |
+| 96 | 0.351 | 1.905 | 0.18× | 0.010 | 2.135 | 0.00× |
+| 128 | 0.992 | 1.948 | 0.51× | 0.018 | 1.898 | 0.01× |
+| 192 | 3.537 | 2.128 | **1.66×** | 0.040 | 2.043 | 0.02× |
+| 256 | 10.068 | 2.231 | **4.51×** | 0.070 | 2.062 | 0.03× |
+
+Matmul crosses between n=128 and n=192 and keeps climbing — 21.85× at 1024 with
+residency. Distance climbs far more slowly, reaching only 0.81× at n=1024 and
+0.74× at 2048 in the table above, and never crosses.
+
+The GPU column is nearly flat at about 2 ms for both operations at these sizes,
+which is the same statement from the other direction: that is fixed overhead,
+and the only question is whether the CPU's work grows fast enough to exceed it.
+
+**This is why the two integration recommendations differ**, and neither is a
+judgement about kernel quality:
+
+- `Tensor::matmul` is worth routing to the GPU **above n≈150**, and the resident
+  API makes it much better than that when calls chain.
+- `pairwise_sqdist` is not worth routing at any size, because the persistence
+  reduction is CPU-side and sequential, so the matrix must come back. Fixing
+  that needs the *consumer* on the GPU, not a better kernel.
+
 ## Why the distance kernel loses: it is the bus, not the kernel
 
 The kernel measures 0.52× the CPU reference at n=512, which reads as a slow
