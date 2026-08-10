@@ -13,7 +13,7 @@
   <a href=".github/workflows/ci.yml"><img src="https://img.shields.io/github/actions/workflow/status/teerthsharma/Aether-Lang/ci.yml?branch=master&label=CI&style=flat-square" alt="CI"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-00aaff?style=flat-square" alt="License: MIT"></a>
   <a href="rust-toolchain.toml"><img src="https://img.shields.io/badge/rust-nightly-orange?style=flat-square&logo=rust" alt="Rust nightly"></a>
-  <a href="#results"><img src="https://img.shields.io/badge/tests-163%20passing-brightgreen?style=flat-square" alt="163 tests"></a>
+  <a href="#results"><img src="https://img.shields.io/badge/tests-223%20passing-brightgreen?style=flat-square" alt="223 tests"></a>
   <a href="#mutation-testing-or-how-i-learned-to-stop-trusting-green-checkmarks"><img src="https://img.shields.io/badge/mutants-8%20injected-purple?style=flat-square" alt="8 mutants"></a>
   <a href="#what-we-got-wrong"><img src="https://img.shields.io/badge/claims%20killed-6-red?style=flat-square" alt="6 claims killed"></a>
   <a href="docs/reference/status.md"><img src="https://img.shields.io/badge/claim%20ledger-live-blue?style=flat-square" alt="Claim ledger"></a>
@@ -120,9 +120,9 @@ The pitch is one sentence: *some loops should terminate when the shape of the da
 
 - Brevity. You saw the table of contents.
 - That the language is production-ready. It is a research language. It has a seal emoji as a keyword.
-- A GPU. There is no GPU. There is a `wgpu` dependency in `Cargo.toml` with *zero call sites*, discovered while auditing this repo and now documented as a lie in the [claim ledger](docs/reference/status.md). More on that in the section where I list what this project used to claim and no longer does.
+- GPU acceleration of the language or the topology engine. There is a real GPU backend — `aether-gpu`, 60 tests, measured on an RTX 4060 — and **nothing calls it**. The cost and precision of both candidate integrations are measured; the integrations are not made. An earlier version of this line said there was no GPU at all, which was true of the `wgpu` dependency it described and is no longer true of the tree.
 
-Grab a coffee. There are 18,602 lines of Rust and 10,474 lines of Lean below, and roughly a third of this document is about the ways I was wrong.
+Grab a coffee. There are 24,180 lines of Rust and 10,474 lines of Lean below, and roughly a third of this document is about the ways I was wrong.
 
 (Those two figures replaced 21,262 and 11,652, which appeared in this README until a rewrite re-counted them. Neither was reproducible. If a document is going to insist that every number carries a command, it has to survive that rule being pointed at itself. The command is in [Reproducing Every Number](#reproducing-every-number-in-this-document).)
 
@@ -235,7 +235,8 @@ The rule: a row is **Active** only if a command in [`.github/workflows/ci.yml`](
 | Kernel *boots* | ⛔ Ungated | compiles ≠ boots; needs QEMU logs |
 | External TDA parity | ⛔ Ungated | no ripser/GUDHI fixture comparison |
 | Lean 4 formalization | ⛔ Ungated | 10,474 lines, 48 theorems, **no `lake build` in CI** |
-| GPU acceleration | ❌ **Does not exist** | `wgpu` declared, zero call sites |
+| GPU compute backend (`aether-gpu`) | ✅ Active | **60 tests**, RTX 4060 / Vulkan, `cargo test -p aether-gpu` |
+| GPU used by `aether-core` | ⛔ **Ungated** | nothing routes through it; cost and precision measured, integration not made |
 | Attention backward pass | ❌ Does not exist | forward only; no gradcheck possible |
 | Wall-clock speedup claims | ❌ Withdrawn | see [What We Got Wrong](#what-we-got-wrong) |
 
@@ -245,11 +246,11 @@ The rule: a row is **Active** only if a command in [`.github/workflows/ci.yml`](
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
   cargo fmt --all -- --check                                   clean
   cargo clippy -D correctness -D suspicious                     clean
-  cargo test --workspace --exclude aether-kernel     163 / 163 passed
+  cargo test --workspace --exclude aether-kernel     223 / 223 passed
   cargo build -p aether-kernel --target x86_64-unknown-none        ok
   cargo build -p aether-core  --target thumbv7m-none-eabi          ok
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-  Rust lines (crates/)                                        18,602
+  Rust lines (crates/)                                        24,180
   Lean lines (Aether/)              10,474   theorems 48   sorry 0
   Test suites gated in CI                                          7
   Claims withdrawn during audit                                    6
@@ -1513,7 +1514,7 @@ Ranked by value, highest first — this ranking is the honest one, not the conve
 
 **5. Delete `aegis-core` and `aegis-cli`.** Mechanical, uncontroversial, and removes the most embarrassing thing in the tree.
 
-**6. Remove the phantom GPU dependencies.** `wgpu`, `pollster` and `bytemuck` ship in `aether-lang`'s default features with zero call sites. Every default build compiles a GPU stack for nothing.
+**6. Wire `Tensor::matmul` to `aether-gpu`, or decide not to.** The cost is measured (crossover n=128, 38x at n=512 with conversion) and the precision is measured (5e-7 relative, fine for training, not for 1e-9 assertions). What remains is the semantic decision about whether `ml::Tensor` may drop to f32.
 
 **7. A gradcheck for `ml/autograd.rs`.** An autograd with no finite-difference verification is an unverified claim.
 
@@ -1893,8 +1894,10 @@ So the same persistence code that runs in the CLI runs in `aether-kernel` on bar
 **Does the kernel boot?**
 It **compiles** for `x86_64-unknown-none`. Booting is not tested. Different claims.
 
-**There is a `wgpu` dependency. Is there GPU acceleration?**
-No. `wgpu`, `pollster` and `bytemuck` are in `aether-lang`'s **default** feature set with **zero call sites**. The only occurrence of `wgpu` in the entire tree is the comment `"future hooks for wgpu"` at `ml/tensor.rs:6`. Every default build compiles a GPU stack for nothing. Documented in the ledger, queued for removal.
+**Is there GPU acceleration?**
+There is a GPU **backend** — `aether-gpu`, 13 WGSL kernels, resident tensors, 60 tests, an RTX 4060 over Vulkan. There is no GPU **acceleration of this project**, because nothing in `aether-core` or `aether-lang` calls it. Both integrations are measured and neither is made: `Tensor::matmul` pays above n=128 and reaches 38× at n=512 with conversion counted; `pairwise_sqdist` never pays, because the persistence reduction is CPU-side and sequential so the matrix has to come back. Wiring the first one in means deciding whether `ml::Tensor` may drop to f32, which is a semantic change no benchmark authorises.
+
+This answer used to read "No", and the `wgpu`/`pollster`/`bytemuck` entries it referred to — in `aether-lang`'s default feature set with zero call sites — have since been deleted. The current backend is a separate crate on a current wgpu.
 
 **Why is there a `CHANGELOG.md` with almost nothing in it?**
 Fair.
@@ -1959,8 +1962,14 @@ Aether-Lang/
 │   │   │   ├── governor.rs       PID-on-manifold
 │   │   │   ├── memory.rs         manifold heap, entropy GC
 │   │   │   └── ml/               regression, clustering, neural, tensors
-│   │   ├── tests/            most of the 163 tests live here
+│   │   ├── tests/            most of the topology tests live here
 │   │   └── examples/         scale_probe, routing_cost — reproduce the tables
+│   ├── aether-gpu/           wgpu compute backend — 13 WGSL kernels, f32
+│   │   ├── src/shaders.wgsl      matmul, tiled matmul, pairwise distance,
+│   │   │                         softmax, fused gradients, Adam, SGD
+│   │   ├── tests/                60 tests: parity, gradcheck, f32 topology
+│   │   ├── mutants.sh            mutation harness, 0 of 10 escape
+│   │   └── FEATURES.md           measurements, negative results, corrections
 │   ├── aether-lang/          lexer, parser, AST, interpreter, Titan VM
 │   ├── aether-kernel/        no_std x86_64 microkernel
 │   ├── aether-cli/           repl / run / check
@@ -2238,7 +2247,11 @@ For contrast, `aegis-core` declares the same dependency as `optional = true` —
 | `alloc` | — | `no_std` with an allocator |
 | `no_std` | `alloc` | Bare-metal mode |
 
-The CLI adds `clap` and `rustyline`. The `wgpu`/`reqwest`/`pollster`/`bytemuck` entries in `aether-lang`'s default features also have zero call sites and should not be there either.
+The CLI adds `clap` and `rustyline`.
+
+`aether-lang` used to pull `wgpu`, `reqwest`, `safetensors`, `pollster` and `bytemuck` through its **default** feature set, all with zero call sites, so every default build compiled an HTTP client and a 2023-era GPU stack that nothing referenced. All five are deleted.
+
+`aether-gpu` is the crate that actually uses a GPU, and it is deliberately separate: `aether-core` is `no_std` and builds for `thumbv7m-none-eabi`, while `wgpu` needs `std` and a driver stack. A feature flag would leave a `no_std` crate whose dependency graph only resolves on hosted targets.
 
 **Optional Python.** `pyproject.toml` builds a `pyo3` extension via `maturin`. The bindings directory is currently an empty package.
 
@@ -2307,7 +2320,7 @@ The evidence policy in one rule: **a number without a reproduction command does 
 
 | Claim | Where | Command |
 |---|---|---|
-| 163 / 163 tests pass | [Status](#honest-status-dashboard) | `cargo test --workspace --exclude aether-kernel` |
+| 223 / 223 tests pass | [Status](#honest-status-dashboard) | `cargo test --workspace --exclude aether-kernel` |
 | 11 persistence invariants | [Theory](#theoretical-foundation) | `cargo test -p aether-core --test persistence_invariants` |
 | 17 diagram-metric tests | [Test suite](#diagram_distancers--17-tests-381-lines) | `cargo test -p aether-core --test diagram_distance` |
 | 29 attention contracts | [Test suite](#attention_contractsrs--29-tests-1124-lines) | `cargo test -p aether-core --test attention_contracts -- --nocapture` |
@@ -2322,9 +2335,11 @@ The evidence policy in one rule: **a number without a reproduction command does 
 | `no_std` on Cortex-M3 | [Status](#honest-status-dashboard) | `cargo build -p aether-core --no-default-features --features no_std -Z build-std=core,alloc --target thumbv7m-none-eabi` |
 | Formatting clean | [Status](#honest-status-dashboard) | `cargo fmt --all -- --check` |
 | Clippy clean | [Status](#honest-status-dashboard) | `cargo clippy --workspace --exclude aether-kernel --all-targets -- -D warnings -D clippy::correctness -D clippy::suspicious -A clippy::style -A clippy::complexity -A clippy::perf` |
-| 18,602 Rust lines | [Status](#honest-status-dashboard) | `Get-ChildItem crates -Recurse -Filter *.rs \| Get-Content \| Measure-Object -Line` |
+| 24,180 Rust lines | [Status](#honest-status-dashboard) | `Get-ChildItem crates -Recurse -Filter *.rs \| Get-Content \| Measure-Object -Line` |
 | `nalgebra` has zero call sites | [What We Got Wrong §6](#6-nalgebra-a-second-phantom-dependency) | `grep -rn nalgebra crates/ --include=*.rs` |
-| `wgpu` has one comment and no call sites | [FAQ](#the-faq-nobody-asked-for) | `grep -rn wgpu crates/ --include=*.rs` |
+| 60 GPU tests, RTX 4060 / Vulkan | [Status](#honest-status-dashboard) | `cargo test -p aether-gpu --release` |
+| 0 of 10 GPU mutants escape | [FEATURES.md](crates/aether-gpu/FEATURES.md) | `./crates/aether-gpu/mutants.sh` |
+| matmul crossover n=128, 38× at n=512 | [FEATURES.md](crates/aether-gpu/FEATURES.md) | `cargo run -p aether-gpu --example tensor_crossover --release` |
 | 10,474 Lean lines, 48 theorems, 0 `sorry` | [Lean](#the-lean-formalization) | `Get-ChildItem Aether -Recurse -Filter *.lean \| Get-Content \| Measure-Object -Line`, then `Select-String "^\s*(theorem\|lemma)\s"` and `Select-String "\bsorry\b"` |
 
 ### Numbers that are *not* reproducible from this repository
@@ -2366,7 +2381,14 @@ Longer than most projects' feature lists. That is the point.
 
 **The core claim is unmeasured.** Whether topological convergence beats scalar convergence on real problems, against a tuned baseline, has not been tested. The machinery is correct; its *value* is unestablished.
 
-**No GPU.** None. The dependencies suggesting otherwise have zero call sites.
+**The GPU backend is not used by anything.** `aether-gpu` is real — 13 WGSL
+kernels, resident tensors, 60 tests, verified against finite differences and a
+mutation matrix — but no line of `aether-core` or `aether-lang` calls it. Both
+candidate integrations have been measured and neither has been made:
+`Tensor::matmul` crosses over at n=128 and reaches 38× at n=512 with f64↔f32
+conversion counted, and `pairwise_sqdist` never pays because the persistence
+reduction is CPU-side, so the matrix must come back. See
+[`crates/aether-gpu/FEATURES.md`](crates/aether-gpu/FEATURES.md).
 
 **Two phantom dependencies.** `nalgebra` is a non-optional dependency of `aether-core` with zero call sites, and `wgpu`/`pollster`/`bytemuck` ship in `aether-lang`'s default features with one comment between them. Both are queued for removal; both are [written up](#6-nalgebra-a-second-phantom-dependency) rather than quietly deleted before publication.
 
