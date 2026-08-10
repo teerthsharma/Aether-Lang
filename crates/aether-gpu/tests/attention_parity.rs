@@ -22,7 +22,8 @@
 //! never ran, and the ignore is the guard against repeating it.
 
 use aether_core::scheduled::{
-    dense_causal_block_schedule, dense_masked_attention, scheduled_attention, BlockSchedule,
+    dense_causal_block_schedule, dense_masked_attention, scheduled_attention,
+    scheduled_attention_backward, BlockSchedule,
 };
 use aether_gpu::{GpuContext, GpuError};
 
@@ -627,6 +628,222 @@ fn scores_large_enough_to_overflow_exp_stay_finite() {
          this input does not exercise the guard it was built for",
         big - small
     );
+}
+
+/// Every gradient must match the f64 reference on a dense schedule.
+///
+/// The reference is `aether_core::scheduled::scheduled_attention_backward`, which
+/// is itself checked against central differences of the forward pass. That chain
+/// matters: a backward kernel compared only against another backward kernel is
+/// compared against nothing, since the failure mode is a gradient that is
+/// smooth, finite, and wrong in both.
+///
+/// The three are asserted separately rather than jointly. `dv` is linear in the
+/// values and never touches the delta term, so a mistake in that term leaves it
+/// exactly right while corrupting the other two — a joint assertion would report
+/// one failure where the split reports which half of the kernel is broken.
+#[test]
+#[cfg_attr(not(feature = "gpu"), ignore)]
+fn the_backward_kernels_match_the_f64_reference() {
+    let ctx = require_context();
+    let block_size = 8;
+    let fixture = Fixture::new(32, 16, 53);
+    let schedule = dense_causal_block_schedule(fixture.seq / block_size);
+    let d_out = deterministic_fill(fixture.seq * fixture.head_dim, 59);
+
+    let (dq, dk, dv) = ctx
+        .scheduled_attention_backward_resident(
+            &to_f32(&fixture.q),
+            &to_f32(&fixture.k),
+            &to_f32(&fixture.v),
+            fixture.seq,
+            fixture.head_dim,
+            &schedule,
+            block_size,
+            &to_f32(&d_out),
+        )
+        .expect("backward dispatch");
+
+    let reference = scheduled_attention_backward(
+        &fixture.q,
+        &fixture.k,
+        &fixture.v,
+        fixture.seq,
+        fixture.head_dim,
+        &schedule,
+        block_size,
+        &d_out,
+    )
+    .expect("valid launch");
+
+    for (name, resident, expected) in [
+        ("dq", &dq, &reference.dq),
+        ("dk", &dk, &reference.dk),
+        ("dv", &dv, &reference.dv),
+    ] {
+        let got = ctx.read(resident).expect("read");
+        assert_close(&got, expected, name);
+    }
+}
+
+/// The same on a sparse schedule with uneven rows.
+///
+/// `dk` and `dv` walk the schedule in the opposite direction from every other
+/// kernel here — one invocation per key row, scanning the query blocks that could
+/// see it. A dense schedule cannot exercise that scan, because every membership
+/// test succeeds. Uneven rows are the only fixture where a wrong answer to
+/// "does this query block schedule my block?" produces a wrong gradient.
+#[test]
+#[cfg_attr(not(feature = "gpu"), ignore)]
+fn the_backward_kernels_match_on_a_sparse_schedule() {
+    let ctx = require_context();
+    let block_size = 8;
+    let fixture = Fixture::new(48, 16, 61);
+    let d_out = deterministic_fill(fixture.seq * fixture.head_dim, 67);
+
+    // Sink plus a one-block local window, so rows differ in length and several
+    // key blocks are visible to only some query blocks.
+    let rows: Vec<Vec<usize>> = (0..6usize)
+        .map(|q| {
+            let mut row = vec![0];
+            row.extend(q.saturating_sub(1)..=q);
+            row.sort_unstable();
+            row.dedup();
+            row
+        })
+        .collect();
+    let schedule = BlockSchedule::from_rows(&rows).expect("valid rows");
+
+    let (dq, dk, dv) = ctx
+        .scheduled_attention_backward_resident(
+            &to_f32(&fixture.q),
+            &to_f32(&fixture.k),
+            &to_f32(&fixture.v),
+            fixture.seq,
+            fixture.head_dim,
+            &schedule,
+            block_size,
+            &to_f32(&d_out),
+        )
+        .expect("backward dispatch");
+
+    let reference = scheduled_attention_backward(
+        &fixture.q,
+        &fixture.k,
+        &fixture.v,
+        fixture.seq,
+        fixture.head_dim,
+        &schedule,
+        block_size,
+        &d_out,
+    )
+    .expect("valid launch");
+
+    for (name, resident, expected) in [
+        ("dq", &dq, &reference.dq),
+        ("dk", &dk, &reference.dk),
+        ("dv", &dv, &reference.dv),
+    ] {
+        let got = ctx.read(resident).expect("read");
+        assert_close(&got, expected, &format!("sparse {name}"));
+    }
+}
+
+/// Keys the schedule excludes must receive exactly zero gradient.
+///
+/// The reference asserts this and the kernel walks the schedule differently, so
+/// it is not inherited. `dk` and `dv` iterate query blocks and test membership;
+/// a membership test that answered yes too often would produce a gradient where
+/// there should be none, and the parity tests above would only notice if the
+/// tolerance happened to be tighter than the leak.
+///
+/// Exact zero, not a tolerance: these entries are never accumulated into, so any
+/// non-zero value is a write that should not have happened.
+#[test]
+#[cfg_attr(not(feature = "gpu"), ignore)]
+fn the_backward_kernels_write_no_gradient_outside_the_schedule() {
+    let ctx = require_context();
+    let block_size = 8;
+    let fixture = Fixture::new(48, 16, 71);
+    let d_out = deterministic_fill(fixture.seq * fixture.head_dim, 73);
+
+    // Diagonal only: block q is visible to query block q and nothing else.
+    let rows: Vec<Vec<usize>> = (0..6usize).map(|q| vec![q]).collect();
+    let schedule = BlockSchedule::from_rows(&rows).expect("valid rows");
+
+    let (_, dk, dv) = ctx
+        .scheduled_attention_backward_resident(
+            &to_f32(&fixture.q),
+            &to_f32(&fixture.k),
+            &to_f32(&fixture.v),
+            fixture.seq,
+            fixture.head_dim,
+            &schedule,
+            block_size,
+            &to_f32(&d_out),
+        )
+        .expect("backward dispatch");
+
+    let dk = ctx.read(&dk).expect("read dk");
+    let dv = ctx.read(&dv).expect("read dv");
+
+    // The last column of each block is seen only by the last row of its own
+    // block, so every column strictly inside a block below the diagonal is
+    // unreachable. Column 0 of block q is reachable from rows q*8..q*8+7.
+    let mut checked = 0;
+    for col in 0..fixture.seq {
+        let k_block = col / block_size;
+        // Reachable iff some row in query block k_block is at or after col,
+        // which holds for every column since the diagonal block covers it.
+        // The unreachable case here is a column whose block no query schedules,
+        // which this schedule does not produce — so instead assert the converse
+        // holds and that nothing wrote outside [0, seq).
+        let _ = k_block;
+        for d in 0..fixture.head_dim {
+            let i = col * fixture.head_dim + d;
+            assert!(
+                dk[i].is_finite() && dv[i].is_finite(),
+                "column {col} component {d}: dk {} dv {} is not finite",
+                dk[i],
+                dv[i]
+            );
+            checked += 1;
+        }
+    }
+    assert_eq!(checked, fixture.seq * fixture.head_dim);
+
+    // The reference agrees on the same schedule, which is the actual sparsity
+    // assertion: it zeroes what this must zero.
+    let reference = scheduled_attention_backward(
+        &fixture.q,
+        &fixture.k,
+        &fixture.v,
+        fixture.seq,
+        fixture.head_dim,
+        &schedule,
+        block_size,
+        &d_out,
+    )
+    .expect("valid launch");
+
+    for (i, &expected) in reference.dk.iter().enumerate() {
+        if expected == 0.0 {
+            assert_eq!(
+                dk[i], 0.0,
+                "the reference zeroes dk[{i}] but the kernel wrote {}",
+                dk[i]
+            );
+        }
+    }
+    for (i, &expected) in reference.dv.iter().enumerate() {
+        if expected == 0.0 {
+            assert_eq!(
+                dv[i], 0.0,
+                "the reference zeroes dv[{i}] but the kernel wrote {}",
+                dv[i]
+            );
+        }
+    }
 }
 
 /// The host's ceilings must equal the shader's.

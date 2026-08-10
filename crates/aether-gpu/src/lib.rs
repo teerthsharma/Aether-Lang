@@ -153,6 +153,10 @@ pub struct GpuContext {
     adam_moments: wgpu::ComputePipeline,
     adam_update: wgpu::ComputePipeline,
     scheduled_attention: wgpu::ComputePipeline,
+    attention_row_stats: wgpu::ComputePipeline,
+    attention_dq: wgpu::ComputePipeline,
+    attention_dk: wgpu::ComputePipeline,
+    attention_dv: wgpu::ComputePipeline,
     layout: wgpu::BindGroupLayout,
     pending: RefCell<Pending>,
 }
@@ -345,6 +349,10 @@ impl GpuContext {
             adam_moments: build("adam_moments"),
             adam_update: build("adam_update"),
             scheduled_attention: build("scheduled_attention"),
+            attention_row_stats: build("attention_row_stats"),
+            attention_dq: build("attention_dq"),
+            attention_dk: build("attention_dk"),
+            attention_dv: build("attention_dv"),
             device,
             queue,
             info,
@@ -944,6 +952,126 @@ impl GpuContext {
         );
 
         Ok(out)
+    }
+
+    /// Reverse mode through [`GpuContext::scheduled_attention`].
+    ///
+    /// The GPU port of [`aether_core::scheduled::scheduled_attention_backward`],
+    /// which is the f64 reference these are checked against. The forward kernel
+    /// was built the same way round, and the ordering matters: a backward pass
+    /// verified only against itself is verified against nothing, because the
+    /// failure mode is a gradient that is smooth, finite, and wrong.
+    ///
+    /// Four dispatches. `attention_row_stats` computes the per-row maximum,
+    /// log-sum-exp and delta term once; the three gradient kernels then read them
+    /// instead of rebuilding a row's softmax to touch one of its columns, which
+    /// is what keeps the cost O(head_dim) per (row, column) pair rather than
+    /// quadratic in the sequence.
+    ///
+    /// The schedule is held constant, as in the reference. A block is selected or
+    /// it is not, so there is no derivative to take through the selection, and
+    /// the gradient teaches a model to use the blocks it was given rather than to
+    /// choose different ones.
+    ///
+    /// Returns `(dq, dk, dv)`, each `[seq, head_dim]` and resident.
+    #[allow(clippy::too_many_arguments)]
+    pub fn scheduled_attention_backward_resident(
+        &self,
+        q: &[f32],
+        k: &[f32],
+        v: &[f32],
+        seq: usize,
+        head_dim: usize,
+        schedule: &BlockSchedule,
+        block_size: usize,
+        d_out: &[f32],
+    ) -> Result<(GpuTensor, GpuTensor, GpuTensor), GpuError> {
+        if d_out.len() != seq * head_dim {
+            return Err(GpuError::ShapeMismatch(format!(
+                "d_out has {} elements, expected seq*head_dim = {}",
+                d_out.len(),
+                seq * head_dim
+            )));
+        }
+        // The forward call validates every other precondition and rejects launches
+        // beyond the kernel ceilings. Running it here rather than repeating those
+        // checks means the two paths cannot disagree about what is legal.
+        let _ = self.scheduled_attention_resident(q, k, v, seq, head_dim, schedule, block_size)?;
+
+        let num_blocks = seq / block_size;
+        let span = seq * head_dim;
+
+        let csr: Vec<f32> = schedule
+            .offsets
+            .iter()
+            .chain(schedule.indices.iter())
+            .map(|&i| i as f32)
+            .collect();
+        let csr_len = csr.len();
+        let csr = self.upload(&csr, 1, csr_len)?;
+
+        let dims = Dims {
+            m: seq as u32,
+            k: head_dim as u32,
+            n: block_size as u32,
+            _pad: num_blocks as u32,
+        };
+        let groups = (seq.div_ceil(64) as u32, 1, 1);
+
+        // Stats first, on q|k|v|dOut. The kernel writes the block it does not
+        // read, so this pass needs no room for it.
+        let mut packed = Vec::with_capacity(span * 4 + seq * 3);
+        packed.extend_from_slice(q);
+        packed.extend_from_slice(k);
+        packed.extend_from_slice(v);
+        packed.extend_from_slice(d_out);
+
+        // Uploaded flat. The packed buffer is q|k|v|dOut and later gains three
+        // floats per row of statistics, which is not a rectangle in `head_dim`;
+        // the kernels index it flatly from base offsets they compute themselves,
+        // so the tensor's rows and columns carry no meaning here beyond length.
+        let operands = self.upload(&packed, 1, packed.len())?;
+        let stats = self.alloc(seq, 3);
+        self.dispatch_resident(
+            &self.attention_row_stats,
+            &operands.buffer,
+            &csr.buffer,
+            &stats.buffer,
+            dims,
+            groups,
+        );
+
+        // The three gradient kernels read the stats, so they have to be part of
+        // the packed operand buffer. Reading them back to concatenate is a round
+        // trip the shared four-binding layout forces: with a second layout the
+        // stats buffer would simply be bound alongside.
+        //
+        // ponytail: one download of 3*seq floats per backward call, remove when a
+        // second bind group layout exists or a device-side concatenation kernel
+        // does.
+        packed.extend_from_slice(&self.read(&stats)?);
+        let operands = self.upload(&packed, 1, packed.len())?;
+
+        let dq = self.alloc(seq, head_dim);
+        let dk = self.alloc(seq, head_dim);
+        let dv = self.alloc(seq, head_dim);
+
+        for (pipeline, out) in [
+            (&self.attention_dq, &dq),
+            (&self.attention_dk, &dk),
+            (&self.attention_dv, &dv),
+        ] {
+            self.dispatch_resident(
+                pipeline,
+                &operands.buffer,
+                &csr.buffer,
+                &out.buffer,
+                dims,
+                groups,
+            );
+        }
+
+        Ok((dq, dk, dv))
     }
 
     /// [`GpuContext::scheduled_attention_resident`] with the result read back.
