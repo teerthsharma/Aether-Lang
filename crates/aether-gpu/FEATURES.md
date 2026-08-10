@@ -366,21 +366,61 @@ the 0.65 s version, and the measurement is the only thing that contradicted it.
 Final: **0.27 s against the 7.76 s round-tripping baseline, 28.55x**, with the
 CV accuracy unchanged at 0.8220 +/- 0.0271.
 
-## An unreproduced crash
+## Why the distance kernel loses: it is the bus, not the kernel
 
-One `STATUS_ACCESS_VIOLATION` (`0xc0000005`) at process exit, on the first run
-of `train_resident` after a rebuild. It did not reproduce in twelve subsequent
-runs of the same binary, and has not reappeared since.
+The kernel measures 0.52× the CPU reference at n=512, which reads as a slow
+kernel. It is not. Compute is isolated by timing one dispatch against ten — the
+transfers are identical in both, so the difference over nine is the marginal
+cost of a dispatch:
 
-Not diagnosed. `GpuContext` now implements `Drop` to submit any recorded work
-and block until the device is idle, which closes a plausible mechanism --
-tearing down a device with queue work in flight -- but no evidence links that
-mechanism to the observed fault. It is hardening, not a fix, and it is listed
-here rather than in **Shipped** for that reason.
+| n | total ms | compute ms | transfer ms | transfer % |
+|---:|---:|---:|---:|---:|
+| 256 | 2.512 | −0.017 | 2.529 | 100.7% |
+| 512 | 2.703 | 0.131 | 2.572 | 95.2% |
+| 1024 | 3.442 | 0.335 | 3.107 | 90.3% |
+| 2048 | 8.395 | 0.651 | 7.744 | 92.2% |
 
-The `Drop` impl earns its place independently: without it, work recorded and
-never flushed is discarded silently, so a caller that updates parameters and
-never reads them back would lose the update with no error.
+**90–100% of the time is transfer.** At n=512 the kernel computes in 0.131 ms
+against the CPU reference's 1.192 ms — roughly **9× faster** — and loses overall
+because moving the answer back costs 2.5 ms.
+
+The n=256 compute figure is negative, which is the honest reading of a
+measurement below its own noise floor rather than a number to round up to zero.
+
+This is an architectural limit, not a kernel problem, and no amount of tiling or
+occupancy work touches it. The persistence reduction runs on the CPU and is
+inherently sequential, so an n×n matrix has to cross the bus. GPU distances can
+only pay when the *consumer* is also on the GPU.
+
+So the conclusion from the precision work stands and now has a cause: routing
+`aether-core` through this kernel does not pay at the sizes the engine admits,
+and would not pay at larger ones either until the reduction moves too.
+
+## A crash, now reproducible at 1 in 5
+
+`STATUS_ACCESS_VIOLATION` (`0xc0000005`) at process exit. First seen once in
+`train_resident` after a rebuild, then not again in twelve runs, and left
+recorded as undiagnosed rather than fixed.
+
+It has reappeared in `gpu_bench`, and there it reproduces: **1 of 5 runs**. All
+output completes first, so the fault is at teardown, not during work.
+
+What changed between the clean runs and the reproducing ones is the
+compute-versus-transfer section, which issues ten dispatches while reading only
+the last, so nine result tensors are allocated and dropped per timed iteration
+at sizes up to 16 MB each. That makes buffer churn during teardown the leading
+suspect, but it is a suspicion from correlation and not a diagnosis.
+
+`GpuContext::Drop` already submits any recorded work and blocks until the device
+is idle, which was the obvious mechanism and evidently is not the whole story.
+A rate of 1 in 5 is enough to bisect against, which the earlier 1-in-many was
+not — distinguishing 1/5 from 1/20 needs roughly thirty runs per variant, so
+this is now a tractable investigation rather than an anecdote.
+
+Recorded here as an open defect. The `Drop` impl earns its place regardless:
+without it, work recorded and never flushed is discarded silently, so a caller
+that updates parameters and never reads them back loses the update with no
+error.
 
 ## Is f32 good enough for the topology?
 
