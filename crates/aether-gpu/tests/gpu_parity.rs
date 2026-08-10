@@ -353,6 +353,150 @@ fn a_resident_matmul_rejects_disagreeing_inner_dimensions() {
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
+// What f32 costs a Tensor consumer
+//
+// The performance case for routing `aether_core::ml::Tensor::matmul` to the GPU
+// is measured: crossover at n=128, 38x at n=512 with conversion counted. The
+// precision case is not. The topology tests establish that f32 is acceptable for
+// *distances*, which is a different operation with a different error growth, and
+// carrying that conclusion across would be exactly the kind of transfer this
+// file exists to prevent.
+//
+// `Tensor` is f64. Routing it through an f32 kernel is a semantic change to
+// every consumer, so the size of that change is worth knowing before anyone
+// argues about whether it is acceptable.
+// ═══════════════════════════════════════════════════════════════════════════════
+
+/// f64 reference matmul, independent of `Tensor` so the comparison does not
+/// depend on the implementation being replaced.
+fn f64_matmul(a: &[f64], b: &[f64], n: usize) -> Vec<f64> {
+    let mut c = vec![0.0; n * n];
+    for i in 0..n {
+        for j in 0..n {
+            let mut s = 0.0;
+            for k in 0..n {
+                s += a[i * n + k] * b[k * n + j];
+            }
+            c[i * n + j] = s;
+        }
+    }
+    c
+}
+
+/// How far an f32 matmul drifts from f64, and how that grows with the reduction
+/// depth.
+///
+/// The expectation is `sqrt(k)` growth: f32 has about 1.2e-7 of relative
+/// precision, errors in a k-term dot product accumulate as a random walk, so
+/// relative error should scale roughly with the square root of n. Asserting the
+/// growth rather than a single tolerance is what distinguishes "f32 behaves like
+/// f32" from "f32 behaves like something is wrong".
+#[test]
+fn f32_matmul_error_grows_like_the_square_root_of_the_reduction_depth() {
+    let Some(ctx) = context() else { return };
+
+    let mut previous: Option<(usize, f64)> = None;
+
+    for n in [16usize, 64, 256] {
+        let a32 = fill(n * n, 301);
+        let b32 = fill(n * n, 302);
+        let a64: Vec<f64> = a32.iter().map(|v| *v as f64).collect();
+        let b64: Vec<f64> = b32.iter().map(|v| *v as f64).collect();
+
+        let gpu = ctx.matmul(&a32, &b32, n, n, n).expect("matmul");
+        let exact = f64_matmul(&a64, &b64, n);
+
+        // Relative to the magnitude of the result, not element by element: a
+        // near-zero entry has unbounded relative error and says nothing.
+        let scale = exact.iter().fold(0.0f64, |m, v| m.max(v.abs()));
+        let worst = gpu
+            .iter()
+            .zip(&exact)
+            .map(|(g, e)| ((*g as f64) - e).abs())
+            .fold(0.0f64, f64::max)
+            / scale;
+
+        println!("n={n:>4}: worst relative error {worst:.3e}");
+
+        // f32 epsilon is 1.19e-7; sqrt(n) growth with a generous constant.
+        let bound = 8.0 * 1.19e-7 * (n as f64).sqrt();
+        assert!(
+            worst < bound,
+            "n={n}: relative error {worst:e} exceeds {bound:e}, which is more \
+             than f32 accumulation over {n} terms explains"
+        );
+
+        if let Some((pn, pe)) = previous {
+            // Growth must not be dramatically faster than sqrt. A quadratic or
+            // linear blow-up would indicate a real defect rather than rounding.
+            let ratio = worst / pe.max(1e-30);
+            let sqrt_ratio = ((n as f64) / (pn as f64)).sqrt();
+            assert!(
+                ratio < 6.0 * sqrt_ratio,
+                "error grew {ratio:.2}x from n={pn} to n={n}, far above the \
+                 {sqrt_ratio:.2}x that sqrt accumulation predicts"
+            );
+        }
+        previous = Some((n, worst));
+    }
+}
+
+/// The consumers that an f32 `Tensor` path would and would not serve.
+///
+/// This is the assertion that turns a precision number into a decision. The
+/// relative error at n=256 is around 1e-6, which is:
+///
+/// - fine for neural network training, where gradients are noisy by several
+///   orders of magnitude more than that, and where this crate already trains to
+///   the same accuracy as the f64 CPU path;
+/// - fine for clustering and classification, which threshold and argmax;
+/// - **not** fine for anything asserting to 1e-9 or tighter, which includes the
+///   persistence engine's own invariant suite.
+///
+/// So the honest recommendation is per-consumer, not per-crate, and this test
+/// pins the number the recommendation rests on rather than leaving it in a
+/// comment that drifts.
+#[test]
+fn f32_matmul_precision_is_stated_as_a_number_not_an_adjective() {
+    let Some(ctx) = context() else { return };
+
+    let n = 256;
+    let a32 = fill(n * n, 311);
+    let b32 = fill(n * n, 312);
+    let a64: Vec<f64> = a32.iter().map(|v| *v as f64).collect();
+    let b64: Vec<f64> = b32.iter().map(|v| *v as f64).collect();
+
+    let gpu = ctx.matmul(&a32, &b32, n, n, n).expect("matmul");
+    let exact = f64_matmul(&a64, &b64, n);
+
+    let scale = exact.iter().fold(0.0f64, |m, v| m.max(v.abs()));
+    let worst = gpu
+        .iter()
+        .zip(&exact)
+        .map(|(g, e)| ((*g as f64) - e).abs())
+        .fold(0.0f64, f64::max)
+        / scale;
+
+    println!("n=256 relative error: {worst:.3e}");
+
+    // Comfortably above anything asserting at 1e-9, comfortably below anything
+    // that matters to a thresholding consumer. Both directions are asserted, so
+    // the test fails if the kernel silently becomes either much worse or much
+    // better than the recommendation assumes.
+    assert!(
+        worst > 1e-9,
+        "relative error {worst:e} is below 1e-9, so the claim that an f32 path \
+         is unsuitable for 1e-9 assertions no longer holds and the \
+         recommendation in FEATURES.md needs revisiting"
+    );
+    assert!(
+        worst < 1e-4,
+        "relative error {worst:e} is above 1e-4, which would make an f32 path \
+         unsuitable for thresholding consumers too"
+    );
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
 // The optimizer
 //
 // A mutation run found that flipping `sgd_update` from descent to ascent

@@ -444,6 +444,43 @@ medians sit at. It is left as measured rather than smoothed, since the honest
 reading is that the two are indistinguishable there, not that conversion is
 free.
 
+### And what f32 costs the answer
+
+Cost was measured before acceptability, which is backwards, so: routing `Tensor`
+through an f32 kernel changes every consumer's numbers, and the size of that
+change decides who can use it.
+
+| n | worst relative error |
+|---:|---:|
+| 16 | 1.222e-7 |
+| 64 | 2.287e-7 |
+| 256 | 6.735e-7 |
+
+The growth is √n, as f32 accumulation over a k-term dot product predicts — 1.87×
+from n=16 to 64 against a predicted 2×. That is f32 behaving like f32, which is
+the point of asserting the *growth rate* rather than a single tolerance: a
+linear or quadratic blow-up would mean a defect, and a flat line would mean the
+comparison was not measuring anything.
+
+At roughly **5e-7 relative**, an f32 `Tensor` path is:
+
+- **fine** for neural network training — gradients are noisier than this by
+  orders of magnitude, and this crate already trains to accuracy identical to
+  the f64 CPU path, fold for fold;
+- **fine** for clustering and classification, which threshold and argmax;
+- **not fine** for anything asserting at 1e-9 or tighter, which includes the
+  persistence engine's own invariant suite.
+
+So the recommendation is **per consumer, not per crate**. Both bounds are
+asserted in `f32_matmul_precision_is_stated_as_a_number_not_an_adjective`, so
+the test fails if the kernel becomes either much worse or much better than the
+recommendation assumes — a silent improvement would invalidate the "unsuitable
+for 1e-9" half just as surely as a regression invalidates the other.
+
+The precision argument for distances does **not** transfer here. Different
+operation, different error growth, and carrying a conclusion across would be the
+exact move these tests exist to prevent.
+
 ## Why the distance kernel loses: it is the bus, not the kernel
 
 The kernel measures 0.52× the CPU reference at n=512, which reads as a slow
