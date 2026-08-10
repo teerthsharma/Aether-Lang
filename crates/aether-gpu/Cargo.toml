@@ -1,0 +1,33 @@
+[package]
+name = "aether-gpu"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+description = "AETHER GPU: wgpu compute backend for aether-core tensor operations"
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# AETHER GPU
+# ═══════════════════════════════════════════════════════════════════════════════
+#
+# Deliberately a separate crate rather than a feature on aether-core.
+#
+# aether-core is no_std and builds for thumbv7m-none-eabi. wgpu requires std,
+# an allocator, and a windowing/driver stack. Putting the GPU backend behind a
+# feature flag on aether-core would leave a no_std crate whose dependency graph
+# only resolves on hosted targets, and the Cortex-M3 build is a load-bearing
+# claim. A separate crate keeps that boundary enforced by the build rather
+# than by discipline.
+#
+# Precision: WGSL has no f64. aether-core computes in f64. Every kernel here
+# is f32, so GPU results are compared against the CPU path at f32 tolerance,
+# never at the 1e-12 used elsewhere in this workspace.
+# ═══════════════════════════════════════════════════════════════════════════════
+
+[dependencies]
+aether-core = { path = "../aether-core" }
+wgpu = "27.0"
+pollster = "0.4"
+bytemuck = { version = "1.16", features = ["derive"] }
+
+[dev-dependencies]

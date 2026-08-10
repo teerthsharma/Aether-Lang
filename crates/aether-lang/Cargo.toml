@@ -25,7 +25,13 @@ description = "AETHER Language: Lexer, Parser, AST, and Interpreter"
 
 [features]
 default = ["std"]
-std = ["aether-core/std", "alloc", "dep:reqwest", "dep:safetensors", "dep:wgpu", "dep:pollster", "dep:bytemuck"]
+# `std` used to pull reqwest, safetensors, wgpu, pollster and bytemuck. All five
+# had zero call sites -- `grep -rn 'wgpu\|pollster\|bytemuck\|reqwest\|safetensors'
+# crates/aether-lang/src` returns nothing -- so every default build compiled an
+# HTTP client and a GPU stack that no line of code referenced. GPU work lives in
+# the `aether-gpu` crate, which depends on a current wgpu rather than the 0.17
+# pinned here since 2023.
+std = ["aether-core/std", "alloc"]
 ml = ["dep:candle-core", "dep:candle-transformers", "dep:tokenizers", "dep:hf-hub"]
 alloc = []
 no_std = ["aether-core/no_std", "alloc"]
@@ -35,11 +41,6 @@ python = ["dep:pyo3", "std"]
 aether-core = { path = "../aether-core", default-features = false }
 libm = { workspace = true }
 heapless = { workspace = true }
-reqwest = { version = "0.11", features = ["blocking", "rustls-tls"], default-features = false, optional = true }
-safetensors = { version = "0.3", optional = true }
-wgpu = { version = "0.17", optional = true }
-pollster = { version = "0.3", optional = true }
-bytemuck = { version = "1.13", features = ["derive"], optional = true }
 candle-core = { version = "0.3.3", optional = true }
 candle-transformers = { version = "0.3.3", optional = true }
 tokenizers = { version = "0.15.2", optional = true }

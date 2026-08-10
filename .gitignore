@@ -3,7 +3,11 @@
 /debug
 /release
 **/*.rs.bk
+
+# Merge/patch artifacts
 *.orig
+*.rej
+/patch.diff
 
 # Cargo.lock is committed on purpose. This workspace ships binaries
 # (aether-cli, aether-kernel), the Dockerfile COPYs the lockfile, and the CI

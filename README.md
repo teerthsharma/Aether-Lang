@@ -2045,8 +2045,6 @@ crates/aether-kernel/src/
     └── topology.rs             HardwareTopology, IoCaps
 ```
 
-Also checked into `aether-kernel/`: `tree.txt`, `tree2.txt` and `tree3.txt` — three stale `cargo tree` dumps, one of them mojibaked. They are the only other place `nalgebra` appears in the repository. Small, harmless, and exactly the kind of thing that accumulates when CI has never run.
-
 ---
 
 ## How To Read This Repository
