@@ -184,7 +184,7 @@ fn train_fold(
     x_test: &[f32],
     y_test: &[f32],
     rng: &mut Lcg,
-) -> f32 {
+) -> Vec<bool> {
     let n = y_train.len();
     let mut mlp = init(ctx, rng);
 
@@ -242,18 +242,154 @@ fn train_fold(
     let p = ctx.sigmoid_resident(&z2).expect("p");
     let pred = ctx.read(&p).expect("read");
 
-    let correct = pred
-        .iter()
+    pred.iter()
         .zip(y_test)
-        .filter(|(&p, &t)| (p >= 0.5) == (t >= 0.5))
-        .count();
-    correct as f32 / m as f32
+        .map(|(&p, &t)| (p >= 0.5) == (t >= 0.5))
+        .collect()
 }
 
-fn cross_validate(ctx: &GpuContext, x: &[f32], y: &[f32], rng: &mut Lcg) -> (f32, f32, f32) {
+/// Wilson score interval for a proportion.
+///
+/// Every sample receives exactly one out-of-fold prediction, from a model that
+/// never trained on it, so pooled accuracy is a binomial over `n` independent
+/// trials and an interval on it is legitimate. The fold range reported earlier is
+/// not: five numbers bound a spread and say nothing about where the underlying
+/// rate lies.
+///
+/// Wilson rather than the textbook normal approximation because the latter
+/// misbehaves near 0 and 1 and can produce bounds outside [0, 1], which for a
+/// chance-floor task is exactly the region several arms occupy.
+fn wilson(correct: usize, n: usize) -> (f64, f64) {
+    let z = 1.96;
+    let p = correct as f64 / n as f64;
+    let nf = n as f64;
+    let denom = 1.0 + z * z / nf;
+    let centre = (p + z * z / (2.0 * nf)) / denom;
+    let half = z * (p * (1.0 - p) / nf + z * z / (4.0 * nf * nf)).sqrt() / denom;
+
+    // Clamped because the result is a probability interval and the endpoints are
+    // exact at the extremes: at `correct == n` the upper bound is exactly 1 in
+    // real arithmetic, and f64 lands one ulp below at 0.9999999999999999. The
+    // clamp reports the quantity rather than the rounding, and it is not hiding a
+    // wide excursion — a formula error large enough to matter would still fail
+    // the bracket assertion in the tests below.
+    ((centre - half).max(0.0), (centre + half).min(1.0))
+}
+
+/// McNemar's test on paired predictions.
+///
+/// The arms are evaluated on the same sequences, so comparing two independent
+/// intervals throws away the pairing and loses power. What carries the signal is
+/// the discordant pairs: samples one arm got right and the other did not.
+///
+/// This exists because of a specific failure. At 600 samples this experiment
+/// reported the topological schedule at 58.5% against random at 52.2% — a
+/// six-point gap favouring the mechanism under test — and only four times the
+/// data revealed it as noise. A comparison that reports two point estimates and
+/// leaves the reader to eyeball the gap will keep producing that outcome.
+///
+/// Returns `(b, c, chi-squared)` where `b` counts samples the first arm got right
+/// and the second wrong. The continuity correction is Edwards's, which is the
+/// conservative choice: it makes the test slightly less likely to call a
+/// difference real, and this file has already been wrong in that direction once.
+fn mcnemar(a: &[bool], b_arm: &[bool]) -> (usize, usize, f64) {
+    let b = a.iter().zip(b_arm).filter(|(&x, &y)| x && !y).count();
+    let c = a.iter().zip(b_arm).filter(|(&x, &y)| !x && y).count();
+
+    if b + c == 0 {
+        return (b, c, 0.0);
+    }
+    let diff = (b as f64 - c as f64).abs();
+    let chi2 = if diff <= 1.0 {
+        0.0
+    } else {
+        (diff - 1.0).powi(2) / (b + c) as f64
+    };
+    (b, c, chi2)
+}
+
+/// Complementary error function, Numerical Recipes 6.2.2.
+///
+/// Accurate to about 1.2e-7 relative, which is far finer than the threshold it
+/// feeds. `std` has no `erfc` and pulling a dependency in for one call would be
+/// heavier than the seven lines.
+fn erfc(x: f64) -> f64 {
+    let z = x.abs();
+    let t = 2.0 / (2.0 + z);
+    let ty = 4.0 * t - 2.0;
+    let coefficients = [
+        -1.3026537197817094,
+        6.419_697_923_564_902e-1,
+        1.9476473204185836e-2,
+        -9.561_514_786_808_631e-3,
+        -9.46595344482036e-4,
+        3.66839497852761e-4,
+        4.2523324806907e-5,
+        -2.0278578112534e-5,
+        -1.624290004647e-6,
+        1.303655835580e-6,
+        1.5626441722e-8,
+        -8.5238095915e-8,
+    ];
+    let mut d = 0.0;
+    let mut dd = 0.0;
+    for &c in coefficients.iter().rev().take(coefficients.len() - 1) {
+        let tmp = d;
+        d = ty * d - dd + c;
+        dd = tmp;
+    }
+    let ans = t * (-z * z + 0.5 * (coefficients[0] + ty * d) - dd).exp();
+    if x >= 0.0 {
+        ans
+    } else {
+        2.0 - ans
+    }
+}
+
+/// Chi-squared critical value at `alpha` with one degree of freedom.
+///
+/// For one degree of freedom the survival function is exactly
+/// `erfc(sqrt(x / 2))`, so this inverts it by bisection rather than carrying a
+/// table that would silently stop matching the number of comparisons.
+fn chi2_critical(alpha: f64) -> f64 {
+    let (mut lo, mut hi) = (0.0f64, 200.0f64);
+    for _ in 0..200 {
+        let mid = 0.5 * (lo + hi);
+        if erfc((mid / 2.0).sqrt()) > alpha {
+            lo = mid;
+        } else {
+            hi = mid;
+        }
+    }
+    0.5 * (lo + hi)
+}
+
+/// Family-wise error rate for the whole table of comparisons.
+///
+/// Not the per-comparison rate, and the difference is the reason this constant
+/// exists. Ten pairs tested at 5% each produce about one spurious "better" per
+/// two runs by construction, and the interesting comparison is always chosen
+/// after seeing the table.
+///
+/// That is not hypothetical here. At 600 sequences this file reported
+/// `topological better` over random with chi-squared 4.72, clearing the
+/// uncorrected 3.841 threshold. The 2,400-sequence run puts the same pair at
+/// 0.09 — the two arms are indistinguishable, and the earlier verdict was the
+/// false positive a 5% test is entitled to produce. Bonferroni at 0.05/10 sets
+/// the bar at 7.88 and declines it, which is the behaviour wanted from an
+/// instrument whose job is to say when the data cannot decide.
+const FAMILY_ALPHA: f64 = 0.05;
+
+/// One out-of-fold verdict per sample, in sample order.
+///
+/// Returned per sample rather than as a fold average so the arms can be compared
+/// pairwise on identical sequences. Aggregating to five fold accuracies first
+/// discards which samples each arm got right, which is the whole content of a
+/// paired test.
+fn cross_validate(ctx: &GpuContext, x: &[f32], y: &[f32], rng: &mut Lcg) -> Vec<bool> {
     let n = y.len();
     let fold = n / FOLDS;
-    let mut scores = Vec::with_capacity(FOLDS);
+    let mut verdicts = vec![false; n];
 
     for f in 0..FOLDS {
         let lo = f * fold;
@@ -272,13 +408,12 @@ fn cross_validate(ctx: &GpuContext, x: &[f32], y: &[f32], rng: &mut Lcg) -> (f32
             xs.extend_from_slice(&x[i * HEAD_DIM..(i + 1) * HEAD_DIM]);
             ys.push(y[i]);
         }
-        scores.push(train_fold(ctx, &x_train, &y_train, &x_test, &y_test, rng));
+
+        let fold_verdicts = train_fold(ctx, &x_train, &y_train, &x_test, &y_test, rng);
+        verdicts[lo..hi].copy_from_slice(&fold_verdicts);
     }
 
-    let mean = scores.iter().sum::<f32>() / FOLDS as f32;
-    let lo = scores.iter().cloned().fold(f32::INFINITY, f32::min);
-    let hi = scores.iter().cloned().fold(f32::NEG_INFINITY, f32::max);
-    (mean, lo, hi)
+    verdicts
 }
 
 fn main() {
@@ -312,12 +447,14 @@ fn main() {
     println!();
     println!(
         "  {:>12}  {:>8}  {:>7}  {:>9}  {:>15}",
-        "schedule", "density", "mass", "accuracy", "fold range"
+        "schedule", "density", "mass", "accuracy", "95% interval"
     );
     println!(
         "  {:->12}  {:->8}  {:->7}  {:->9}  {:->15}",
         "", "", "", "", ""
     );
+
+    let mut outcomes: Vec<(&str, Vec<bool>)> = Vec::new();
 
     // Each sample gets its own schedule, derived from its own keys. A schedule
     // shared across samples would be reading structure the sequences do not have
@@ -370,7 +507,10 @@ fn main() {
         }
 
         let mut fold_rng = Lcg(0xC0FFEE);
-        let (mean, lo, hi) = cross_validate(&ctx, &x, &y, &mut fold_rng);
+        let verdicts = cross_validate(&ctx, &x, &y, &mut fold_rng);
+        let correct = verdicts.iter().filter(|&&v| v).count();
+        let mean = correct as f32 / verdicts.len() as f32;
+        let (lo, hi) = wilson(correct, verdicts.len());
 
         println!(
             "  {variant:>12}  {:>7.1}%  {:>7.4}  {:>8.1}%  {:>6.1}% - {:>5.1}%",
@@ -380,6 +520,7 @@ fn main() {
             100.0 * lo,
             100.0 * hi
         );
+        outcomes.push((variant, verdicts));
 
         if variant == "dense" && mean < DENSE_FLOOR {
             println!();
@@ -403,6 +544,62 @@ fn main() {
         }
     }
 
+    // Pairwise on identical sequences. Two overlapping intervals do not settle a
+    // comparison — they discard the pairing, which is where the power is — and
+    // two non-overlapping ones are a stronger claim than the data has to make.
+    println!();
+    println!("───────────────────────────────────────────────────────────────────────");
+    let pairs = outcomes.len() * (outcomes.len() - 1) / 2;
+    let per_comparison = FAMILY_ALPHA / pairs as f64;
+    let critical = chi2_critical(per_comparison);
+
+    println!("  Paired comparison on identical sequences (McNemar)");
+    println!(
+        "  {pairs} comparisons, Bonferroni: {:.1}% family-wise, {:.4} each, chi2 > {critical:.2}",
+        100.0 * FAMILY_ALPHA,
+        per_comparison
+    );
+    println!();
+    println!(
+        "  {:>13} vs {:<13}  {:>6}  {:>6}  {:>8}  {:>14}",
+        "A", "B", "A>B", "B>A", "chi2", "verdict"
+    );
+    println!(
+        "  {:->13}    {:->13}  {:->6}  {:->6}  {:->8}  {:->14}",
+        "", "", "", "", "", ""
+    );
+
+    for i in 0..outcomes.len() {
+        for j in (i + 1)..outcomes.len() {
+            let (name_a, ref va) = outcomes[i];
+            let (name_b, ref vb) = outcomes[j];
+            let (b, c, chi2) = mcnemar(va, vb);
+
+            let verdict = if chi2 > critical {
+                if b > c {
+                    format!("{name_a} better")
+                } else {
+                    format!("{name_b} better")
+                }
+            } else {
+                "not resolved".to_string()
+            };
+
+            println!("  {name_a:>13} vs {name_b:<13}  {b:>6}  {c:>6}  {chi2:>8.2}  {verdict:>14}");
+        }
+    }
+
+    println!();
+    println!("  'not resolved' means the discordant counts are close enough that");
+    println!("  this many sequences cannot separate the two arms. It is a statement");
+    println!("  about the experiment's resolution, not a claim the arms are equal.");
+    println!();
+    println!("  This exists because an earlier run of this file, at 600 sequences,");
+    println!("  reported topological 58.5% against random 52.2% and would have been");
+    println!("  read as the mechanism winning. Four times the data moved random to");
+    println!("  the top. Two point estimates and an eyeballed gap will keep");
+    println!("  producing that; a paired test on the same data would not have.");
+
     println!();
     println!("───────────────────────────────────────────────────────────────────────");
     println!("  The label is the sign of a value component at a content-addressed");
@@ -415,4 +612,127 @@ fn main() {
     println!("  selection removed. It separates a gain from the topology from a");
     println!("  gain the fixed structure would have produced on its own.");
     println!("═══════════════════════════════════════════════════════════════════════");
+}
+
+/// The statistics decide the verdicts, so they are pinned rather than trusted.
+///
+/// `chi2_critical` inverts an approximation by bisection, and a wrong constant
+/// here does not fail loudly — it silently moves the bar and changes every
+/// "resolved" in the table.
+///
+/// Run with `cargo test -p aether-gpu --example recall_training`.
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn the_critical_values_match_the_published_table() {
+        // Chi-squared, one degree of freedom, from any standard table.
+        for (alpha, expected) in [
+            (0.05, 3.841),
+            (0.01, 6.635),
+            (0.005, 7.879),
+            (0.001, 10.828),
+        ] {
+            let got = chi2_critical(alpha);
+            assert!(
+                (got - expected).abs() < 0.01,
+                "chi2_critical({alpha}) gave {got:.4}, table says {expected}"
+            );
+        }
+    }
+
+    #[test]
+    fn the_correction_raises_the_bar_above_the_uncorrected_test() {
+        let uncorrected = chi2_critical(0.05);
+        let corrected = chi2_critical(0.05 / 10.0);
+        assert!(
+            corrected > uncorrected,
+            "correcting for ten comparisons lowered the threshold, {corrected} \
+             against {uncorrected}"
+        );
+
+        // The observed statistic from the 600-sequence run that this correction
+        // exists to decline. It cleared the uncorrected bar and must not clear
+        // the corrected one.
+        let observed = 4.72;
+        assert!(
+            observed > uncorrected && observed < corrected,
+            "the 600-sequence topological-vs-random statistic of {observed} no \
+             longer sits between {uncorrected} and {corrected}, so this test has \
+             stopped guarding the case it was written for"
+        );
+    }
+
+    #[test]
+    fn mcnemar_ignores_agreement_and_counts_only_disagreement() {
+        // Identical arms: no discordant pairs, nothing to resolve.
+        let a = vec![true, false, true, false];
+        assert_eq!(mcnemar(&a, &a), (0, 0, 0.0));
+
+        // Agreement is irrelevant to the statistic. Adding samples both arms get
+        // right must leave it unchanged, which is the property that makes the
+        // test paired rather than a comparison of two accuracies.
+        let x = vec![true, false, false];
+        let y = vec![false, true, false];
+        let (b1, c1, chi1) = mcnemar(&x, &y);
+
+        let mut x2 = x.clone();
+        let mut y2 = y.clone();
+        for _ in 0..50 {
+            x2.push(true);
+            y2.push(true);
+        }
+        let (b2, c2, chi2) = mcnemar(&x2, &y2);
+
+        assert_eq!(
+            (b1, c1),
+            (b2, c2),
+            "agreement changed the discordant counts"
+        );
+        assert!(
+            (chi1 - chi2).abs() < 1e-12,
+            "fifty agreeing samples moved the statistic from {chi1} to {chi2}"
+        );
+    }
+
+    #[test]
+    fn the_wilson_interval_brackets_the_estimate_and_stays_in_range() {
+        for (correct, n) in [
+            (0usize, 100usize),
+            (50, 100),
+            (100, 100),
+            (1, 5),
+            (2400, 2400),
+        ] {
+            let p = correct as f64 / n as f64;
+            let (lo, hi) = wilson(correct, n);
+
+            // A rounding tolerance, not a fudge. At `correct == n` the exact
+            // upper bound is 1, and f64 evaluates the expression to
+            // 0.9999999999999999 — one ulp low, so a strict comparison here
+            // asserts exact arithmetic rather than a property of the interval.
+            // 1e-12 is roughly ten thousand times the observed 1.1e-16
+            // discrepancy and still orders of magnitude below anything that
+            // would matter: a wrong formula moves these bounds by 1e-3 or more.
+            const ROUNDING: f64 = 1e-12;
+            assert!(
+                lo - ROUNDING <= p && p <= hi + ROUNDING,
+                "{correct}/{n}: {p} outside [{lo}, {hi}]"
+            );
+            assert!(
+                lo >= 0.0 && hi <= 1.0,
+                "{correct}/{n}: interval [{lo}, {hi}] leaves [0, 1], which is the \
+                 failure the normal approximation has and Wilson does not"
+            );
+        }
+
+        // More data must not widen the interval at a fixed rate.
+        let (lo_small, hi_small) = wilson(60, 100);
+        let (lo_large, hi_large) = wilson(600, 1000);
+        assert!(
+            (hi_large - lo_large) < (hi_small - lo_small),
+            "ten times the data did not narrow the interval"
+        );
+    }
 }

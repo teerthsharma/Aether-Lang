@@ -102,10 +102,37 @@ against 92.4% for dense and a 50% chance floor. Whatever the salience ranking
 contributes on this task, it is smaller than the resolution of a 2,400-sample
 five-fold comparison.
 
+The comparison is decided by McNemar's test on paired predictions rather than by
+reading the accuracy column, since every arm is evaluated on the same sequences
+and the discordant counts carry the signal that two independent intervals throw
+away:
+
+| pair | A>B | B>A | chi² | verdict |
+|---|---:|---:|---:|---|
+| dense vs topological | 854 | 88 | 621.26 | dense better |
+| topological vs inverted | 564 | 528 | 1.12 | not resolved |
+| topological vs random | 539 | 550 | 0.09 | not resolved |
+| inverted vs random | 538 | 585 | 1.88 | not resolved |
+| topological vs local+sink | 646 | 441 | 38.29 | topological better |
+| random vs local+sink | 727 | 511 | 37.34 | random better |
+
 The same experiment at 600 samples reported topological 58.5% against random
 52.2% and would have been written up as the selector winning. Four times the data
-moved random to 61.0%, the highest of the three. The gap was noise, the fold
-ranges said so at the time, and nothing but the larger run would have caught it.
+moved random to 61.0%, the highest of the three.
+
+The instrument was then tested on the run that produced that gap, and **it
+failed**. McNemar at an uncorrected 5% returns `topological better` there, with
+chi² 4.72 against a 3.841 threshold — a nominally significant verdict the larger
+run refutes at chi² 0.09. The test was behaving correctly; the use of it was not.
+Ten pairs are compared at 5% each and the interesting one is chosen after seeing
+the table, which manufactures roughly one spurious verdict every two runs.
+
+Bonferroni at 0.05/10 puts the bar at chi² 7.88 and declines it. Re-run at 600
+samples under the correction, every comparison among the sparse arms reports `not
+resolved`, which is the right answer for that much data. The correction also
+costs real power there: topological against local+sink scores 6.90 at 600 and
+38.29 at 2,400, so it is declined at the smaller size despite being a genuine
+effect. Losing a true positive is the price of not publishing a false one.
 
 The first configuration was worse than uninformative. With the planted query
 scaled at 6, the target key drew about 5% of the softmax against 127 distractors,
