@@ -25,7 +25,7 @@
 //! `AETHER_REQUIRE_GPU=1` additionally turns a missing adapter into a failure,
 //! for a run that must prove the hardware path was exercised.
 
-use aether_gpu::{cpu_matmul, cpu_pairwise_sqdist, GpuContext};
+use aether_gpu::{cpu_matmul, cpu_pairwise_sqdist, tensor_matmul, GpuContext};
 
 /// f32 accumulation over k terms diverges from a separately-ordered f32
 /// accumulation. The bound scales with k, so the tolerance does too rather
@@ -387,6 +387,71 @@ fn a_resident_matmul_rejects_disagreeing_inner_dimensions() {
         ctx.matmul_resident(&a, &b).is_err(),
         "2x3 by 4x2 has no valid product and must be an error"
     );
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// The Tensor bridge
+// ═══════════════════════════════════════════════════════════════════════════════
+
+/// `tensor_matmul` must agree with `Tensor::matmul` on the same input.
+///
+/// It is the only thing that makes the bridge usable: a caller swapping one for
+/// the other is entitled to the same answer, within the f32 cost the doc states.
+#[test]
+#[cfg_attr(not(feature = "gpu"), ignore = "needs a GPU adapter: --features gpu")]
+fn tensor_matmul_matches_the_cpu_path() {
+    use aether_core::ml::tensor::Tensor;
+
+    let ctx = require_context();
+
+    for (m, k, n) in [(4usize, 4usize, 4usize), (33, 17, 48), (64, 64, 64)] {
+        let a64: Vec<f64> = fill(m * k, 401).iter().map(|v| *v as f64).collect();
+        let b64: Vec<f64> = fill(k * n, 402).iter().map(|v| *v as f64).collect();
+
+        let ta = Tensor::new(&a64, &[m, k]);
+        let tb = Tensor::new(&b64, &[k, n]);
+
+        let cpu = ta.matmul(&tb);
+        let gpu = tensor_matmul(&ctx, &ta, &tb).expect("bridge");
+
+        assert_eq!(gpu.shape, cpu.shape, "{m}x{k}x{n}: shape");
+
+        let c = cpu.data.borrow();
+        let g = gpu.data.borrow();
+        let scale = c.iter().fold(0.0f64, |acc, v| acc.max(v.abs()));
+
+        let worst = g
+            .iter()
+            .zip(c.iter())
+            .map(|(x, y)| (x - y).abs())
+            .fold(0.0f64, f64::max)
+            / scale;
+
+        // The f32 cost the doc states, with room for the reduction depth.
+        let bound = 8.0 * 1.19e-7 * (k as f64).sqrt();
+        assert!(
+            worst < bound,
+            "{m}x{k}x{n}: relative error {worst:e} exceeds {bound:e}"
+        );
+        println!("{m}x{k}x{n}: bridge vs Tensor::matmul, relative error {worst:.3e}");
+    }
+}
+
+/// Shapes the bridge cannot honour must be rejected, not silently reshaped.
+#[test]
+#[cfg_attr(not(feature = "gpu"), ignore = "needs a GPU adapter: --features gpu")]
+fn the_tensor_bridge_rejects_shapes_it_cannot_multiply() {
+    use aether_core::ml::tensor::Tensor;
+
+    let ctx = require_context();
+
+    let a = Tensor::new(&[1.0, 2.0, 3.0, 4.0, 5.0, 6.0], &[2, 3]);
+    let wrong_inner = Tensor::new(&[1.0, 2.0, 3.0, 4.0], &[2, 2]);
+    assert!(tensor_matmul(&ctx, &a, &wrong_inner).is_err());
+
+    let three_d = Tensor::new(&[1.0; 8], &[2, 2, 2]);
+    assert!(tensor_matmul(&ctx, &a, &three_d).is_err());
+    assert!(tensor_matmul(&ctx, &three_d, &a).is_err());
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
