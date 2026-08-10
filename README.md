@@ -1761,6 +1761,29 @@ A passing suite tells you nothing about what it would catch. So: inject known de
 
 The prior six example tests missed two of three defects **entirely**. That is the difference between "one hand-picked cloud with one expected number" and "a property that holds for every input".
 
+> **That table was a record, not a command.** It reported a run nobody could
+> repeat: no harness in the tree injected those defects, so a reader could not
+> check the counts and a later change could not invalidate them. In a document
+> whose first promise is that every number is measured, a number with no command
+> behind it is the one to distrust. `bash crates/aether-core/mutants.sh` now
+> injects all three, alongside nineteen covering the schedule, the salience
+> mechanism and the attention backward pass, and reports which suites catch each.
+>
+> Re-running them found one of the three had stopped being caught. An absolute
+> `+0.001` on the filtration's admission test survived **every suite in the
+> workspace**. The cap was not untested — `a_scaled_radius_cap_selects_the_same_complex`
+> exercises it at 1.2 and at 1.2 × 6, and an absolute epsilon breaks exactly the
+> proportionality that test asserts. It survived because on a twelve-point circle
+> no pairwise distance falls in the thousandth of a unit above either cap. The
+> property was right and the fixture never put it under load.
+>
+> That is this section's own lesson arriving late and pointed at itself: *test
+> fixtures chosen for convenience rather than for discrimination produce suites
+> that pass and prove nothing.* `an_edge_just_beyond_the_radius_cap_is_excluded`
+> places one distance exactly on the cap and one 5×10⁻⁴ above it, so the boundary
+> is the only thing the answer depends on, and carries a control that raises the
+> cap to confirm the merge does happen. With it, **0 of 22 mutants escape**.
+
 **Diagram metrics** — 5 defects, and this is the part I did not enjoy:
 
 | Injected defect | Caught by |
