@@ -410,6 +410,58 @@ fn diagram_scales_linearly_with_the_point_cloud() {
     }
 }
 
+/// An edge just beyond the radius cap must be excluded, with no slack.
+///
+/// This test exists because a mutant survived every suite in the workspace. The
+/// filtration's admission test is `r <= config.max_radius`; adding an absolute
+/// `+0.001` to that bound changed nothing any assertion could see.
+///
+/// The cap was not untested — `a_scaled_radius_cap_selects_the_same_complex`
+/// below exercises it at 1.2 and at 1.2 × 6, and an absolute epsilon breaks the
+/// proportionality that test asserts. It survived anyway, because on a
+/// twelve-point circle no pairwise distance happens to fall in the thousandth
+/// of a unit above either cap. The property was right and the fixture never put
+/// it under load, which is the failure this repository's own mutation section
+/// warns about in the sentence about fixtures chosen for convenience rather than
+/// for discrimination.
+///
+/// Three collinear points place one distance exactly on the cap and one 5e-4
+/// above it, so the boundary is the only thing the answer depends on. Correct
+/// code leaves two components; any positive slack merges them into one, and the
+/// essential H0 count says which happened.
+#[test]
+fn an_edge_just_beyond_the_radius_cap_is_excluded() {
+    // d(a,b) = 1.0 exactly, d(b,c) = 1.0005, d(a,c) = 2.0005.
+    let points = [
+        ManifoldPoint::new([0.0, 0.0]),
+        ManifoldPoint::new([1.0, 0.0]),
+        ManifoldPoint::new([2.0005, 0.0]),
+    ];
+
+    let mut capped = config(1, 32);
+    capped.max_radius = 1.0;
+    let diagram = persistent_homology(&points, capped).unwrap();
+
+    let components = essential_in_dim(&diagram, 0).len();
+    assert_eq!(
+        components, 2,
+        "with a cap of exactly 1.0 the edge at 1.0005 must be excluded, leaving \
+         two components; {components} means the admission test carries slack"
+    );
+
+    // The control. Raising the cap past 1.0005 must merge them, or the assertion
+    // above would also hold on an implementation that admits no edges at all.
+    let mut wider = capped;
+    wider.max_radius = 1.001;
+    let merged = persistent_homology(&points, wider).unwrap();
+    assert_eq!(
+        essential_in_dim(&merged, 0).len(),
+        1,
+        "a cap of 1.001 admits the edge at 1.0005 and must leave one component; \
+         if it does not, the test above passes for the wrong reason"
+    );
+}
+
 #[test]
 fn a_scaled_radius_cap_selects_the_same_complex() {
     // `max_radius` is an absolute length. Scaling the cloud without scaling the cap
