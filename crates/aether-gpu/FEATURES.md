@@ -457,10 +457,24 @@ tracks **instantiating every backend at once**. Not buffer size — nothing at
 512, 1024 or 2048 with a backend pinned. Not allocation volume. Not the choice
 between Vulkan and DX12, since either alone is clean.
 
-Left open here because the mechanism sits in wgpu's multi-backend instance
-teardown, below anything this crate controls. `teardown_repro` is the
-reproduction to attach to a report, and the useful sentence for it is that
-pinning a backend is a complete workaround.
+### Fixed by construction
+
+The workaround was found and then left unapplied for one commit, which is the
+wrong place to stop: a known-crashing default is not made acceptable by being
+documented. `GpuContext::new` now instantiates exactly one backend, trying
+Vulkan, DX12, Metal and GL in order and stopping at the first that yields an
+adapter. `WGPU_BACKEND` still overrides.
+
+| configuration | crashes |
+|---|---:|
+| before, all backends | 8 / 60 |
+| after, single backend by default | **0 / 60** |
+
+The underlying mechanism is still in wgpu's multi-backend instance teardown,
+below anything this crate controls, so `teardown_repro` remains the reproduction
+to attach to an upstream report. What changed is that reaching it now takes
+deliberately setting `WGPU_BACKEND` to a multi-backend value, rather than using
+the crate as written.
 
 The `Drop` impl earns its place regardless of this: without it, work recorded
 and never flushed is discarded silently, so a caller that updates parameters and

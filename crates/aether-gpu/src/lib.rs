@@ -206,28 +206,54 @@ impl GpuContext {
     }
 
     async fn new_async() -> Result<Self, GpuError> {
-        // Honour WGPU_BACKEND so a caller can pin Vulkan, DX12, Metal or GL.
+        // Exactly one backend is instantiated, tried in preference order.
         //
-        // `InstanceDescriptor::default()` does not read it, which is worth
-        // knowing: setting the variable and assuming it took effect gives a
-        // measurement of whatever backend was chosen anyway. Backend selection
-        // matters here because the teardown fault in FEATURES.md needs to be
-        // characterised as backend-specific or not before it is worth reporting
-        // upstream.
-        let backends = wgpu::Backends::from_env().unwrap_or_default();
-        let instance = wgpu::Instance::new(&wgpu::InstanceDescriptor {
-            backends,
-            ..Default::default()
-        });
+        // The obvious construction is `Backends::default()`, which enables every
+        // backend at once and lets wgpu pick. That reproduces an intermittent
+        // STATUS_ACCESS_VIOLATION at process exit: measured 8 crashes in 60 runs
+        // with all backends enabled, against 0 in 180 with any single backend
+        // pinned. Pinning is a complete workaround, so the default does it
+        // rather than leaving every caller to discover the fault. FEATURES.md
+        // carries the bisect.
+        //
+        // `WGPU_BACKEND` still overrides, and is honoured explicitly because
+        // `InstanceDescriptor::default()` does not read it -- setting the
+        // variable and assuming it took effect measures whatever backend would
+        // have been chosen anyway.
+        let candidates: Vec<wgpu::Backends> = match wgpu::Backends::from_env() {
+            Some(requested) => vec![requested],
+            None => vec![
+                wgpu::Backends::VULKAN,
+                wgpu::Backends::DX12,
+                wgpu::Backends::METAL,
+                wgpu::Backends::GL,
+            ],
+        };
 
-        let adapter = instance
-            .request_adapter(&wgpu::RequestAdapterOptions {
-                power_preference: wgpu::PowerPreference::HighPerformance,
-                force_fallback_adapter: false,
-                compatible_surface: None,
-            })
-            .await
-            .map_err(|_| GpuError::NoAdapter)?;
+        let mut found = None;
+        for backends in candidates {
+            let instance = wgpu::Instance::new(&wgpu::InstanceDescriptor {
+                backends,
+                ..Default::default()
+            });
+
+            if let Ok(adapter) = instance
+                .request_adapter(&wgpu::RequestAdapterOptions {
+                    power_preference: wgpu::PowerPreference::HighPerformance,
+                    force_fallback_adapter: false,
+                    compatible_surface: None,
+                })
+                .await
+            {
+                // The instance is dropped here; the adapter keeps what it needs
+                // alive, and holding it would defeat the point of instantiating
+                // one backend at a time.
+                found = Some(adapter);
+                break;
+            }
+        }
+
+        let adapter = found.ok_or(GpuError::NoAdapter)?;
 
         let raw = adapter.get_info();
         let info = AdapterInfo {
