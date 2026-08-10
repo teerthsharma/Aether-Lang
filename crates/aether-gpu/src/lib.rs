@@ -102,10 +102,46 @@ pub struct GpuContext {
     queue: wgpu::Queue,
     info: AdapterInfo,
     matmul: wgpu::ComputePipeline,
+    matmul_tiled: wgpu::ComputePipeline,
+    pairwise_sqdist: wgpu::ComputePipeline,
     add_broadcast_row: wgpu::ComputePipeline,
     relu: wgpu::ComputePipeline,
     relu_backward: wgpu::ComputePipeline,
     layout: wgpu::BindGroupLayout,
+}
+
+/// A tensor that lives in GPU memory across operations.
+///
+/// The slice-taking methods on [`GpuContext`] upload their inputs and read the
+/// result back on every call. That is the right shape for a one-shot kernel and
+/// the wrong one for a training loop: a three-layer forward pass through them
+/// pays twelve PCIe crossings per step to move intermediates the GPU produced
+/// and the GPU is about to consume.
+///
+/// A `GpuTensor` stays resident. Chain operations on it and nothing crosses the
+/// bus until [`GpuContext::read`] is called.
+pub struct GpuTensor {
+    buffer: wgpu::Buffer,
+    rows: usize,
+    cols: usize,
+}
+
+impl GpuTensor {
+    pub fn rows(&self) -> usize {
+        self.rows
+    }
+
+    pub fn cols(&self) -> usize {
+        self.cols
+    }
+
+    pub fn len(&self) -> usize {
+        self.rows * self.cols
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.len() == 0
+    }
 }
 
 impl GpuContext {
@@ -191,6 +227,8 @@ impl GpuContext {
 
         Ok(Self {
             matmul: build("matmul"),
+            matmul_tiled: build("matmul_tiled"),
+            pairwise_sqdist: build("pairwise_sqdist"),
             add_broadcast_row: build("add_broadcast_row"),
             relu: build("relu"),
             relu_backward: build("relu_backward"),
@@ -199,6 +237,210 @@ impl GpuContext {
             info,
             layout,
         })
+    }
+
+    // ── Resident tensors ──────────────────────────────────────────────────────
+
+    /// Upload a host slice and keep it on the device.
+    pub fn upload(&self, data: &[f32], rows: usize, cols: usize) -> Result<GpuTensor, GpuError> {
+        if data.len() != rows * cols {
+            return Err(GpuError::ShapeMismatch(format!(
+                "data has {} elements, expected {rows}*{cols} = {}",
+                data.len(),
+                rows * cols
+            )));
+        }
+
+        let buffer = self
+            .device
+            .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                label: Some("resident tensor"),
+                contents: bytemuck::cast_slice(data),
+                usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_SRC,
+            });
+
+        Ok(GpuTensor { buffer, rows, cols })
+    }
+
+    /// Allocate an uninitialised device tensor.
+    fn alloc(&self, rows: usize, cols: usize) -> GpuTensor {
+        let buffer = self.device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("resident tensor"),
+            size: (rows * cols * std::mem::size_of::<f32>()) as u64,
+            usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_SRC,
+            mapped_at_creation: false,
+        });
+        GpuTensor { buffer, rows, cols }
+    }
+
+    /// Copy a resident tensor back to the host. The only bus crossing in a
+    /// chain of resident operations.
+    pub fn read(&self, t: &GpuTensor) -> Result<Vec<f32>, GpuError> {
+        let bytes = (t.len() * std::mem::size_of::<f32>()) as u64;
+
+        let staging = self.device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("staging"),
+            size: bytes,
+            usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
+            mapped_at_creation: false,
+        });
+
+        let mut encoder = self
+            .device
+            .create_command_encoder(&wgpu::CommandEncoderDescriptor { label: None });
+        encoder.copy_buffer_to_buffer(&t.buffer, 0, &staging, 0, bytes);
+        self.queue.submit(Some(encoder.finish()));
+
+        self.map_and_read(&staging)
+    }
+
+    /// `C = A * B` with both operands already resident, result left resident.
+    ///
+    /// Uses the tiled kernel: it stages 16x16 blocks into workgroup memory so
+    /// each loaded element is reused sixteen times instead of being re-read
+    /// from global memory on every k step.
+    pub fn matmul_resident(&self, a: &GpuTensor, b: &GpuTensor) -> Result<GpuTensor, GpuError> {
+        if a.cols != b.rows {
+            return Err(GpuError::ShapeMismatch(format!(
+                "a is {}x{}, b is {}x{}; inner dimensions must agree",
+                a.rows, a.cols, b.rows, b.cols
+            )));
+        }
+
+        let (m, k, n) = (a.rows, a.cols, b.cols);
+        let out = self.alloc(m, n);
+
+        self.dispatch_resident(
+            &self.matmul_tiled,
+            &a.buffer,
+            &b.buffer,
+            &out.buffer,
+            Dims {
+                m: m as u32,
+                k: k as u32,
+                n: n as u32,
+                _pad: 0,
+            },
+            (
+                m.div_ceil(16).max(1) as u32,
+                n.div_ceil(16).max(1) as u32,
+                1,
+            ),
+        );
+
+        Ok(out)
+    }
+
+    /// Squared Euclidean distance matrix of a resident `[n, d]` cloud.
+    ///
+    /// This is the O(n^2 d) term underneath every Vietoris-Rips filtration in
+    /// `aether-core`, which is what makes it the operation where a GPU matters
+    /// to this project specifically.
+    pub fn pairwise_sqdist_resident(&self, points: &GpuTensor) -> Result<GpuTensor, GpuError> {
+        let n = points.rows;
+        let d = points.cols;
+        let out = self.alloc(n, n);
+
+        self.dispatch_resident(
+            &self.pairwise_sqdist,
+            &points.buffer,
+            &points.buffer,
+            &out.buffer,
+            Dims {
+                m: n as u32,
+                k: d as u32,
+                n: n as u32,
+                _pad: 0,
+            },
+            (
+                n.div_ceil(16).max(1) as u32,
+                n.div_ceil(16).max(1) as u32,
+                1,
+            ),
+        );
+
+        Ok(out)
+    }
+
+    /// Encode and submit one kernel over already-resident buffers. No upload,
+    /// no readback.
+    fn dispatch_resident(
+        &self,
+        pipeline: &wgpu::ComputePipeline,
+        a: &wgpu::Buffer,
+        b: &wgpu::Buffer,
+        c: &wgpu::Buffer,
+        dims: Dims,
+        groups: (u32, u32, u32),
+    ) {
+        let dims_buf = self
+            .device
+            .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                label: Some("dims"),
+                contents: bytemuck::bytes_of(&dims),
+                usage: wgpu::BufferUsages::UNIFORM,
+            });
+
+        let bind_group = self.device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: None,
+            layout: &self.layout,
+            entries: &[
+                wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: a.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 1,
+                    resource: b.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 2,
+                    resource: c.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 3,
+                    resource: dims_buf.as_entire_binding(),
+                },
+            ],
+        });
+
+        let mut encoder = self
+            .device
+            .create_command_encoder(&wgpu::CommandEncoderDescriptor { label: None });
+        {
+            let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
+                label: None,
+                timestamp_writes: None,
+            });
+            pass.set_pipeline(pipeline);
+            pass.set_bind_group(0, &bind_group, &[]);
+            pass.dispatch_workgroups(groups.0, groups.1, groups.2);
+        }
+        self.queue.submit(Some(encoder.finish()));
+    }
+
+    fn map_and_read(&self, staging: &wgpu::Buffer) -> Result<Vec<f32>, GpuError> {
+        let slice = staging.slice(..);
+        let (tx, rx) = std::sync::mpsc::channel();
+        slice.map_async(wgpu::MapMode::Read, move |r| {
+            let _ = tx.send(r);
+        });
+
+        self.device
+            .poll(wgpu::PollType::wait_indefinitely())
+            .map_err(|e| GpuError::Readback(format!("{e:?}")))?;
+
+        match rx.recv() {
+            Ok(Ok(())) => {}
+            Ok(Err(e)) => return Err(GpuError::Readback(format!("{e:?}"))),
+            Err(e) => return Err(GpuError::Readback(e.to_string())),
+        }
+
+        let data = slice.get_mapped_range();
+        let out: Vec<f32> = bytemuck::cast_slice(&data).to_vec();
+        drop(data);
+        staging.unmap();
+        Ok(out)
     }
 
     /// The adapter these kernels actually run on.
@@ -468,6 +710,24 @@ fn storage_entry(binding: u32, read_only: bool) -> wgpu::BindGroupLayoutEntry {
 /// thing the GPU result is checked against, and a reference with its own
 /// optimisations is a reference that can be wrong in the same direction as the
 /// kernel it validates.
+/// Squared Euclidean distance matrix on the CPU, the parity reference for
+/// [`GpuContext::pairwise_sqdist_resident`].
+pub fn cpu_pairwise_sqdist(points: &[f32], n: usize, d: usize) -> Vec<f32> {
+    let mut out = vec![0.0f32; n * n];
+    for i in 0..n {
+        for j in 0..n {
+            let mut sum = 0.0f32;
+            for c in 0..d {
+                let delta = points[i * d + c] - points[j * d + c];
+                sum += delta * delta;
+            }
+            out[i * n + j] = sum;
+        }
+    }
+    out
+}
+
+/// Row-major `f32` matmul on the CPU, used as the parity reference.
 pub fn cpu_matmul(a: &[f32], b: &[f32], m: usize, k: usize, n: usize) -> Vec<f32> {
     let mut c = vec![0.0f32; m * n];
     for i in 0..m {

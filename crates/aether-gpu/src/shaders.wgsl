@@ -42,6 +42,91 @@ fn matmul(@builtin(global_invocation_id) gid: vec3<u32>) {
     c[row * dims.n + col] = sum;
 }
 
+// Tiled matmul using workgroup shared memory.
+//
+// The naive kernel above re-reads A and B from global memory once per k step.
+// This one stages 16x16 tiles into workgroup memory, so each loaded element is
+// reused 16 times. Same result, different summation order: the accumulation is
+// now per-tile, so f32 rounding differs from the naive kernel and from the CPU
+// reference. It is still a fixed order, so it is still bitwise deterministic.
+//
+// Both barriers sit in uniform control flow. Bounds checks write 0.0 into the
+// tile rather than returning early, because an invocation that returns before
+// a workgroupBarrier hangs the ones that do not.
+const TILE: u32 = 16u;
+
+var<workgroup> tile_a: array<array<f32, 16>, 16>;
+var<workgroup> tile_b: array<array<f32, 16>, 16>;
+
+@compute @workgroup_size(16, 16, 1)
+fn matmul_tiled(
+    @builtin(local_invocation_id) lid: vec3<u32>,
+    @builtin(workgroup_id) wid: vec3<u32>,
+) {
+    let row = wid.x * TILE + lid.x;
+    let col = wid.y * TILE + lid.y;
+
+    var sum = 0.0;
+    let num_tiles = (dims.k + TILE - 1u) / TILE;
+
+    for (var t: u32 = 0u; t < num_tiles; t = t + 1u) {
+        let a_col = t * TILE + lid.y;
+        let b_row = t * TILE + lid.x;
+
+        if (row < dims.m && a_col < dims.k) {
+            tile_a[lid.x][lid.y] = a[row * dims.k + a_col];
+        } else {
+            tile_a[lid.x][lid.y] = 0.0;
+        }
+
+        if (b_row < dims.k && col < dims.n) {
+            tile_b[lid.x][lid.y] = b[b_row * dims.n + col];
+        } else {
+            tile_b[lid.x][lid.y] = 0.0;
+        }
+
+        workgroupBarrier();
+
+        for (var i: u32 = 0u; i < TILE; i = i + 1u) {
+            sum = sum + tile_a[lid.x][i] * tile_b[i][lid.y];
+        }
+
+        workgroupBarrier();
+    }
+
+    if (row < dims.m && col < dims.n) {
+        c[row * dims.n + col] = sum;
+    }
+}
+
+// Squared Euclidean distance matrix: D[i,j] = ||x_i - x_j||^2 over an [m, k]
+// row-major cloud. Output is [m, m].
+//
+// This is the O(n^2 d) term that dominates every Vietoris-Rips filtration in
+// aether-core, so it is the operation where a GPU actually matters to this
+// project rather than to a generic ML benchmark.
+//
+// Squared, not the root: the persistence engine sorts edges by distance, and
+// sqrt is monotonic, so the ordering is identical and the root can be taken
+// once on whatever survives rather than n^2 times here.
+@compute @workgroup_size(16, 16, 1)
+fn pairwise_sqdist(@builtin(global_invocation_id) gid: vec3<u32>) {
+    let i = gid.x;
+    let j = gid.y;
+
+    if (i >= dims.m || j >= dims.m) {
+        return;
+    }
+
+    var sum = 0.0;
+    for (var d: u32 = 0u; d < dims.k; d = d + 1u) {
+        let delta = a[i * dims.k + d] - a[j * dims.k + d];
+        sum = sum + delta * delta;
+    }
+
+    c[i * dims.m + j] = sum;
+}
+
 // Elementwise C = A + B, with B broadcast over rows when it holds a single row.
 // Bias addition in a dense layer is the broadcast case.
 @compute @workgroup_size(256, 1, 1)
