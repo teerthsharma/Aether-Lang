@@ -81,7 +81,17 @@ fn main() {
         let ta = Tensor::new(&a64, &[n, n]);
         let tb = Tensor::new(&b64, &[n, n]);
 
-        let reps = if n >= 384 { 3 } else { 10 };
+        // The CPU side used three repetitions above n=384, on the reasoning that
+        // a 200 ms operation is expensive to repeat. A median of three is a poor
+        // estimator, and measuring it showed how poor: across six runs of this
+        // binary the n=512 CPU figure ranged 197.9 to 321.8 ms, and the ratio
+        // derived from it ranged 35x to 61x.
+        //
+        // That made the documented "36x" one draw from a distribution nearly
+        // twice as wide as the number suggested. Nine repetitions cost about two
+        // seconds at n=512 and are worth it: a benchmark whose noise exceeds the
+        // effect it reports is not measuring the effect.
+        let reps = if n >= 384 { 9 } else { 15 };
         let cpu = median_ms(reps, || {
             let _ = ta.matmul(&tb);
         });
