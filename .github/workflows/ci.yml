@@ -70,10 +70,11 @@ jobs:
       #
       # To actually run them, on a runner that has a GPU:
       #
-      #   AETHER_REQUIRE_GPU=1 cargo test -p aether-gpu --features gpu --release
+      #   cargo test -p aether-gpu --features gpu --release
       #
-      # AETHER_REQUIRE_GPU turns a missing adapter into a failure, so the run
-      # cannot silently degrade back to skipping.
+      # The feature is the only switch. Asking for the hardware tests and
+      # finding no adapter fails rather than skipping, so the run cannot
+      # silently degrade back to reporting nothing.
       - name: Run Tests
         run: cargo test --workspace --exclude aether-kernel
 
