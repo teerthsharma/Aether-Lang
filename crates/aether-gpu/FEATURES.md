@@ -161,9 +161,21 @@ scale is.
 
 ### The remaining kernels
 
-Seven more defects, one per previously-unmutated kernel, run through a harness
-that patches the shader, forces the modification time forward, runs each suite
-separately, and restores from git.
+Seven more defects, one per previously-unmutated kernel. Reproduce with:
+
+```bash
+./crates/aether-gpu/mutants.sh
+```
+
+The harness patches the shader, forces the modification time forward, runs each
+suite separately, restores from git, and exits with the number of defects that
+escaped everything — so it is usable as a gate rather than only as a report.
+
+It refuses to run without real GPU hardware. Every kernel test skips when no
+adapter is present, and a skip is a pass, so a GPU-less run would report all
+seven mutants surviving and announce a total coverage failure that actually
+describes the machine. That is the same mistake the suites themselves guard
+against, one level up.
 
 | Injected defect | `gpu_parity` | `gradcheck` |
 |---|---|---|
