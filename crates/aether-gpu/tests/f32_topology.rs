@@ -44,7 +44,9 @@
 
 use aether_core::diagram::bottleneck_distance;
 use aether_core::manifold::ManifoldPoint;
-use aether_core::persistence::{persistent_homology, ComplexKind, PersistenceConfig};
+use aether_core::persistence::{
+    persistent_homology, persistent_homology_from_distances, ComplexKind, PersistenceConfig,
+};
 
 /// Deterministic cloud generator, f64 throughout.
 fn cloud(n: usize, seed: u64) -> Vec<ManifoldPoint<3>> {
@@ -563,6 +565,160 @@ fn the_perturbation_a_diagram_survives_has_margin_over_the_kernel_error() {
         largest_clean >= KERNEL_ERROR,
         "the topology changes at displacements at or below the kernel's own error"
     );
+}
+
+/// The distance-matrix entry point must agree exactly with the point-based one.
+///
+/// It exists so a filtration can be built from distances the engine did not
+/// compute. Its first obligation is to compute the same thing as the path it
+/// generalises, on the same input — otherwise every result obtained through it
+/// describes a different engine.
+#[test]
+fn the_distance_matrix_path_reproduces_the_point_path_exactly() {
+    for (n, cfg) in [
+        (24usize, h1_config(64)),
+        (40, h1_config(64)),
+        (64, h0_config(128)),
+    ] {
+        let points = cloud(n, 55);
+        let exact = exact_distances(&points);
+
+        let from_points = persistent_homology(&points, cfg).expect("points");
+        let from_matrix = persistent_homology_from_distances(&exact, n, cfg).expect("matrix");
+
+        assert_eq!(
+            from_points.pairs.len(),
+            from_matrix.pairs.len(),
+            "n={n}: different number of pairs"
+        );
+        for (a, b) in from_points.pairs.iter().zip(&from_matrix.pairs) {
+            assert_eq!(a.dimension, b.dimension, "n={n}: dimension");
+            assert!((a.birth - b.birth).abs() < 1e-15, "n={n}: birth");
+            match (a.death, b.death) {
+                (Some(x), Some(y)) => assert!((x - y).abs() < 1e-15, "n={n}: death"),
+                (None, None) => {}
+                _ => panic!("n={n}: one bar is essential and the other is not"),
+            }
+        }
+    }
+    println!("distance-matrix path matches the point path bar for bar");
+}
+
+/// A matrix that is not a distance matrix must be rejected, not filtered.
+///
+/// An asymmetric matrix still produces a barcode: the reduction runs, bars come
+/// out, and nothing indicates that the filtration was never a filtration. That
+/// is the failure worth guarding, and it is why the entry point validates
+/// rather than trusting its caller.
+#[test]
+fn the_distance_matrix_path_rejects_matrices_that_are_not_metrics() {
+    let cfg = h0_config(64);
+    let n = 4;
+
+    let mut asymmetric = vec![0.0; n * n];
+    asymmetric[1] = 1.0;
+    asymmetric[n] = 2.0;
+    assert!(persistent_homology_from_distances(&asymmetric, n, cfg).is_err());
+
+    let mut nonzero_diagonal = vec![1.0; n * n];
+    for i in 0..n {
+        nonzero_diagonal[i * n + i] = 0.5;
+    }
+    assert!(persistent_homology_from_distances(&nonzero_diagonal, n, cfg).is_err());
+
+    let mut negative = vec![0.0; n * n];
+    negative[1] = -1.0;
+    negative[n] = -1.0;
+    assert!(persistent_homology_from_distances(&negative, n, cfg).is_err());
+
+    let mut not_finite = vec![0.0; n * n];
+    not_finite[1] = f64::NAN;
+    not_finite[n] = f64::NAN;
+    assert!(persistent_homology_from_distances(&not_finite, n, cfg).is_err());
+
+    assert!(persistent_homology_from_distances(&[0.0; 9], 4, cfg).is_err());
+}
+
+/// End to end: a diagram computed from the GPU kernel's own f32 distances,
+/// against one computed from exact f64 distances.
+///
+/// Every earlier result here was a proxy. The coordinate test rounded inputs and
+/// computed in f64; the perturbation study displaced points to *model* the
+/// kernel's error. This runs `pairwise_sqdist`, takes the square root, and hands
+/// the result to the persistence engine.
+#[test]
+fn a_diagram_built_from_gpu_distances_matches_one_built_from_exact_distances() {
+    let Some(ctx) = context() else { return };
+
+    for (n, dim, cfg) in [
+        (32usize, 1usize, h1_config(64)),
+        (64, 1, h1_config(128)),
+        (128, 0, h0_config(256)),
+    ] {
+        let points = cloud(n, 77);
+        let host = flat(&points);
+
+        let g = ctx.upload(&host, n, 3).expect("upload");
+        let sq = ctx
+            .read(&ctx.pairwise_sqdist_resident(&g).expect("sqdist"))
+            .expect("read");
+
+        // The kernel returns squared distances; the filtration wants distances.
+        // Symmetrised because f32 rounding can make d(i,j) and d(j,i) differ in
+        // the last bit, which the entry point rejects -- correctly, since an
+        // asymmetric matrix is not a distance matrix.
+        let mut gpu = vec![0.0f64; n * n];
+        for i in 0..n {
+            for j in (i + 1)..n {
+                let a = (sq[i * n + j].max(0.0) as f64).sqrt();
+                let b = (sq[j * n + i].max(0.0) as f64).sqrt();
+                let d = 0.5 * (a + b);
+                gpu[i * n + j] = d;
+                gpu[j * n + i] = d;
+            }
+        }
+
+        let exact = exact_distances(&points);
+
+        let da = persistent_homology_from_distances(&exact, n, cfg).expect("exact");
+        let db = persistent_homology_from_distances(&gpu, n, cfg).expect("gpu");
+
+        let bottleneck = bottleneck_distance(&da, &db, dim);
+
+        let mut worst = 0.0f64;
+        for i in 0..n * n {
+            worst = worst.max((gpu[i] - exact[i]).abs());
+        }
+
+        // Perturbing every filtration value by at most `worst` moves the
+        // diagram by at most `worst` in bottleneck distance.
+        assert!(
+            bottleneck <= worst + 1e-12,
+            "n={n}: bottleneck {bottleneck:e} exceeds the distance error {worst:e}"
+        );
+
+        let mut betti_same = true;
+        for step in 1..60 {
+            let r = step as f64 * 0.03;
+            let ba = da.betti_at(r);
+            let bb = db.betti_at(r);
+            if ba.beta_0 != bb.beta_0 || (dim == 1 && ba.beta_1 != bb.beta_1) {
+                betti_same = false;
+                break;
+            }
+        }
+
+        println!(
+            "n={n:>3} H{dim}: distance error {worst:.3e}, bottleneck {bottleneck:.3e}, \
+             Betti {}",
+            if betti_same { "identical" } else { "DIFFERENT" }
+        );
+
+        assert!(
+            betti_same,
+            "n={n}: GPU distances changed a Betti number end to end"
+        );
+    }
 }
 
 /// The same question for the shape the persistence engine is usually asked

@@ -175,6 +175,60 @@ pub fn time_delay_persistence<const D: usize>(
     persistent_homology(&points, config)
 }
 
+/// Persistent homology of a Vietoris-Rips filtration built from a supplied
+/// `[n, n]` row-major distance matrix.
+///
+/// The engine otherwise computes Euclidean distances from points, which ties it
+/// to one metric and to its own arithmetic. This entry point takes the distances
+/// directly, so a filtration can be built from a geodesic, a correlation
+/// distance, an edit distance, or distances computed somewhere else entirely --
+/// a GPU, for instance, which is the case that motivated it.
+///
+/// # Validation
+///
+/// The matrix must be square, symmetric, zero on the diagonal, non-negative and
+/// finite. These are checked rather than assumed: a filtration built from an
+/// asymmetric matrix is not a filtration, and the failure is silent -- the
+/// reduction still runs and still produces a barcode, just one that answers no
+/// question. `InvalidRadius` is returned for a violation.
+///
+/// The triangle inequality is deliberately **not** checked. Rips is defined for
+/// any symmetric non-negative dissimilarity, the construction never appeals to
+/// it, and rejecting non-metric dissimilarities would exclude legitimate uses.
+///
+/// `ComplexKind::Witness` is not supported here: the witness construction needs
+/// landmark-to-witness distances from a larger set than the matrix describes.
+pub fn persistent_homology_from_distances(
+    distances: &[f64],
+    n: usize,
+    config: PersistenceConfig,
+) -> Result<PersistenceDiagram, PersistenceError> {
+    validate_common(n, config)?;
+    validate_point_cap(n, config)?;
+
+    if distances.len() != n * n {
+        return Err(PersistenceError::InvalidDimension);
+    }
+    if config.complex_kind != ComplexKind::VietorisRips {
+        return Err(PersistenceError::InvalidDimension);
+    }
+
+    for i in 0..n {
+        if distances[i * n + i] != 0.0 {
+            return Err(PersistenceError::InvalidRadius);
+        }
+        for j in (i + 1)..n {
+            let (a, b) = (distances[i * n + j], distances[j * n + i]);
+            if !a.is_finite() || a < 0.0 || (a - b).abs() > 0.0 {
+                return Err(PersistenceError::InvalidRadius);
+            }
+        }
+    }
+
+    let simplices = build_vietoris_rips_from_distances(distances, n, config)?;
+    reduce_z2(&simplices, config.max_homology_dim)
+}
+
 pub fn persistent_homology<const D: usize>(
     points: &[ManifoldPoint<D>],
     config: PersistenceConfig,
@@ -277,6 +331,20 @@ fn build_vietoris_rips_simplices<const D: usize>(
         }
     }
 
+    build_vietoris_rips_from_distances(&distances, n, config)
+}
+
+/// The Rips complex of an arbitrary metric, given its distance matrix.
+///
+/// Split out from the Euclidean path above so the filtration can be built from
+/// distances the engine did not compute. The two share this code rather than
+/// duplicating the simplex enumeration, so a change to how faces enter cannot
+/// apply to one and not the other.
+fn build_vietoris_rips_from_distances(
+    distances: &[f64],
+    n: usize,
+    config: PersistenceConfig,
+) -> Result<Vec<Simplex>, PersistenceError> {
     let mut simplices = Vec::new();
     for i in 0..n {
         push_simplex(
