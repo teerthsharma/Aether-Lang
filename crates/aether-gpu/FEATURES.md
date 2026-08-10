@@ -405,22 +405,42 @@ recorded as undiagnosed rather than fixed.
 It has reappeared in `gpu_bench`, and there it reproduces: **1 of 5 runs**. All
 output completes first, so the fault is at teardown, not during work.
 
-What changed between the clean runs and the reproducing ones is the
-compute-versus-transfer section, which issues ten dispatches while reading only
-the last, so nine result tensors are allocated and dropped per timed iteration
-at sizes up to 16 MB each. That makes buffer churn during teardown the leading
-suspect, but it is a suspicion from correlation and not a diagnosis.
+### The bisect, and what it ruled out
 
-`GpuContext::Drop` already submits any recorded work and blocks until the device
-is idle, which was the obvious mechanism and evidently is not the whole story.
-A rate of 1 in 5 is enough to bisect against, which the earlier 1-in-many was
-not — distinguishing 1/5 from 1/20 needs roughly thirty runs per variant, so
-this is now a tractable investigation rather than an anecdote.
+`gpu_bench` takes about fifteen seconds a run, which makes thirty-run statistics
+slow, so `examples/teardown_repro.rs` strips it to four candidate patterns at
+2048×2048 (16 MB per buffer), 30 runs each:
 
-Recorded here as an open defect. The `Drop` impl earns its place regardless:
-without it, work recorded and never flushed is discarded silently, so a caller
-that updates parameters and never reads them back loses the update with no
-error.
+| pattern | dispatches | results read | crashes |
+|---|---|---|---:|
+| `drop` | 100 | none | 2 / 30 |
+| `read` | 100 | all | 1 / 30 |
+| `flush` | 100 | none, but flushed | 0 / 30 |
+| `alloc` | **0** | — | **6 / 30** |
+
+**The suspected cause was wrong.** `alloc` has the highest rate and issues no
+dispatches at all — it only uploads large buffers and drops them. Whatever the
+fault is, it is not recorded-but-unread work referencing freed buffers, which
+was the hypothesis the previous entry recorded.
+
+That leaves allocation churn itself. `alloc` moves roughly 1.6 GB through
+create-and-drop on an 8 GB adapter, using nothing but `upload` and `Drop`. This
+crate contains no `unsafe` and does no manual lifetime management on the wgpu
+side, so the fault is below the level this code operates at.
+
+The rate differences between the first three patterns are **not** statistically
+resolved at 30 runs — 2/30 against 0/30 is nowhere near significant, and reading
+a ranking into them would be over-interpreting. Only the qualitative result is
+solid, and it does not depend on the rates: a pattern with zero dispatches
+crashes, so dispatch handling is not the mechanism.
+
+Left open, and left below rather than in **Shipped**. The next step is a report
+against wgpu with `teardown_repro` as the reproduction, not further changes
+here.
+
+The `Drop` impl earns its place regardless of this: without it, work recorded
+and never flushed is discarded silently, so a caller that updates parameters and
+never reads them back loses the update with no error.
 
 ## Is f32 good enough for the topology?
 
