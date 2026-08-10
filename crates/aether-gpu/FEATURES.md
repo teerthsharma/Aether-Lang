@@ -151,6 +151,13 @@ into `shaders.wgsl`, one at a time, rebuilt, and run against both suites.
 |---|---|---|
 | `sigmoid_bce_grad` drops the `1/batch` scaling | **caught** — `dw1[0]` relative error 4.0 | survives |
 | `relu_backward` boundary `> 0.0` becomes `>= 0.0` | survives | **caught** — `relu_backward_is_zero_at_exactly_zero` |
+| `softmax_xent_grad` sign flipped, `(y - p)` for `(p - y)` | **caught** — `db2[0]` relative error 2.0 | survives |
+
+A sign flip produces a relative error of exactly 2.0 and a dropped `1/batch`
+produces exactly `batch - 1` at batch 5. Both are the signature of the defect
+rather than a generic mismatch, which is worth reading off the failure message:
+a relative error near 2 means the direction is wrong, near `batch - 1` means the
+scale is.
 
 **Neither suite alone is sufficient**, and the reason is structural rather than
 accidental. Gradcheck samples random parameters, so a pre-activation never lands
@@ -244,9 +251,9 @@ Dispatch and allocation dominate below roughly 128×128.
   parity baseline, not a tuned BLAS. Ratios compare this crate's own two paths.
 - f32 only. `aether-core` computes in f64 on the CPU path, and nothing in
   `aether-core` routes through this crate yet.
-- No gradcheck. The backward kernels are checked against forward/backward
-  agreement at the ReLU boundary and by end-to-end training convergence, not by
-  finite differences.
+- Gradcheck covers both output heads now, sigmoid/BCE and softmax/cross-entropy,
+  each through a one-hidden-layer network. The two-hidden-layer path used by the
+  training examples is covered only by the end-to-end accuracy match.
 - 0.8220 is what 100 full-batch epochs at lr=0.5 buys on this task. It is a
   fixed budget, not a tuned result, and not the architecture's ceiling.
 
