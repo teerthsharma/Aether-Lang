@@ -214,24 +214,13 @@ fn f32_coordinates_do_not_change_the_betti_numbers() {
 
 use aether_gpu::{cpu_pairwise_sqdist, GpuContext};
 
-/// See the note in `gpu_parity.rs`: without `AETHER_REQUIRE_GPU`, a missing
-/// adapter makes every hardware test return early, and an early return is a
-/// pass. The variable turns that into a failure so a run can prove the
-/// hardware path was exercised rather than skipped.
-fn context() -> Option<GpuContext> {
-    match GpuContext::new() {
-        Ok(c) => Some(c),
-        Err(e) => {
-            if std::env::var("AETHER_REQUIRE_GPU").is_ok() {
-                panic!(
-                    "AETHER_REQUIRE_GPU is set but no usable GPU adapter was found ({e}). \
-                     This test would otherwise have skipped and reported success."
-                );
-            }
-            eprintln!("SKIP: no usable GPU adapter ({e})");
-            None
-        }
-    }
+/// See `gpu_parity.rs`: callers are `#[ignore]`d without the `gpu` feature, so
+/// a missing adapter here means the feature was requested and cannot be
+/// honoured. That is a failure rather than a silent skip.
+fn require_context() -> GpuContext {
+    GpuContext::new().unwrap_or_else(|e| {
+        panic!("the `gpu` feature is enabled but no usable adapter was found ({e})")
+    })
 }
 
 fn flat(points: &[ManifoldPoint<3>]) -> Vec<f32> {
@@ -287,7 +276,7 @@ fn exact_distances(points: &[ManifoldPoint<3>]) -> Vec<f64> {
 #[test]
 #[cfg_attr(not(feature = "gpu"), ignore = "needs a GPU adapter: --features gpu")]
 fn the_filtration_ordering_guarantee_fails_as_the_cloud_grows() {
-    let Some(ctx) = context() else { return };
+    let ctx = require_context();
 
     let mut safe_upto = 0usize;
 
@@ -367,7 +356,7 @@ fn the_filtration_ordering_guarantee_fails_as_the_cloud_grows() {
 #[test]
 #[cfg_attr(not(feature = "gpu"), ignore = "needs a GPU adapter: --features gpu")]
 fn the_distance_kernel_error_is_bounded_by_f32_epsilon() {
-    let Some(ctx) = context() else { return };
+    let ctx = require_context();
 
     let n = 64;
     let points = cloud(n, 7);
@@ -661,7 +650,7 @@ fn the_distance_matrix_path_rejects_matrices_that_are_not_metrics() {
 #[test]
 #[cfg_attr(not(feature = "gpu"), ignore = "needs a GPU adapter: --features gpu")]
 fn a_diagram_built_from_gpu_distances_matches_one_built_from_exact_distances() {
-    let Some(ctx) = context() else { return };
+    let ctx = require_context();
 
     for (n, dim, cfg) in [
         (32usize, 1usize, h1_config(64)),

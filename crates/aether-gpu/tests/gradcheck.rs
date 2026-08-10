@@ -42,24 +42,13 @@ enum Head {
     Softmax,
 }
 
-/// See the note in `gpu_parity.rs`: without `AETHER_REQUIRE_GPU`, a missing
-/// adapter makes every hardware test return early, and an early return is a
-/// pass. The variable turns that into a failure so a run can prove the
-/// hardware path was exercised rather than skipped.
-fn context() -> Option<GpuContext> {
-    match GpuContext::new() {
-        Ok(c) => Some(c),
-        Err(e) => {
-            if std::env::var("AETHER_REQUIRE_GPU").is_ok() {
-                panic!(
-                    "AETHER_REQUIRE_GPU is set but no usable GPU adapter was found ({e}). \
-                     This test would otherwise have skipped and reported success."
-                );
-            }
-            eprintln!("SKIP: no usable GPU adapter ({e})");
-            None
-        }
-    }
+/// See `gpu_parity.rs`. Callers are `#[ignore]`d without the `gpu` feature, so
+/// a missing adapter here means the feature was requested and cannot be
+/// honoured — a failure, not a skip.
+fn require_context() -> GpuContext {
+    GpuContext::new().unwrap_or_else(|e| {
+        panic!("the `gpu` feature is enabled but no usable adapter was found ({e})")
+    })
 }
 
 fn fill(n: usize, seed: u64) -> Vec<f64> {
@@ -502,23 +491,26 @@ fn stage2(
 // ═══════════════════════════════════════════════════════════════════════════════
 
 #[test]
-fn one_layer_sigmoid_small() {
+fn one_layer_sigmoid_small_reference() {
     stage1("1-layer sigmoid 5x3x4", 5, &[3, 4, 1], Head::Sigmoid, 1, 64);
-    if let Some(ctx) = context() {
-        stage2(
-            &ctx,
-            "1-layer sigmoid 5x3x4",
-            5,
-            &[3, 4, 1],
-            Head::Sigmoid,
-            1,
-            2e-3,
-        );
-    }
 }
 
 #[test]
-fn two_layer_sigmoid_small() {
+#[cfg_attr(not(feature = "gpu"), ignore = "needs a GPU adapter: --features gpu")]
+fn one_layer_sigmoid_small_gpu() {
+    stage2(
+        &require_context(),
+        "1-layer sigmoid 5x3x4",
+        5,
+        &[3, 4, 1],
+        Head::Sigmoid,
+        1,
+        2e-3,
+    );
+}
+
+#[test]
+fn two_layer_sigmoid_small_reference() {
     stage1(
         "2-layer sigmoid 5x3x4x4",
         5,
@@ -527,21 +519,24 @@ fn two_layer_sigmoid_small() {
         11,
         64,
     );
-    if let Some(ctx) = context() {
-        stage2(
-            &ctx,
-            "2-layer sigmoid 5x3x4x4",
-            5,
-            &[3, 4, 4, 1],
-            Head::Sigmoid,
-            11,
-            2e-3,
-        );
-    }
 }
 
 #[test]
-fn one_layer_softmax_small() {
+#[cfg_attr(not(feature = "gpu"), ignore = "needs a GPU adapter: --features gpu")]
+fn two_layer_sigmoid_small_gpu() {
+    stage2(
+        &require_context(),
+        "2-layer sigmoid 5x3x4x4",
+        5,
+        &[3, 4, 4, 1],
+        Head::Sigmoid,
+        11,
+        2e-3,
+    );
+}
+
+#[test]
+fn one_layer_softmax_small_reference() {
     stage1(
         "1-layer softmax 5x3x4x3",
         5,
@@ -550,21 +545,24 @@ fn one_layer_softmax_small() {
         21,
         64,
     );
-    if let Some(ctx) = context() {
-        stage2(
-            &ctx,
-            "1-layer softmax 5x3x4x3",
-            5,
-            &[3, 4, 3],
-            Head::Softmax,
-            21,
-            2e-3,
-        );
-    }
 }
 
 #[test]
-fn one_layer_sigmoid_tile_crossing() {
+#[cfg_attr(not(feature = "gpu"), ignore = "needs a GPU adapter: --features gpu")]
+fn one_layer_softmax_small_gpu() {
+    stage2(
+        &require_context(),
+        "1-layer softmax 5x3x4x3",
+        5,
+        &[3, 4, 3],
+        Head::Softmax,
+        21,
+        2e-3,
+    );
+}
+
+#[test]
+fn one_layer_sigmoid_tile_crossing_reference() {
     stage1(
         "1-layer sigmoid 33x17x48",
         33,
@@ -573,23 +571,26 @@ fn one_layer_sigmoid_tile_crossing() {
         31,
         32,
     );
-    if let Some(ctx) = context() {
-        stage2(
-            &ctx,
-            "1-layer sigmoid 33x17x48",
-            33,
-            &[17, 48, 1],
-            Head::Sigmoid,
-            31,
-            1e-3,
-        );
-    }
+}
+
+#[test]
+#[cfg_attr(not(feature = "gpu"), ignore = "needs a GPU adapter: --features gpu")]
+fn one_layer_sigmoid_tile_crossing_gpu() {
+    stage2(
+        &require_context(),
+        "1-layer sigmoid 33x17x48",
+        33,
+        &[17, 48, 1],
+        Head::Sigmoid,
+        31,
+        1e-3,
+    );
 }
 
 /// Depth and tile-crossing together, which no earlier fixture covered: the
 /// stacked cases were all small and the large case was all one layer.
 #[test]
-fn two_layer_sigmoid_tile_crossing() {
+fn two_layer_sigmoid_tile_crossing_reference() {
     stage1(
         "2-layer sigmoid 33x17x48x48",
         33,
@@ -598,23 +599,26 @@ fn two_layer_sigmoid_tile_crossing() {
         41,
         32,
     );
-    if let Some(ctx) = context() {
-        stage2(
-            &ctx,
-            "2-layer sigmoid 33x17x48x48",
-            33,
-            &[17, 48, 48, 1],
-            Head::Sigmoid,
-            41,
-            1e-3,
-        );
-    }
+}
+
+#[test]
+#[cfg_attr(not(feature = "gpu"), ignore = "needs a GPU adapter: --features gpu")]
+fn two_layer_sigmoid_tile_crossing_gpu() {
+    stage2(
+        &require_context(),
+        "2-layer sigmoid 33x17x48x48",
+        33,
+        &[17, 48, 48, 1],
+        Head::Sigmoid,
+        41,
+        1e-3,
+    );
 }
 
 /// The softmax head at a size that crosses tiles, and stacked. Previously the
 /// multi-class gradient was verified only at 5x3x4.
 #[test]
-fn two_layer_softmax_tile_crossing() {
+fn two_layer_softmax_tile_crossing_reference() {
     stage1(
         "2-layer softmax 33x17x48x48x5",
         33,
@@ -623,17 +627,20 @@ fn two_layer_softmax_tile_crossing() {
         51,
         32,
     );
-    if let Some(ctx) = context() {
-        stage2(
-            &ctx,
-            "2-layer softmax 33x17x48x48x5",
-            33,
-            &[17, 48, 48, 5],
-            Head::Softmax,
-            51,
-            1e-3,
-        );
-    }
+}
+
+#[test]
+#[cfg_attr(not(feature = "gpu"), ignore = "needs a GPU adapter: --features gpu")]
+fn two_layer_softmax_tile_crossing_gpu() {
+    stage2(
+        &require_context(),
+        "2-layer softmax 33x17x48x48x5",
+        33,
+        &[17, 48, 48, 5],
+        Head::Softmax,
+        51,
+        1e-3,
+    );
 }
 
 /// A gradient merely proportional to the truth passes a direction check but

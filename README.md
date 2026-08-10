@@ -216,7 +216,7 @@ All fixed; receipts in [PR #177](https://github.com/teerthsharma/Aether-Lang/pul
 
 The rule: a row is **Active** only if a command in [`.github/workflows/ci.yml`](.github/workflows/ci.yml) produces its evidence. Test count in a file is not evidence if the file never runs.
 
-A third status was needed once the GPU backend arrived. 🖥️ **Hardware-gated** means the tests need an adapter no CI runner has. They were briefly worse than useless: a test that returns early on a missing adapter *passes*, so `cargo test --workspace` reported roughly forty GPU tests green while executing none of them — the exact green checkmark this document spends a section warning about, built by its own author. They are now `#[ignore]`d behind an off-by-default `gpu` feature, so the same run prints `0 passed; 38 ignored`. CI still compiles them with `cargo build -p aether-gpu --tests --features gpu`, so a broken one is caught rather than hidden behind the ignore. `AETHER_REQUIRE_GPU=1` additionally turns a missing adapter into a failure, for a run that must prove the hardware path was exercised. The honest reading of a hardware-gated row is "verified on one developer machine", which is weaker than every other Active row here.
+A third status was needed once the GPU backend arrived. 🖥️ **Hardware-gated** means the tests need an adapter no CI runner has. They were briefly worse than useless: a test that returns early on a missing adapter *passes*, so `cargo test --workspace` reported roughly forty GPU tests green while executing none of them — the exact green checkmark this document spends a section warning about, built by its own author. They are now `#[ignore]`d behind an off-by-default `gpu` feature, so the same run prints `0 passed; 38 ignored`. CI still compiles them with `cargo build -p aether-gpu --tests --features gpu`, so a broken one is caught rather than hidden behind the ignore. Asking for the hardware tests and finding no adapter now fails rather than skipping, so the feature flag is the only switch and cannot be half-honoured. The honest reading of a hardware-gated row is "verified on one developer machine", which is weaker than every other Active row here.
 
 | Subsystem | Status | Evidence |
 |---|---|---|
@@ -237,7 +237,7 @@ A third status was needed once the GPU backend arrived. 🖥️ **Hardware-gated
 | Kernel *boots* | ⛔ Ungated | compiles ≠ boots; needs QEMU logs |
 | External TDA parity | ⛔ Ungated | no ripser/GUDHI fixture comparison |
 | Lean 4 formalization | ⛔ Ungated | 10,474 lines, 48 theorems, **no `lake build` in CI** |
-| GPU compute backend (`aether-gpu`) | 🖥️ **Hardware-gated** | **41 tests**, RTX 4060 / Vulkan. `cargo test -p aether-gpu --features gpu --release`. In CI they report as **ignored**, not passed |
+| GPU compute backend (`aether-gpu`) | 🖥️ **Hardware-gated** | **47 tests**, RTX 4060 / Vulkan. `cargo test -p aether-gpu --features gpu --release`. In CI they report as **ignored**, not passed |
 | GPU used by `aether-core` | ⛔ **Ungated** | nothing routes through it; cost and precision measured, integration not made |
 | Attention backward pass | ❌ Does not exist | forward only; no gradcheck possible |
 | Wall-clock speedup claims | ❌ Withdrawn | see [What We Got Wrong](#what-we-got-wrong) |

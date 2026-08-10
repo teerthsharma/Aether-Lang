@@ -34,34 +34,24 @@ fn tolerance(k: usize) -> f32 {
     1e-5 * (k as f32).sqrt().max(1.0)
 }
 
-/// The GPU context, or `None` when no adapter exists.
+/// The GPU context, or a failure.
 ///
-/// # Why `AETHER_REQUIRE_GPU` exists
+/// Every caller of this is `#[ignore]`d without the `gpu` feature, so reaching
+/// it means the feature was requested. Asking to run the hardware tests and
+/// finding no hardware is a failure, not a skip: the alternative is the early
+/// return that had this suite reporting green while running nothing.
 ///
-/// Returning `None` makes every test that needs hardware return early, and an
-/// early return is a **pass**. That is the right behaviour on a machine without
-/// a GPU and a trap everywhere else: `cargo test --workspace` includes this
-/// crate, so CI reports these tests green while running none of them. A suite
-/// that cannot distinguish "verified" from "not attempted" is the green
-/// checkmark this repository's README spends a section warning about.
-///
-/// Setting `AETHER_REQUIRE_GPU=1` turns a missing adapter into a failure, so a
-/// run can assert that the hardware path was actually exercised. Use it locally
-/// to prove a change was tested, and in CI on any runner that has a GPU.
-fn context() -> Option<GpuContext> {
-    match GpuContext::new() {
-        Ok(ctx) => Some(ctx),
-        Err(e) => {
-            if std::env::var("AETHER_REQUIRE_GPU").is_ok() {
-                panic!(
-                    "AETHER_REQUIRE_GPU is set but no usable GPU adapter was found ({e}). \
-                     This test would otherwise have skipped and reported success."
-                );
-            }
-            eprintln!("SKIP: no usable GPU adapter ({e})");
-            None
-        }
-    }
+/// This replaced an `Option` plus an `AETHER_REQUIRE_GPU` variable. Two
+/// mechanisms guarding one property, neither enforcing the other, is worse than
+/// one that cannot be bypassed.
+fn require_context() -> GpuContext {
+    GpuContext::new().unwrap_or_else(|e| {
+        panic!(
+            "the `gpu` feature is enabled but no usable adapter was found ({e}). \
+             These tests exist to exercise hardware; without it there is nothing \
+             to report."
+        )
+    })
 }
 
 /// Deterministic pseudo-random fill. A fixed generator rather than `rand` so a
@@ -81,7 +71,7 @@ fn fill(n: usize, seed: u64) -> Vec<f32> {
 #[test]
 #[cfg_attr(not(feature = "gpu"), ignore = "needs a GPU adapter: --features gpu")]
 fn the_gpu_reports_which_adapter_it_is_using() {
-    let Some(ctx) = context() else { return };
+    let ctx = require_context();
     let info = ctx.adapter_info();
 
     println!("adapter: {}", info.name);
@@ -101,7 +91,7 @@ fn the_gpu_reports_which_adapter_it_is_using() {
 #[test]
 #[cfg_attr(not(feature = "gpu"), ignore = "needs a GPU adapter: --features gpu")]
 fn the_selected_adapter_is_real_hardware_not_a_software_rasterizer() {
-    let Some(ctx) = context() else { return };
+    let ctx = require_context();
     let info = ctx.adapter_info();
 
     if !info.is_hardware() {
@@ -123,7 +113,7 @@ fn the_selected_adapter_is_real_hardware_not_a_software_rasterizer() {
 #[test]
 #[cfg_attr(not(feature = "gpu"), ignore = "needs a GPU adapter: --features gpu")]
 fn gpu_matmul_matches_the_cpu_reference() {
-    let Some(ctx) = context() else { return };
+    let ctx = require_context();
 
     for (m, k, n) in [(4, 4, 4), (8, 16, 8), (32, 32, 32), (17, 5, 23)] {
         let a = fill(m * k, 1);
@@ -153,7 +143,7 @@ fn gpu_matmul_matches_the_cpu_reference() {
 #[test]
 #[cfg_attr(not(feature = "gpu"), ignore = "needs a GPU adapter: --features gpu")]
 fn shapes_around_the_workgroup_boundary_are_handled() {
-    let Some(ctx) = context() else { return };
+    let ctx = require_context();
 
     for dim in [1usize, 15, 16, 17, 31, 32, 33] {
         let a = fill(dim * dim, dim as u64);
@@ -177,7 +167,7 @@ fn shapes_around_the_workgroup_boundary_are_handled() {
 #[test]
 #[cfg_attr(not(feature = "gpu"), ignore = "needs a GPU adapter: --features gpu")]
 fn a_rectangular_product_is_not_transposed() {
-    let Some(ctx) = context() else { return };
+    let ctx = require_context();
 
     // A is 2x3, B is 3x4, so C is 2x4. Hand-computed.
     let a = vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0];
@@ -198,7 +188,7 @@ fn a_rectangular_product_is_not_transposed() {
 #[test]
 #[cfg_attr(not(feature = "gpu"), ignore = "needs a GPU adapter: --features gpu")]
 fn repeated_dispatches_are_bitwise_identical() {
-    let Some(ctx) = context() else { return };
+    let ctx = require_context();
 
     let (m, k, n) = (24, 24, 24);
     let a = fill(m * k, 7);
@@ -214,7 +204,7 @@ fn repeated_dispatches_are_bitwise_identical() {
 #[test]
 #[cfg_attr(not(feature = "gpu"), ignore = "needs a GPU adapter: --features gpu")]
 fn bias_is_broadcast_across_rows_not_down_columns() {
-    let Some(ctx) = context() else { return };
+    let ctx = require_context();
 
     let a = vec![
         1.0, 2.0, 3.0, //
@@ -229,7 +219,7 @@ fn bias_is_broadcast_across_rows_not_down_columns() {
 #[test]
 #[cfg_attr(not(feature = "gpu"), ignore = "needs a GPU adapter: --features gpu")]
 fn relu_clamps_negatives_and_leaves_positives_alone() {
-    let Some(ctx) = context() else { return };
+    let ctx = require_context();
 
     let a = vec![-2.0, -0.5, 0.0, 0.5, 2.0];
     let gpu = ctx.relu(&a).expect("relu dispatch");
@@ -243,7 +233,7 @@ fn relu_clamps_negatives_and_leaves_positives_alone() {
 #[test]
 #[cfg_attr(not(feature = "gpu"), ignore = "needs a GPU adapter: --features gpu")]
 fn relu_backward_is_zero_at_exactly_zero() {
-    let Some(ctx) = context() else { return };
+    let ctx = require_context();
 
     let pre = vec![-1.0, 0.0, 1.0];
     let grad = vec![5.0, 5.0, 5.0];
@@ -265,7 +255,7 @@ fn relu_backward_is_zero_at_exactly_zero() {
 #[test]
 #[cfg_attr(not(feature = "gpu"), ignore = "needs a GPU adapter: --features gpu")]
 fn the_tiled_kernel_matches_the_cpu_reference() {
-    let Some(ctx) = context() else { return };
+    let ctx = require_context();
 
     for (m, k, n) in [(16, 16, 16), (33, 47, 19), (64, 64, 64), (1, 1, 1)] {
         let a = fill(m * k, 11);
@@ -311,7 +301,7 @@ fn the_tiled_kernel_matches_the_cpu_reference() {
 #[test]
 #[cfg_attr(not(feature = "gpu"), ignore = "needs a GPU adapter: --features gpu")]
 fn the_tiled_kernel_is_correct_across_many_tile_iterations() {
-    let Some(ctx) = context() else { return };
+    let ctx = require_context();
 
     // k = 512 is 32 tile iterations; 128x128 output is 64 concurrent workgroups.
     let (m, k, n) = (128, 512, 128);
@@ -352,7 +342,7 @@ fn the_tiled_kernel_is_correct_across_many_tile_iterations() {
 #[test]
 #[cfg_attr(not(feature = "gpu"), ignore = "needs a GPU adapter: --features gpu")]
 fn a_resident_chain_equals_the_same_chain_with_readbacks() {
-    let Some(ctx) = context() else { return };
+    let ctx = require_context();
 
     let (m, k, n, p) = (24, 16, 32, 8);
     let a = fill(m * k, 21);
@@ -388,7 +378,7 @@ fn a_resident_chain_equals_the_same_chain_with_readbacks() {
 #[test]
 #[cfg_attr(not(feature = "gpu"), ignore = "needs a GPU adapter: --features gpu")]
 fn a_resident_matmul_rejects_disagreeing_inner_dimensions() {
-    let Some(ctx) = context() else { return };
+    let ctx = require_context();
 
     let a = ctx.upload(&fill(6, 1), 2, 3).expect("upload");
     let b = ctx.upload(&fill(8, 2), 4, 2).expect("upload");
@@ -441,7 +431,7 @@ fn f64_matmul(a: &[f64], b: &[f64], n: usize) -> Vec<f64> {
 #[test]
 #[cfg_attr(not(feature = "gpu"), ignore = "needs a GPU adapter: --features gpu")]
 fn f32_matmul_error_grows_like_the_square_root_of_the_reduction_depth() {
-    let Some(ctx) = context() else { return };
+    let ctx = require_context();
 
     let mut previous: Option<(usize, f64)> = None;
 
@@ -507,7 +497,7 @@ fn f32_matmul_error_grows_like_the_square_root_of_the_reduction_depth() {
 #[test]
 #[cfg_attr(not(feature = "gpu"), ignore = "needs a GPU adapter: --features gpu")]
 fn f32_matmul_precision_is_stated_as_a_number_not_an_adjective() {
-    let Some(ctx) = context() else { return };
+    let ctx = require_context();
 
     let n = 256;
     let a32 = fill(n * n, 311);
@@ -558,7 +548,7 @@ fn f32_matmul_precision_is_stated_as_a_number_not_an_adjective() {
 #[test]
 #[cfg_attr(not(feature = "gpu"), ignore = "needs a GPU adapter: --features gpu")]
 fn sgd_subtracts_the_scaled_gradient() {
-    let Some(ctx) = context() else { return };
+    let ctx = require_context();
 
     let params = ctx.upload(&[1.0, 2.0, 3.0, -1.0], 1, 4).expect("params");
     let grads = ctx.upload(&[0.5, -1.0, 2.0, 0.0], 1, 4).expect("grads");
@@ -590,7 +580,7 @@ fn sgd_subtracts_the_scaled_gradient() {
 #[test]
 #[cfg_attr(not(feature = "gpu"), ignore = "needs a GPU adapter: --features gpu")]
 fn sgd_moves_every_parameter_against_its_gradient() {
-    let Some(ctx) = context() else { return };
+    let ctx = require_context();
 
     let p_host = fill(64, 71);
     let g_host = fill(64, 72);
@@ -621,7 +611,7 @@ fn sgd_moves_every_parameter_against_its_gradient() {
 #[test]
 #[cfg_attr(not(feature = "gpu"), ignore = "needs a GPU adapter: --features gpu")]
 fn a_zero_learning_rate_leaves_parameters_untouched() {
-    let Some(ctx) = context() else { return };
+    let ctx = require_context();
 
     let p_host = fill(32, 73);
     let params = ctx.upload(&p_host, 4, 8).expect("params");
@@ -640,7 +630,7 @@ fn a_zero_learning_rate_leaves_parameters_untouched() {
 #[test]
 #[cfg_attr(not(feature = "gpu"), ignore = "needs a GPU adapter: --features gpu")]
 fn the_step_scales_linearly_with_the_learning_rate() {
-    let Some(ctx) = context() else { return };
+    let ctx = require_context();
 
     let p_host = fill(16, 75);
     let params = ctx.upload(&p_host, 4, 4).expect("params");
@@ -666,7 +656,7 @@ fn the_step_scales_linearly_with_the_learning_rate() {
 #[test]
 #[cfg_attr(not(feature = "gpu"), ignore = "needs a GPU adapter: --features gpu")]
 fn sgd_rejects_a_gradient_of_the_wrong_length() {
-    let Some(ctx) = context() else { return };
+    let ctx = require_context();
 
     let params = ctx.upload(&fill(12, 77), 3, 4).expect("params");
     let grads = ctx.upload(&fill(8, 78), 2, 4).expect("grads");
@@ -705,7 +695,7 @@ fn adam_cpu(params: &mut [f64], grads: &[f64], m: &mut [f64], v: &mut [f64], t: 
 #[test]
 #[cfg_attr(not(feature = "gpu"), ignore = "needs a GPU adapter: --features gpu")]
 fn adam_matches_a_cpu_reference_over_many_steps() {
-    let Some(ctx) = context() else { return };
+    let ctx = require_context();
 
     let n = 40;
     let p0 = fill(n, 201);
@@ -755,7 +745,7 @@ fn adam_matches_a_cpu_reference_over_many_steps() {
 #[test]
 #[cfg_attr(not(feature = "gpu"), ignore = "needs a GPU adapter: --features gpu")]
 fn the_first_adam_step_applies_bias_correction() {
-    let Some(ctx) = context() else { return };
+    let ctx = require_context();
 
     let n = 8;
     let params = vec![0.0f32; n];
@@ -787,7 +777,7 @@ fn the_first_adam_step_applies_bias_correction() {
 #[test]
 #[cfg_attr(not(feature = "gpu"), ignore = "needs a GPU adapter: --features gpu")]
 fn adam_normalises_away_the_gradient_scale() {
-    let Some(ctx) = context() else { return };
+    let ctx = require_context();
 
     let n = 16;
     let small = vec![0.01f32; n];
@@ -832,7 +822,7 @@ fn adam_normalises_away_the_gradient_scale() {
 #[test]
 #[cfg_attr(not(feature = "gpu"), ignore = "needs a GPU adapter: --features gpu")]
 fn adams_epsilon_sits_outside_the_square_root() {
-    let Some(ctx) = context() else { return };
+    let ctx = require_context();
 
     let n = 8;
     let lr = 0.1f32;
@@ -869,7 +859,7 @@ fn adams_epsilon_sits_outside_the_square_root() {
 #[test]
 #[cfg_attr(not(feature = "gpu"), ignore = "needs a GPU adapter: --features gpu")]
 fn adam_rejects_state_sized_for_a_different_parameter_count() {
-    let Some(ctx) = context() else { return };
+    let ctx = require_context();
 
     let p = ctx.upload(&fill(10, 211), 1, 10).expect("params");
     let other = ctx.upload(&fill(4, 212), 1, 4).expect("other");
@@ -886,7 +876,7 @@ fn adam_rejects_state_sized_for_a_different_parameter_count() {
 #[test]
 #[cfg_attr(not(feature = "gpu"), ignore = "needs a GPU adapter: --features gpu")]
 fn softmax_rows_are_probability_distributions() {
-    let Some(ctx) = context() else { return };
+    let ctx = require_context();
 
     let (rows, classes) = (7, 4);
     let logits = ctx
@@ -918,7 +908,7 @@ fn softmax_rows_are_probability_distributions() {
 #[test]
 #[cfg_attr(not(feature = "gpu"), ignore = "needs a GPU adapter: --features gpu")]
 fn softmax_is_invariant_to_a_constant_shift() {
-    let Some(ctx) = context() else { return };
+    let ctx = require_context();
 
     let (rows, classes) = (5, 3);
     let base = fill(rows * classes, 42);
@@ -948,7 +938,7 @@ fn softmax_is_invariant_to_a_constant_shift() {
 #[test]
 #[cfg_attr(not(feature = "gpu"), ignore = "needs a GPU adapter: --features gpu")]
 fn large_logits_do_not_produce_nan_in_softmax() {
-    let Some(ctx) = context() else { return };
+    let ctx = require_context();
 
     let logits = vec![
         1000.0, 999.0, 998.0, //
@@ -975,7 +965,7 @@ fn large_logits_do_not_produce_nan_in_softmax() {
 #[test]
 #[cfg_attr(not(feature = "gpu"), ignore = "needs a GPU adapter: --features gpu")]
 fn the_fused_softmax_gradient_equals_softmax_minus_target() {
-    let Some(ctx) = context() else { return };
+    let ctx = require_context();
 
     let (rows, classes) = (6, 3);
     let logits_host = fill(rows * classes, 43);
@@ -1012,7 +1002,7 @@ fn the_fused_softmax_gradient_equals_softmax_minus_target() {
 #[test]
 #[cfg_attr(not(feature = "gpu"), ignore = "needs a GPU adapter: --features gpu")]
 fn the_softmax_gradient_sums_to_zero_across_each_row() {
-    let Some(ctx) = context() else { return };
+    let ctx = require_context();
 
     let (rows, classes) = (8, 5);
     let logits_host = fill(rows * classes, 44);
@@ -1039,7 +1029,7 @@ fn the_softmax_gradient_sums_to_zero_across_each_row() {
 #[test]
 #[cfg_attr(not(feature = "gpu"), ignore = "needs a GPU adapter: --features gpu")]
 fn the_softmax_gradient_rejects_mismatched_target_shapes() {
-    let Some(ctx) = context() else { return };
+    let ctx = require_context();
 
     let logits = ctx.upload(&fill(12, 45), 4, 3).expect("upload");
     let targets = ctx.upload(&fill(8, 46), 4, 2).expect("upload");
@@ -1057,7 +1047,7 @@ fn the_softmax_gradient_rejects_mismatched_target_shapes() {
 #[test]
 #[cfg_attr(not(feature = "gpu"), ignore = "needs a GPU adapter: --features gpu")]
 fn resident_operations_accumulate_into_one_submission() {
-    let Some(ctx) = context() else { return };
+    let ctx = require_context();
 
     let a = ctx.upload(&fill(64, 1), 8, 8).expect("upload");
     let b = ctx.upload(&fill(64, 2), 8, 8).expect("upload");
@@ -1093,7 +1083,7 @@ fn resident_operations_accumulate_into_one_submission() {
 #[test]
 #[cfg_attr(not(feature = "gpu"), ignore = "needs a GPU adapter: --features gpu")]
 fn batching_does_not_change_the_result() {
-    let Some(ctx) = context() else { return };
+    let ctx = require_context();
 
     let a = ctx.upload(&fill(256, 3), 16, 16).expect("upload");
     let b = ctx.upload(&fill(256, 4), 16, 16).expect("upload");
@@ -1124,7 +1114,7 @@ fn batching_does_not_change_the_result() {
 #[test]
 #[cfg_attr(not(feature = "gpu"), ignore = "needs a GPU adapter: --features gpu")]
 fn flush_is_required_for_recorded_work_to_execute() {
-    let Some(ctx) = context() else { return };
+    let ctx = require_context();
 
     let a = ctx.upload(&fill(64, 5), 8, 8).expect("upload");
     let b = ctx.upload(&fill(64, 6), 8, 8).expect("upload");
@@ -1147,7 +1137,7 @@ fn flush_is_required_for_recorded_work_to_execute() {
 #[test]
 #[cfg_attr(not(feature = "gpu"), ignore = "needs a GPU adapter: --features gpu")]
 fn the_distance_matrix_matches_the_cpu_reference() {
-    let Some(ctx) = context() else { return };
+    let ctx = require_context();
 
     for (n, d) in [(8usize, 2usize), (32, 3), (17, 5), (64, 8)] {
         let pts = fill(n * d, 31 + n as u64);
@@ -1174,7 +1164,7 @@ fn the_distance_matrix_matches_the_cpu_reference() {
 #[test]
 #[cfg_attr(not(feature = "gpu"), ignore = "needs a GPU adapter: --features gpu")]
 fn the_distance_matrix_is_symmetric_with_a_zero_diagonal() {
-    let Some(ctx) = context() else { return };
+    let ctx = require_context();
 
     let (n, d) = (48, 4);
     let pts = fill(n * d, 99);
@@ -1217,7 +1207,7 @@ fn the_distance_matrix_is_symmetric_with_a_zero_diagonal() {
 #[test]
 #[cfg_attr(not(feature = "gpu"), ignore = "needs a GPU adapter: --features gpu")]
 fn distances_are_non_negative_and_satisfy_the_triangle_inequality() {
-    let Some(ctx) = context() else { return };
+    let ctx = require_context();
 
     let (n, d) = (24, 3);
     let pts = fill(n * d, 77);
@@ -1247,7 +1237,7 @@ fn distances_are_non_negative_and_satisfy_the_triangle_inequality() {
 #[test]
 #[cfg_attr(not(feature = "gpu"), ignore = "needs a GPU adapter: --features gpu")]
 fn mismatched_shapes_are_rejected_rather_than_dispatched() {
-    let Some(ctx) = context() else { return };
+    let ctx = require_context();
 
     let a = vec![1.0; 6];
     let b = vec![1.0; 6];
