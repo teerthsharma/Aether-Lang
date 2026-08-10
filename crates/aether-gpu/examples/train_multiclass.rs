@@ -1,4 +1,4 @@
-//! Multi-class GPU training with stratified cross-validation.
+//! Multi-class GPU training, evaluated on an independently drawn test set.
 //!
 //! Run:
 //!   cargo run -p aether-gpu --example train_multiclass --release
@@ -11,9 +11,11 @@
 //! the confusion matrix and per-class recall show it immediately, which is why
 //! both are printed rather than a single headline number.
 //!
-//! Folds are stratified. Contiguous slices of a shuffled array give folds whose
-//! class balance drifts, and on three classes that drift is large enough to move
-//! the accuracy more than the effect being measured.
+//! Train and test are separate i.i.d. draws from the same generator, not two
+//! halves of one sample. An earlier version cross-validated a single swept
+//! sample and reported 0.8067; that split placed a training point 0.99x the
+//! cloud's own spacing from every held-out point, so the figure described
+//! interpolation between near-duplicates. See aether_gpu::datasets.
 //!
 //! # Honest description of the data
 //!
@@ -25,9 +27,9 @@
 
 use std::time::Instant;
 
-use aether_gpu::{GpuContext, GpuTensor};
+use aether_gpu::{datasets, GpuContext, GpuTensor};
 
-const FOLDS: usize = 5;
+const RUNS: usize = 5;
 const EPOCHS: usize = 100;
 const HIDDEN: usize = 64;
 const CLASSES: usize = 3;
@@ -44,48 +46,6 @@ impl Lcg {
             .wrapping_add(1442695040888963407);
         (self.0 >> 33) as f32 / (1u64 << 31) as f32
     }
-}
-
-/// Three interleaved spirals. Returns `[n, 2]` features and `[n]` class labels.
-fn spirals(seed: u64) -> (Vec<f32>, Vec<usize>) {
-    let mut rng = Lcg(seed);
-    let mut x = Vec::new();
-    let mut y = Vec::new();
-
-    for class in 0..CLASSES {
-        for i in 0..PER_CLASS {
-            let t = i as f32 / PER_CLASS as f32;
-            let radius = 0.15 + 3.85 * t;
-            let angle = 2.2 * core::f32::consts::PI * t
-                + class as f32 * 2.0 * core::f32::consts::PI / CLASSES as f32;
-            let jr = (rng.next_f32() - 0.5) * 0.30;
-            let ja = (rng.next_f32() - 0.5) * 0.12;
-            x.push((radius + jr) * (angle + ja).cos() / 4.0);
-            x.push((radius + jr) * (angle + ja).sin() / 4.0);
-            y.push(class);
-        }
-    }
-    (x, y)
-}
-
-/// Stratified fold assignment: each class is dealt round-robin across folds, so
-/// every fold holds the same class balance as the whole set.
-fn stratified_folds(y: &[usize], folds: usize) -> Vec<usize> {
-    let mut assignment = vec![0usize; y.len()];
-    let mut next = vec![0usize; CLASSES];
-    for (i, &class) in y.iter().enumerate() {
-        assignment[i] = next[class] % folds;
-        next[class] += 1;
-    }
-    assignment
-}
-
-fn one_hot(y: &[usize]) -> Vec<f32> {
-    let mut out = vec![0.0f32; y.len() * CLASSES];
-    for (i, &c) in y.iter().enumerate() {
-        out[i * CLASSES + c] = 1.0;
-    }
-    out
 }
 
 fn init_weights(fan_in: usize, fan_out: usize, rng: &mut Lcg) -> Vec<f32> {
@@ -206,44 +166,52 @@ fn main() {
         std::process::exit(1);
     }
 
-    let (x, y) = spirals(0x5B1FA1);
+    // Train and test are drawn independently from the same generator.
+    //
+    // This example previously cross-validated a single swept sample, which
+    // measured interpolation between near-duplicates rather than
+    // generalisation: dealing consecutive arc points into different folds put a
+    // training point 0.99x the cloud's own spacing from every held-out point.
+    // The figure it printed, 0.8067, was not what it was labelled.
+    //
+    // See aether_gpu::datasets for the diagnostic and the full argument.
+    let (x, y) = datasets::spirals_iid(0x5B1FA1, CLASSES, PER_CLASS);
+    let (test_x, test_y) = datasets::spirals_iid(0x5B1FA2, CLASSES, PER_CLASS);
     let n = y.len();
-    let folds = stratified_folds(&y, FOLDS);
-    let y_hot = one_hot(&y);
+    let n_te = test_y.len();
+    let y_hot = datasets::one_hot(&y, CLASSES);
+
+    // Assert the split is real rather than trusting that it is.
+    let mut combined = x.clone();
+    combined.extend_from_slice(&test_x);
+    let is_test: Vec<bool> = (0..n)
+        .map(|_| false)
+        .chain((0..n_te).map(|_| true))
+        .collect();
+    datasets::report_split("independent draws", &combined, &is_test);
+    println!();
 
     println!("═══════════════════════════════════════════════════════════════════");
-    println!("  Multi-class GPU training, {FOLDS}-fold stratified CV, {EPOCHS} epochs");
+    println!("  Multi-class GPU training, {RUNS} seeds, {EPOCHS} epochs");
     println!("═══════════════════════════════════════════════════════════════════");
     println!("  adapter    {}  |  {}", info.name, info.backend);
-    println!("  data       {CLASSES} interleaved spirals, {n} points (synthetic)");
+    println!("  train      {n} points, drawn i.i.d. (synthetic {CLASSES}-spiral)");
+    println!("  test       {n_te} points, drawn independently from the same generator");
     println!("  network    2 -> {HIDDEN} -> {HIDDEN} -> {CLASSES}, ReLU, softmax + cross-entropy");
 
-    // Global confusion matrix, accumulated over the held-out fold of each split.
+    // Confusion pooled over runs. The spread below is over initialisations,
+    // not over folds: there are no folds now, because train and test are
+    // separate draws rather than two halves of one sample.
     let mut confusion = vec![vec![0usize; CLASSES]; CLASSES];
     let mut accs = Vec::new();
     let start = Instant::now();
 
-    for fold in 0..FOLDS {
-        let (mut trx, mut tr_hot, mut tex, mut tey) = (vec![], vec![], vec![], vec![]);
-        let mut n_tr = 0;
+    let gx = ctx.upload(&x, n, 2).expect("x");
+    let gy = ctx.upload(&y_hot, n, CLASSES).expect("y");
+    let gtex = ctx.upload(&test_x, n_te, 2).expect("test x");
 
-        for i in 0..n {
-            if folds[i] == fold {
-                tex.extend_from_slice(&x[i * 2..i * 2 + 2]);
-                tey.push(y[i]);
-            } else {
-                trx.extend_from_slice(&x[i * 2..i * 2 + 2]);
-                tr_hot.extend_from_slice(&y_hot[i * CLASSES..(i + 1) * CLASSES]);
-                n_tr += 1;
-            }
-        }
-        let n_te = tey.len();
-
-        let gx = ctx.upload(&trx, n_tr, 2).expect("x");
-        let gy = ctx.upload(&tr_hot, n_tr, CLASSES).expect("y");
-        let gtex = ctx.upload(&tex, n_te, 2).expect("test x");
-
-        let mut rng = Lcg(0xBEEF + fold as u64);
+    for run in 0..RUNS {
+        let mut rng = Lcg(0xBEEF + run as u64);
         let mut net = Net::new(&ctx, &mut rng);
 
         for _ in 0..EPOCHS {
@@ -251,21 +219,15 @@ fn main() {
         }
 
         let pred = net.predict(&ctx, &gtex, n_te);
-        let correct = pred.iter().zip(&tey).filter(|(p, t)| p == t).count();
+        let correct = pred.iter().zip(&test_y).filter(|(p, t)| p == t).count();
         let acc = correct as f32 / n_te as f32;
         accs.push(acc);
 
-        for (p, t) in pred.iter().zip(&tey) {
+        for (p, t) in pred.iter().zip(&test_y) {
             confusion[*t][*p] += 1;
         }
 
-        println!(
-            "  fold {}/{}  n_test {:>4}  accuracy {:.4}",
-            fold + 1,
-            FOLDS,
-            n_te,
-            acc
-        );
+        println!("  seed {}/{}  test accuracy {:.4}", run + 1, RUNS, acc);
     }
 
     let elapsed = start.elapsed();
@@ -320,7 +282,7 @@ fn main() {
     };
 
     println!("───────────────────────────────────────────────────────────────────");
-    println!("  CV accuracy       {mean:.4} +/- {sd:.4}");
+    println!("  test accuracy     {mean:.4} +/- {sd:.4}  (spread over {RUNS} seeds)");
     println!("  macro F1          {macro_f1:.4}");
     println!("  majority-class    {majority:.4}  <- control");
     println!("  separation        {:+.4}", mean - majority);

@@ -22,6 +22,8 @@
 //! `std`, an allocator, and a driver stack. Keeping the GPU path in its own
 //! crate means the embedded build cannot silently acquire a dependency on it.
 
+pub mod datasets;
+
 use std::borrow::Cow;
 use std::cell::RefCell;
 

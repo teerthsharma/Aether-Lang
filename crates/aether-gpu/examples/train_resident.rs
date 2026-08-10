@@ -23,9 +23,9 @@
 
 use std::time::Instant;
 
-use aether_gpu::{GpuContext, GpuTensor};
+use aether_gpu::{datasets, GpuContext, GpuTensor};
 
-const FOLDS: usize = 5;
+const RUNS: usize = 5;
 const EPOCHS: usize = 100;
 const HIDDEN: usize = 32;
 const LEARNING_RATE: f32 = 0.5;
@@ -43,41 +43,6 @@ impl Lcg {
     }
 }
 
-fn spirals(seed: u64) -> (Vec<f32>, Vec<f32>) {
-    let mut rng = Lcg(seed);
-    let n = POINTS_PER_CLASS * 2;
-    let mut x = Vec::with_capacity(n * 2);
-    let mut y = Vec::with_capacity(n);
-
-    for class in 0..2 {
-        for i in 0..POINTS_PER_CLASS {
-            let t = i as f32 / POINTS_PER_CLASS as f32;
-            let radius = 0.2 + 3.8 * t;
-            let angle = 2.5 * core::f32::consts::PI * t + class as f32 * core::f32::consts::PI;
-            let jr = (rng.next_f32() - 0.5) * 0.35;
-            let ja = (rng.next_f32() - 0.5) * 0.15;
-            x.push((radius + jr) * (angle + ja).cos() / 4.0);
-            x.push((radius + jr) * (angle + ja).sin() / 4.0);
-            y.push(class as f32);
-        }
-    }
-
-    let mut order: Vec<usize> = (0..n).collect();
-    for i in (1..n).rev() {
-        let j = (rng.next_f32() * (i + 1) as f32) as usize % (i + 1);
-        order.swap(i, j);
-    }
-
-    let mut xs = Vec::with_capacity(n * 2);
-    let mut ys = Vec::with_capacity(n);
-    for &idx in &order {
-        xs.push(x[idx * 2]);
-        xs.push(x[idx * 2 + 1]);
-        ys.push(y[idx]);
-    }
-    (xs, ys)
-}
-
 fn init_weights(fan_in: usize, fan_out: usize, rng: &mut Lcg) -> Vec<f32> {
     let bound = (6.0f32 / fan_in as f32).sqrt();
     (0..fan_in * fan_out)
@@ -85,7 +50,7 @@ fn init_weights(fan_in: usize, fan_out: usize, rng: &mut Lcg) -> Vec<f32> {
         .collect()
 }
 
-/// Parameters, resident for the lifetime of a fold.
+/// Parameters, resident for the lifetime of a run.
 struct ResidentMlp {
     w1: GpuTensor,
     b1: GpuTensor,
@@ -208,7 +173,7 @@ fn main() {
     }
 
     println!("═══════════════════════════════════════════════════════════════════");
-    println!("  Fully-resident GPU training, {FOLDS}-fold CV, {EPOCHS} epochs/fold");
+    println!("  Fully-resident GPU training, {RUNS} seeds, {EPOCHS} epochs/fold");
     println!("═══════════════════════════════════════════════════════════════════");
     println!(
         "  adapter      {}  |  {}  |  {}",
@@ -217,50 +182,52 @@ fn main() {
     println!("  residency    weights stay on device for all {EPOCHS} epochs");
     println!("  readback     final predictions only");
 
-    let (x, y) = spirals(0xA37E5);
-    let n = y.len();
-    let fold_size = n / FOLDS;
+    // Train and test are independent draws from the same generator.
+    //
+    // This example previously cross-validated a single swept sample and printed
+    // 0.8220. That split dealt consecutive arc points into different folds, so
+    // every held-out point had a training point 0.99x the cloud's own spacing
+    // away; the figure measured interpolation between near-duplicates rather
+    // than generalisation. See aether_gpu::datasets for the diagnostic.
+    let (x, y_class) = datasets::spirals_iid(0xA37E5, 2, POINTS_PER_CLASS);
+    let (test_x, test_class) = datasets::spirals_iid(0xA37E6, 2, POINTS_PER_CLASS);
+    let y: Vec<f32> = y_class.iter().map(|c| *c as f32).collect();
+    let test_y: Vec<f32> = test_class.iter().map(|c| *c as f32).collect();
+    let (n, n_te) = (y.len(), test_y.len());
+
+    let mut combined = x.clone();
+    combined.extend_from_slice(&test_x);
+    let is_test: Vec<bool> = (0..n)
+        .map(|_| false)
+        .chain((0..n_te).map(|_| true))
+        .collect();
+    datasets::report_split("independent draws", &combined, &is_test);
+    println!();
 
     let mut accs = Vec::new();
     let start = Instant::now();
 
-    for fold in 0..FOLDS {
-        let lo = fold * fold_size;
-        let hi = if fold == FOLDS - 1 { n } else { lo + fold_size };
+    // Uploaded once. Nothing crosses the bus again until predict().
+    let gx = ctx.upload(&x, n, 2).expect("upload x");
+    let gy = ctx.upload(&y, n, 1).expect("upload y");
+    let gtex = ctx.upload(&test_x, n_te, 2).expect("upload test x");
 
-        let (mut trx, mut tryy, mut tex, mut tey) = (vec![], vec![], vec![], vec![]);
-        for i in 0..n {
-            if i >= lo && i < hi {
-                tex.extend_from_slice(&x[i * 2..i * 2 + 2]);
-                tey.push(y[i]);
-            } else {
-                trx.extend_from_slice(&x[i * 2..i * 2 + 2]);
-                tryy.push(y[i]);
-            }
-        }
-
-        let (n_tr, n_te) = (tryy.len(), tey.len());
-
-        // Upload once per fold. Nothing else crosses the bus until predict().
-        let gx = ctx.upload(&trx, n_tr, 2).expect("upload x");
-        let gy = ctx.upload(&tryy, n_tr, 1).expect("upload y");
-        let gtex = ctx.upload(&tex, n_te, 2).expect("upload test x");
-
-        let mut rng = Lcg(0xC0FFEE + fold as u64);
+    for run in 0..RUNS {
+        let mut rng = Lcg(0xC0FFEE + run as u64);
         let mut net = ResidentMlp::new(&ctx, &mut rng);
 
         for _ in 0..EPOCHS {
             net.step(&ctx, &gx, &gy, LEARNING_RATE);
         }
 
-        let train_acc = accuracy(&net.predict(&ctx, &gx), &tryy);
-        let test_acc = accuracy(&net.predict(&ctx, &gtex), &tey);
+        let train_acc = accuracy(&net.predict(&ctx, &gx), &y);
+        let test_acc = accuracy(&net.predict(&ctx, &gtex), &test_y);
         accs.push(test_acc);
 
         println!(
-            "  fold {}/{}  train acc {:.4}  test acc {:.4}",
-            fold + 1,
-            FOLDS,
+            "  seed {}/{}  train acc {:.4}  test acc {:.4}",
+            run + 1,
+            RUNS,
             train_acc,
             test_acc
         );
@@ -270,11 +237,14 @@ fn main() {
     let mean = accs.iter().sum::<f32>() / accs.len() as f32;
     let var = accs.iter().map(|a| (a - mean).powi(2)).sum::<f32>() / accs.len() as f32;
 
-    let ones = y.iter().filter(|v| **v > 0.5).count();
-    let majority = ones.max(n - ones) as f32 / n as f32;
+    let majority = datasets::majority_class(&test_class, 2);
 
     println!("───────────────────────────────────────────────────────────────────");
-    println!("  CV test accuracy    {:.4} +/- {:.4}", mean, var.sqrt());
+    println!(
+        "  test accuracy       {:.4} +/- {:.4}  (spread over seeds)",
+        mean,
+        var.sqrt()
+    );
     println!("  majority-class      {:.4}  <- control", majority);
     println!("  separation          {:+.4}", mean - majority);
     println!("  wall clock          {:.2} s", elapsed.as_secs_f64());

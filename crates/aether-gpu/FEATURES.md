@@ -142,6 +142,46 @@ spirals are not linearly separable, so the majority-class control is a real
 floor rather than a formality — but nothing measured on it transfers to real
 data, and this row is not evidence about real datasets.
 
+## Correction: the split investigation overstated its conclusion
+
+The section below concluded that every accuracy figure in this crate was
+measuring interpolation between near-duplicates, on the evidence that held-out
+points sat 0.99× the cloud's own spacing from their nearest training point.
+
+**That inference was wrong.** Two genuinely independent draws from the same
+generator measure **1.39×** — dense i.i.d. sampling naturally places points near
+each other, and a close training neighbour is what "same distribution" means.
+The ratio cannot separate a leaky split from honest i.i.d. data, so 0.99× was
+never evidence of a leak.
+
+Checked directly, by re-running both examples against independently drawn test
+sets:
+
+| | interleaved CV | independent draws |
+|---|---:|---:|
+| Adam, `train_optimizers` | 1.0000 | 1.0000 |
+| SGD, `train_multiclass` | 0.8067 | 0.8020 ± 0.0337 |
+
+**They agree.** The interleaved split was not inflating anything on this data,
+and the numbers it produced were about right.
+
+What survives:
+
+- The **blocked** split really is broken, and the ratio detects it: 9.72×, with
+  both optimisers falling below the majority-class control. It measures
+  extrapolation into arcs never seen.
+- Independent draws remain the correct construction, on the structural argument
+  that a partition of one deterministic sweep is not a sample. That argument
+  never depended on the ratio, which is why it survives the ratio turning out
+  not to mean what it was taken to mean.
+- `SplitDiagnostic::is_separated` has been replaced by `is_extrapolating`, and
+  `report_split` no longer issues a leak verdict it cannot support. A unit test
+  pins the correction: a low ratio does not distinguish the two cases.
+
+The original section is kept below rather than rewritten, because the reasoning
+that produced a wrong conclusion from a real measurement is the part worth
+keeping.
+
 ## The accuracy numbers above were measuring the wrong thing
 
 Adam reached a cross-validated **1.0000 with standard deviation 0.0000** across
