@@ -455,8 +455,48 @@ What survives is the weaker bound: filtration values move by at most the
 distance error, so bars shift by about 1e-7. Whether a bar appears or disappears
 is no longer settled by construction, and would have to be measured per cloud.
 
-Combined with the kernel measuring 0.52× the CPU reference at n=512, the case
-for routing `aether-core` through it is now weaker than it looked, not stronger.
+### So it was measured
+
+"Not guaranteed" is a worst-case statement: two distances *can* swap. It says
+nothing about whether a swap changes homology, and most do not — exchanging the
+entry order of two simplices that are not both pivotal leaves the barcode alone
+apart from endpoint shifts.
+
+Points displaced by the kernel's own error magnitude, Betti numbers compared
+across the full filtration:
+
+| n | homology | clouds changed |
+|---:|---|---|
+| 32 | H₁ | 0 / 50 |
+| 64 | H₁ | 0 / 50 |
+| 128 | H₀ | 0 / 50 |
+| 256 | H₀ | 0 / 30 |
+
+**0 of 180.** By the rule of three that puts the 95% upper bound on the rate at
+1.7% — not "never", but below that.
+
+Sweeping the displacement upward to find where it does break, n=64 H₁:
+
+| displacement | clouds changed |
+|---|---|
+| 1e-6 | 0 / 20 |
+| 1e-5 | 0 / 20 |
+| **1e-4** | **4 / 20** |
+| 1e-3 | 19 / 20 |
+| 1e-2 | 20 / 20 |
+
+**Largest clean displacement 1e-5 against a kernel error of 4e-7: a 25× margin.**
+
+The worst-case and average-case answers genuinely differ and both are true. The
+ordering guarantee is unavailable past n≈32, and the topology is nonetheless
+unchanged in every cloud tested, with two orders of magnitude of room. An f32
+distance path is viable here in practice; it just cannot be *proved* viable by
+the ordering argument, and a caller who needs a guarantee rather than evidence
+does not have one.
+
+None of which makes the kernel worth using: it still measures 0.52× the CPU
+reference at n=512. The precision objection is answered and the performance one
+is not.
 
 ## Negative results
 
