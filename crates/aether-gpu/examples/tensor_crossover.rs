@@ -23,7 +23,7 @@
 use std::time::Instant;
 
 use aether_core::ml::tensor::Tensor;
-use aether_gpu::GpuContext;
+use aether_gpu::{tensor_matmul, GpuContext};
 
 fn median_ms(reps: usize, mut f: impl FnMut()) -> f64 {
     let mut t = Vec::with_capacity(reps);
@@ -64,12 +64,12 @@ fn main() {
     println!("═══════════════════════════════════════════════════════════════════════");
     println!();
     println!(
-        "  {:>5}  {:>12}  {:>12}  {:>8}  {:>12}  {:>8}",
-        "n", "Tensor ms", "GPU raw ms", "ratio", "GPU+conv ms", "ratio"
+        "  {:>5}  {:>12}  {:>12}  {:>8}  {:>12}  {:>12}  {:>8}",
+        "n", "Tensor ms", "GPU raw ms", "ratio", "hand-conv ms", "bridge ms", "ratio"
     );
     println!(
-        "  {:->5}  {:->12}  {:->12}  {:->8}  {:->12}  {:->8}",
-        "", "", "", "", "", ""
+        "  {:->5}  {:->12}  {:->12}  {:->8}  {:->12}  {:->12}  {:->8}",
+        "", "", "", "", "", "", ""
     );
 
     let mut honest_crossover: Option<usize> = None;
@@ -103,13 +103,23 @@ fn main() {
             let _back: Vec<f64> = out.iter().map(|v| *v as f64).collect();
         });
 
-        let ratio_conv = cpu / with_conv;
-        if honest_crossover.is_none() && ratio_conv > 1.0 {
+        // The shipped bridge, which is what a caller actually runs. It differs
+        // from `with_conv` above by gathering through the tensor's strides
+        // rather than reading its buffer flat -- necessary for correctness on a
+        // non-contiguous tensor, and a scalar loop on the contiguous path this
+        // will almost always take. Whether that cost matters is the question
+        // this column answers.
+        let bridge = median_ms(reps.max(10), || {
+            let _ = tensor_matmul(&ctx, &ta, &tb).expect("bridge");
+        });
+
+        let ratio_bridge = cpu / bridge;
+        if honest_crossover.is_none() && ratio_bridge > 1.0 {
             honest_crossover = Some(n);
         }
 
         println!(
-            "  {n:>5}  {cpu:>12.3}  {raw:>12.3}  {:>7.2}x  {with_conv:>12.3}  {ratio_conv:>7.2}x",
+            "  {n:>5}  {cpu:>12.3}  {raw:>12.3}  {:>7.2}x  {with_conv:>12.3}  {bridge:>12.3}  {ratio_bridge:>7.2}x",
             cpu / raw
         );
     }
@@ -117,13 +127,19 @@ fn main() {
     println!();
     println!("───────────────────────────────────────────────────────────────────────");
     match honest_crossover {
-        Some(n) => println!("  crossover including f64<->f32 conversion: n = {n}"),
+        Some(n) => println!("  crossover using the shipped bridge: n = {n}"),
         None => println!("  no crossover including conversion at any size tested"),
     }
     println!("═══════════════════════════════════════════════════════════════════════");
     println!("  'GPU raw' assumes the operands are already f32, which they are not:");
-    println!("  Tensor is f64. 'GPU+conv' converts both operands down and the");
-    println!("  result back up, which is what an integration has to do, and is");
-    println!("  the column the recommendation should be read from.");
+    println!("  Tensor is f64. 'hand-conv' converts both operands down and the");
+    println!("  result back up by reading each buffer flat.");
+    println!();
+    println!("  'bridge' is the shipped tensor_matmul, which gathers through the");
+    println!("  tensor's strides instead. That is required for correctness on a");
+    println!("  non-contiguous tensor and costs about 11% on the contiguous path");
+    println!("  it will almost always take. The ratio column is measured from it,");
+    println!("  because it is the code a caller runs -- quoting hand-conv would");
+    println!("  report a number nothing in the crate produces.");
     println!("═══════════════════════════════════════════════════════════════════════");
 }
