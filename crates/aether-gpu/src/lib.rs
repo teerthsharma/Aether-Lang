@@ -1018,39 +1018,41 @@ impl GpuContext {
         };
         let groups = (seq.div_ceil(64) as u32, 1, 1);
 
-        // Stats first, on q|k|v|dOut. The kernel writes the block it does not
-        // read, so this pass needs no room for it.
+        // One buffer holds q|k|v|dOut plus a reserved tail of three floats per
+        // row for the statistics. Uploaded flat: the layout is not a rectangle in
+        // `head_dim`, and every kernel indexes it from base offsets it computes
+        // itself, so the tensor's rows and columns mean nothing beyond length.
         let mut packed = Vec::with_capacity(span * 4 + seq * 3);
         packed.extend_from_slice(q);
         packed.extend_from_slice(k);
         packed.extend_from_slice(v);
         packed.extend_from_slice(d_out);
-
-        // Uploaded flat. The packed buffer is q|k|v|dOut and later gains three
-        // floats per row of statistics, which is not a rectangle in `head_dim`;
-        // the kernels index it flatly from base offsets they compute themselves,
-        // so the tensor's rows and columns carry no meaning here beyond length.
+        packed.resize(span * 4 + seq * 3, 0.0);
         let operands = self.upload(&packed, 1, packed.len())?;
-        let stats = self.alloc(seq, 3);
+
+        // The statistics kernel takes that buffer as its *output* and reads the
+        // operands back out of it, because a `read_write` binding is readable. It
+        // fills the reserved tail in place, and the three gradient kernels below
+        // bind the same buffer as `a` with everything already there.
+        //
+        // This replaces a full round trip. The previous version wrote the
+        // statistics to their own tensor, downloaded them, and re-uploaded them
+        // concatenated onto the operands, once per backward call, on the reasoning
+        // that the shared four-binding layout had no free binding to leave them
+        // in. That was true and the conclusion did not follow: the output binding
+        // was always readable, so no second layout was ever required.
+        //
+        // `a` and `b` both receive the CSR buffer. This kernel reads the schedule
+        // through `b` and never touches `a`, and two read-only bindings onto one
+        // buffer cannot race.
         self.dispatch_resident(
             &self.attention_row_stats,
-            &operands.buffer,
             &csr.buffer,
-            &stats.buffer,
+            &csr.buffer,
+            &operands.buffer,
             dims,
             groups,
         );
-
-        // The three gradient kernels read the stats, so they have to be part of
-        // the packed operand buffer. Reading them back to concatenate is a round
-        // trip the shared four-binding layout forces: with a second layout the
-        // stats buffer would simply be bound alongside.
-        //
-        // ponytail: one download of 3*seq floats per backward call, remove when a
-        // second bind group layout exists or a device-side concatenation kernel
-        // does.
-        packed.extend_from_slice(&self.read(&stats)?);
-        let operands = self.upload(&packed, 1, packed.len())?;
 
         let dq = self.alloc(seq, head_dim);
         let dk = self.alloc(seq, head_dim);
