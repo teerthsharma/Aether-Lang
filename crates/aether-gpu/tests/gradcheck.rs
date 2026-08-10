@@ -9,7 +9,7 @@
 //!
 //! Finite differences in f32 are close to useless: the step has to be large
 //! enough to survive f32 rounding of the loss and small enough for the
-//! difference quotient to approximate the derivative, and for this network no
+//! difference quotient to approximate the derivative, and for these networks no
 //! step satisfies both comfortably. So the check is staged:
 //!
 //!   1. central differences in f64  vs  analytic gradient in f64
@@ -19,12 +19,28 @@
 //!
 //! Neither step alone is sufficient. The first cannot see the GPU at all; the
 //! second would happily agree if both implementations shared a sign error.
+//!
+//! # One reference, several shapes
+//!
+//! This started as four hand-written reference networks -- one and two hidden
+//! layers, sigmoid and softmax heads, small and tile-crossing sizes -- and the
+//! two combinations that were still missing would have made six. Four
+//! near-identical backward passes is a worse liability than the gap they were
+//! covering: they drift, and a fix applied to one is not applied to the others.
+//!
+//! `Net` below is depth-generic, head-generic and size-generic, so every
+//! combination is a table row rather than another transcription of the chain
+//! rule.
 
 use aether_gpu::{GpuContext, GpuTensor};
 
-const BATCH: usize = 5;
-const IN: usize = 3;
-const HID: usize = 4;
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+enum Head {
+    /// Sigmoid with binary cross-entropy. One output unit.
+    Sigmoid,
+    /// Softmax with categorical cross-entropy. One-hot targets.
+    Softmax,
+}
 
 fn context() -> Option<GpuContext> {
     match GpuContext::new() {
@@ -48,1153 +64,581 @@ fn fill(n: usize, seed: u64) -> Vec<f64> {
         .collect()
 }
 
-/// The reference network, in f64, matching the kernels exactly:
-/// `x -> W1 -> +b1 -> relu -> W2 -> +b2 -> sigmoid -> mean BCE`.
+/// A dense ReLU stack with a choice of output head, in f64.
 ///
-/// One hidden layer, which isolates the output head: everything this fixture
-/// catches is attributable to the sigmoid and BCE path rather than to the
-/// composition of two gates.
-///
-/// This is deliberately not the whole check. An earlier version of this comment
-/// claimed a second identical layer "exercises no new code path", which is
-/// wrong -- with one hidden layer the gradient reaching the input weights
-/// crosses exactly one ReLU gate, so gating the wrong tensor or reusing the
-/// first layer's mask has nowhere to surface. `Ref2` below covers the stacked
-/// case that the training examples actually run.
-struct Ref {
-    w1: Vec<f64>, // [IN, HID]
-    b1: Vec<f64>, // [HID]
-    w2: Vec<f64>, // [HID, 1]
-    b2: Vec<f64>, // [1]
+/// `dims` is `[inputs, hidden.., outputs]`, so `dims.len() - 1` is the number of
+/// weight matrices and every hidden layer carries a ReLU. The kernels are
+/// matched exactly, including the ReLU derivative being zero at exactly zero and
+/// the max subtraction inside softmax.
+struct Net {
+    rows: usize,
+    dims: Vec<usize>,
+    w: Vec<Vec<f64>>,
+    b: Vec<Vec<f64>>,
+    head: Head,
 }
 
-impl Ref {
-    fn loss(&self, x: &[f64], y: &[f64]) -> f64 {
-        let (_, _, p) = self.forward(x);
-        p.iter()
-            .zip(y)
-            .map(|(p, t)| {
-                let p = p.clamp(1e-12, 1.0 - 1e-12);
-                -(t * p.ln() + (1.0 - t) * (1.0 - p).ln())
-            })
-            .sum::<f64>()
-            / BATCH as f64
-    }
-
-    /// Returns `(z1, a1, p)`.
-    fn forward(&self, x: &[f64]) -> (Vec<f64>, Vec<f64>, Vec<f64>) {
-        let mut z1 = vec![0.0; BATCH * HID];
-        for i in 0..BATCH {
-            for j in 0..HID {
-                let mut s = self.b1[j];
-                for k in 0..IN {
-                    s += x[i * IN + k] * self.w1[k * HID + j];
-                }
-                z1[i * HID + j] = s;
-            }
-        }
-
-        let a1: Vec<f64> = z1.iter().map(|v| v.max(0.0)).collect();
-
-        let mut p = vec![0.0; BATCH];
-        for i in 0..BATCH {
-            let mut s = self.b2[0];
-            for j in 0..HID {
-                s += a1[i * HID + j] * self.w2[j];
-            }
-            p[i] = 1.0 / (1.0 + (-s).exp());
-        }
-
-        (z1, a1, p)
-    }
-
-    /// Analytic gradients, returned in the same layout as the parameters.
-    fn grads(&self, x: &[f64], y: &[f64]) -> (Vec<f64>, Vec<f64>, Vec<f64>, Vec<f64>) {
-        let (z1, a1, p) = self.forward(x);
-
-        // Fused sigmoid + BCE derivative, matching sigmoid_bce_grad.
-        let dz2: Vec<f64> = p
-            .iter()
-            .zip(y)
-            .map(|(p, t)| (p - t) / BATCH as f64)
-            .collect();
-
-        let mut dw2 = vec![0.0; HID];
-        for j in 0..HID {
-            for i in 0..BATCH {
-                dw2[j] += a1[i * HID + j] * dz2[i];
-            }
-        }
-        let db2 = vec![dz2.iter().sum::<f64>()];
-
-        let mut dz1 = vec![0.0; BATCH * HID];
-        for i in 0..BATCH {
-            for j in 0..HID {
-                // ReLU derivative: zero at exactly zero, matching the kernel.
-                let gate = if z1[i * HID + j] > 0.0 { 1.0 } else { 0.0 };
-                dz1[i * HID + j] = dz2[i] * self.w2[j] * gate;
-            }
-        }
-
-        let mut dw1 = vec![0.0; IN * HID];
-        for k in 0..IN {
-            for j in 0..HID {
-                for i in 0..BATCH {
-                    dw1[k * HID + j] += x[i * IN + k] * dz1[i * HID + j];
-                }
-            }
-        }
-
-        let mut db1 = vec![0.0; HID];
-        for j in 0..HID {
-            for i in 0..BATCH {
-                db1[j] += dz1[i * HID + j];
-            }
-        }
-
-        (dw1, db1, dw2, db2)
-    }
-}
-
-/// Central differences: `(L(w+h) - L(w-h)) / 2h`.
-///
-/// Central rather than forward because the error is O(h^2) instead of O(h),
-/// which is what makes a meaningful tolerance possible at all.
-fn finite_diff(net: &mut Ref, x: &[f64], y: &[f64], which: usize, idx: usize, h: f64) -> f64 {
-    let get = |n: &mut Ref, w: usize, i: usize| -> f64 {
-        match w {
-            0 => n.w1[i],
-            1 => n.b1[i],
-            2 => n.w2[i],
-            _ => n.b2[i],
-        }
-    };
-    let set = |n: &mut Ref, w: usize, i: usize, v: f64| match w {
-        0 => n.w1[i] = v,
-        1 => n.b1[i] = v,
-        2 => n.w2[i] = v,
-        _ => n.b2[i] = v,
-    };
-
-    let orig = get(net, which, idx);
-
-    set(net, which, idx, orig + h);
-    let up = net.loss(x, y);
-
-    set(net, which, idx, orig - h);
-    let down = net.loss(x, y);
-
-    set(net, which, idx, orig);
-
-    (up - down) / (2.0 * h)
-}
-
-/// Stage 1: the reference's own analytic gradient against central differences.
-///
-/// A ReLU is non-differentiable at zero, so a unit whose pre-activation sits
-/// within `h` of the boundary has a finite difference that straddles the kink
-/// and legitimately disagrees with either one-sided derivative. Those entries
-/// are skipped rather than fudged into the tolerance.
-#[test]
-fn the_reference_analytic_gradient_matches_central_differences() {
-    let x = fill(BATCH * IN, 1);
-    let y: Vec<f64> = (0..BATCH).map(|i| (i % 2) as f64).collect();
-
-    let mut net = Ref {
-        w1: fill(IN * HID, 2),
-        b1: fill(HID, 3),
-        w2: fill(HID, 4),
-        b2: fill(1, 5),
-    };
-
-    let (dw1, db1, dw2, db2) = net.grads(&x, &y);
-    let h = 1e-6;
-
-    let groups: [(usize, &[f64]); 4] = [(0, &dw1), (1, &db1), (2, &dw2), (3, &db2)];
-
-    let mut checked = 0;
-    for (which, analytic) in groups {
-        for (idx, &a) in analytic.iter().enumerate() {
-            // Skip any parameter whose perturbation moves a pre-activation
-            // across the ReLU kink.
-            let (z1_before, _, _) = net.forward(&x);
-            let near_kink = z1_before.iter().any(|z| z.abs() < 1e-3);
-            if near_kink {
-                continue;
-            }
-
-            let fd = finite_diff(&mut net, &x, &y, which, idx, h);
-            let denom = a.abs().max(fd.abs()).max(1e-8);
-            let rel = (a - fd).abs() / denom;
-
-            assert!(
-                rel < 1e-5,
-                "group {which} index {idx}: analytic {a:.12e} vs finite diff {fd:.12e}, \
-                 relative error {rel:.3e}"
-            );
-            checked += 1;
-        }
-    }
-
-    assert!(
-        checked > 0,
-        "every parameter was skipped; the check proved nothing"
-    );
-    println!("stage 1: {checked} parameters matched central differences");
-}
-
-/// Stage 2: the GPU kernels against the verified f64 reference.
-///
-/// Builds the same network from the public resident operations and compares the
-/// gradients the kernels produce with the reference's analytic ones.
-#[test]
-fn the_gpu_backward_pass_matches_the_reference_gradients() {
-    let Some(ctx) = context() else { return };
-
-    let x64 = fill(BATCH * IN, 11);
-    let y64: Vec<f64> = (0..BATCH).map(|i| (i % 2) as f64).collect();
-    let w1_64 = fill(IN * HID, 12);
-    let b1_64 = fill(HID, 13);
-    let w2_64 = fill(HID, 14);
-    let b2_64 = fill(1, 15);
-
-    let net = Ref {
-        w1: w1_64.clone(),
-        b1: b1_64.clone(),
-        w2: w2_64.clone(),
-        b2: b2_64.clone(),
-    };
-    let (ref_dw1, ref_db1, ref_dw2, ref_db2) = net.grads(&x64, &y64);
-
-    let f32v = |v: &[f64]| -> Vec<f32> { v.iter().map(|x| *x as f32).collect() };
-
-    let gx = ctx.upload(&f32v(&x64), BATCH, IN).expect("x");
-    let gy = ctx.upload(&f32v(&y64), BATCH, 1).expect("y");
-    let gw1 = ctx.upload(&f32v(&w1_64), IN, HID).expect("w1");
-    let gb1 = ctx.upload(&f32v(&b1_64), 1, HID).expect("b1");
-    let gw2 = ctx.upload(&f32v(&w2_64), HID, 1).expect("w2");
-    let gb2 = ctx.upload(&f32v(&b2_64), 1, 1).expect("b2");
-
-    // Forward
-    let z1 = ctx.matmul_resident(&gx, &gw1).expect("z1");
-    let z1 = ctx.add_bias_resident(&z1, &gb1).expect("z1 bias");
-    let a1 = ctx.relu_resident(&z1).expect("a1");
-    let z2 = ctx.matmul_resident(&a1, &gw2).expect("z2");
-    let z2 = ctx.add_bias_resident(&z2, &gb2).expect("z2 bias");
-
-    // Backward
-    let dz2 = ctx.sigmoid_bce_grad_resident(&z2, &gy).expect("dz2");
-    let a1t = ctx.transpose_resident(&a1).expect("a1t");
-    let dw2 = ctx.matmul_resident(&a1t, &dz2).expect("dw2");
-    let db2 = ctx.column_sums_resident(&dz2).expect("db2");
-
-    let w2t = ctx.transpose_resident(&gw2).expect("w2t");
-    let da1 = ctx.matmul_resident(&dz2, &w2t).expect("da1");
-    let dz1 = ctx.relu_backward_resident(&z1, &da1).expect("dz1");
-
-    let xt = ctx.transpose_resident(&gx).expect("xt");
-    let dw1 = ctx.matmul_resident(&xt, &dz1).expect("dw1");
-    let db1 = ctx.column_sums_resident(&dz1).expect("db1");
-
-    let cmp = |name: &str, got: &GpuTensor, want: &[f64]| {
-        let g = ctx.read(got).expect("readback");
-        assert_eq!(g.len(), want.len(), "{name}: length");
-        for (i, (a, b)) in g.iter().zip(want).enumerate() {
-            let denom = (*b).abs().max(1e-6);
-            let rel = ((*a as f64) - b).abs() / denom;
-            assert!(
-                rel < 2e-3,
-                "{name}[{i}]: gpu {a:.8e} vs reference {b:.8e}, relative error {rel:.3e}"
-            );
-        }
-        println!("{name}: {} entries matched the f64 reference", g.len());
-    };
-
-    cmp("dw1", &dw1, &ref_dw1);
-    cmp("db1", &db1, &ref_db1);
-    cmp("dw2", &dw2, &ref_dw2);
-    cmp("db2", &db2, &ref_db2);
-}
-
-/// A gradient that is merely *proportional* to the truth passes a direction
-/// check but trains at the wrong effective learning rate, and a 1/batch scaling
-/// error is the usual way that happens. Comparing magnitudes catches it.
-#[test]
-fn the_gradient_is_scaled_by_the_batch_size_not_merely_proportional() {
-    let x = fill(BATCH * IN, 21);
-    let y: Vec<f64> = (0..BATCH).map(|i| (i % 2) as f64).collect();
-
-    let net = Ref {
-        w1: fill(IN * HID, 22),
-        b1: fill(HID, 23),
-        w2: fill(HID, 24),
-        b2: fill(1, 25),
-    };
-
-    let (_, _, _, db2) = net.grads(&x, &y);
-
-    // db2 is the mean of (p - y) over the batch, so it is bounded by 1.
-    assert!(
-        db2[0].abs() <= 1.0,
-        "db2 = {} exceeds 1, which means the 1/batch scaling is missing",
-        db2[0]
-    );
-}
-
-// ═══════════════════════════════════════════════════════════════════════════════
-// Two hidden layers
-//
-// Both training examples stack two ReLU layers; every check above uses one.
-// The distinction is not cosmetic. With a single hidden layer the gradient
-// reaching the input weights passes through exactly one ReLU gate, so an error
-// in how the gate composes with the chain rule -- gating the wrong tensor,
-// gating after the matmul instead of before, reusing the first layer's mask --
-// has nowhere to show up. Two layers is the smallest network where the
-// composition is exercised at all.
-// ═══════════════════════════════════════════════════════════════════════════════
-
-/// `x -> W1 -> +b1 -> relu -> W2 -> +b2 -> relu -> W3 -> +b3 -> sigmoid -> BCE`,
-/// the architecture `train_resident` actually trains.
-struct Ref2 {
-    w1: Vec<f64>, // [IN, HID]
-    b1: Vec<f64>, // [HID]
-    w2: Vec<f64>, // [HID, HID]
-    b2: Vec<f64>, // [HID]
-    w3: Vec<f64>, // [HID, 1]
-    b3: Vec<f64>, // [1]
-}
-
-struct Fwd2 {
-    z1: Vec<f64>,
-    a1: Vec<f64>,
-    z2: Vec<f64>,
-    a2: Vec<f64>,
+/// Per-layer pre-activations and activations, plus the output probabilities.
+struct Fwd {
+    z: Vec<Vec<f64>>,
+    a: Vec<Vec<f64>>,
     p: Vec<f64>,
 }
 
-impl Ref2 {
-    fn forward(&self, x: &[f64]) -> Fwd2 {
-        let mut z1 = vec![0.0; BATCH * HID];
-        for i in 0..BATCH {
-            for j in 0..HID {
-                let mut s = self.b1[j];
-                for k in 0..IN {
-                    s += x[i * IN + k] * self.w1[k * HID + j];
-                }
-                z1[i * HID + j] = s;
-            }
+impl Net {
+    fn new(rows: usize, dims: &[usize], head: Head, seed: u64) -> Self {
+        let layers = dims.len() - 1;
+        let mut w = Vec::with_capacity(layers);
+        let mut b = Vec::with_capacity(layers);
+        for l in 0..layers {
+            w.push(fill(dims[l] * dims[l + 1], seed + l as u64 * 7 + 1));
+            b.push(fill(dims[l + 1], seed + l as u64 * 7 + 2));
         }
-        let a1: Vec<f64> = z1.iter().map(|v| v.max(0.0)).collect();
-
-        let mut z2 = vec![0.0; BATCH * HID];
-        for i in 0..BATCH {
-            for j in 0..HID {
-                let mut s = self.b2[j];
-                for k in 0..HID {
-                    s += a1[i * HID + k] * self.w2[k * HID + j];
-                }
-                z2[i * HID + j] = s;
-            }
+        Self {
+            rows,
+            dims: dims.to_vec(),
+            w,
+            b,
+            head,
         }
-        let a2: Vec<f64> = z2.iter().map(|v| v.max(0.0)).collect();
-
-        let mut p = vec![0.0; BATCH];
-        for i in 0..BATCH {
-            let mut s = self.b3[0];
-            for j in 0..HID {
-                s += a2[i * HID + j] * self.w3[j];
-            }
-            p[i] = 1.0 / (1.0 + (-s).exp());
-        }
-
-        Fwd2 { z1, a1, z2, a2, p }
     }
 
+    fn layers(&self) -> usize {
+        self.dims.len() - 1
+    }
+
+    fn classes(&self) -> usize {
+        *self.dims.last().unwrap()
+    }
+
+    fn forward(&self, x: &[f64]) -> Fwd {
+        let mut z = Vec::with_capacity(self.layers());
+        let mut a = vec![x.to_vec()];
+
+        for l in 0..self.layers() {
+            let (fan_in, fan_out) = (self.dims[l], self.dims[l + 1]);
+            let input = &a[l];
+            let mut zl = vec![0.0; self.rows * fan_out];
+            for i in 0..self.rows {
+                for j in 0..fan_out {
+                    let mut s = self.b[l][j];
+                    for k in 0..fan_in {
+                        s += input[i * fan_in + k] * self.w[l][k * fan_out + j];
+                    }
+                    zl[i * fan_out + j] = s;
+                }
+            }
+            // Every layer but the last is followed by a ReLU; the last feeds
+            // the head.
+            if l + 1 < self.layers() {
+                a.push(zl.iter().map(|v| v.max(0.0)).collect());
+            }
+            z.push(zl);
+        }
+
+        let logits = z.last().unwrap();
+        let p = match self.head {
+            Head::Sigmoid => logits
+                .iter()
+                .map(|v| 1.0 / (1.0 + (-v).exp()))
+                .collect::<Vec<_>>(),
+            Head::Softmax => {
+                let c = self.classes();
+                let mut out = vec![0.0; self.rows * c];
+                for i in 0..self.rows {
+                    let row = &logits[i * c..(i + 1) * c];
+                    let mx = row.iter().cloned().fold(f64::NEG_INFINITY, f64::max);
+                    let sum: f64 = row.iter().map(|l| (l - mx).exp()).sum();
+                    for j in 0..c {
+                        out[i * c + j] = (row[j] - mx).exp() / sum;
+                    }
+                }
+                out
+            }
+        };
+
+        Fwd { z, a, p }
+    }
+
+    /// Mean loss. Both heads reduce to a mean over the batch, which is what
+    /// makes the fused gradient `(p - y) / rows` in either case.
     fn loss(&self, x: &[f64], y: &[f64]) -> f64 {
         let f = self.forward(x);
-        f.p.iter()
-            .zip(y)
-            .map(|(p, t)| {
-                let p = p.clamp(1e-12, 1.0 - 1e-12);
-                -(t * p.ln() + (1.0 - t) * (1.0 - p).ln())
-            })
-            .sum::<f64>()
-            / BATCH as f64
+        match self.head {
+            Head::Sigmoid => {
+                f.p.iter()
+                    .zip(y)
+                    .map(|(p, t)| {
+                        let p = p.clamp(1e-15, 1.0 - 1e-15);
+                        -(t * p.ln() + (1.0 - t) * (1.0 - p).ln())
+                    })
+                    .sum::<f64>()
+                    / self.rows as f64
+            }
+            Head::Softmax => {
+                let mut total = 0.0;
+                for i in 0..f.p.len() {
+                    if y[i] > 0.5 {
+                        total -= f.p[i].clamp(1e-15, 1.0).ln();
+                    }
+                }
+                total / self.rows as f64
+            }
+        }
     }
 
-    #[allow(clippy::type_complexity)]
-    fn grads(
-        &self,
-        x: &[f64],
-        y: &[f64],
-    ) -> (Vec<f64>, Vec<f64>, Vec<f64>, Vec<f64>, Vec<f64>, Vec<f64>) {
+    /// Analytic gradients, one entry per weight matrix and bias vector.
+    fn grads(&self, x: &[f64], y: &[f64]) -> (Vec<Vec<f64>>, Vec<Vec<f64>>) {
         let f = self.forward(x);
+        let layers = self.layers();
 
-        let dz3: Vec<f64> =
+        let mut dw = vec![Vec::new(); layers];
+        let mut db = vec![Vec::new(); layers];
+
+        // Both heads collapse to the same expression, which is the whole reason
+        // the kernels fuse them.
+        let mut dz: Vec<f64> =
             f.p.iter()
                 .zip(y)
-                .map(|(p, t)| (p - t) / BATCH as f64)
+                .map(|(p, t)| (p - t) / self.rows as f64)
                 .collect();
 
-        let mut dw3 = vec![0.0; HID];
-        for j in 0..HID {
-            for i in 0..BATCH {
-                dw3[j] += f.a2[i * HID + j] * dz3[i];
-            }
-        }
-        let db3 = vec![dz3.iter().sum::<f64>()];
+        for l in (0..layers).rev() {
+            let (fan_in, fan_out) = (self.dims[l], self.dims[l + 1]);
+            let input = &f.a[l];
 
-        // Second gate: uses z2, not z1, and not a2.
-        let mut dz2 = vec![0.0; BATCH * HID];
-        for i in 0..BATCH {
-            for j in 0..HID {
-                let gate = if f.z2[i * HID + j] > 0.0 { 1.0 } else { 0.0 };
-                dz2[i * HID + j] = dz3[i] * self.w3[j] * gate;
-            }
-        }
-
-        let mut dw2 = vec![0.0; HID * HID];
-        for k in 0..HID {
-            for j in 0..HID {
-                for i in 0..BATCH {
-                    dw2[k * HID + j] += f.a1[i * HID + k] * dz2[i * HID + j];
+            let mut dwl = vec![0.0; fan_in * fan_out];
+            for k in 0..fan_in {
+                for j in 0..fan_out {
+                    for i in 0..self.rows {
+                        dwl[k * fan_out + j] += input[i * fan_in + k] * dz[i * fan_out + j];
+                    }
                 }
             }
-        }
-        let mut db2 = vec![0.0; HID];
-        for j in 0..HID {
-            for i in 0..BATCH {
-                db2[j] += dz2[i * HID + j];
-            }
-        }
+            dw[l] = dwl;
 
-        // First gate: uses z1, and the incoming gradient is dz2 through W2.
-        let mut dz1 = vec![0.0; BATCH * HID];
-        for i in 0..BATCH {
-            for j in 0..HID {
-                let mut s = 0.0;
-                for k in 0..HID {
-                    s += dz2[i * HID + k] * self.w2[j * HID + k];
-                }
-                let gate = if f.z1[i * HID + j] > 0.0 { 1.0 } else { 0.0 };
-                dz1[i * HID + j] = s * gate;
-            }
-        }
-
-        let mut dw1 = vec![0.0; IN * HID];
-        for k in 0..IN {
-            for j in 0..HID {
-                for i in 0..BATCH {
-                    dw1[k * HID + j] += x[i * IN + k] * dz1[i * HID + j];
-                }
-            }
-        }
-        let mut db1 = vec![0.0; HID];
-        for j in 0..HID {
-            for i in 0..BATCH {
-                db1[j] += dz1[i * HID + j];
-            }
-        }
-
-        (dw1, db1, dw2, db2, dw3, db3)
-    }
-}
-
-/// Stage 1 for the stacked network.
-#[test]
-fn the_two_layer_reference_gradient_matches_central_differences() {
-    let x = fill(BATCH * IN, 91);
-    let y: Vec<f64> = (0..BATCH).map(|i| (i % 2) as f64).collect();
-
-    let mut net = Ref2 {
-        w1: fill(IN * HID, 92),
-        b1: fill(HID, 93),
-        w2: fill(HID * HID, 94),
-        b2: fill(HID, 95),
-        w3: fill(HID, 96),
-        b3: fill(1, 97),
-    };
-
-    let (dw1, db1, dw2, db2, dw3, db3) = net.grads(&x, &y);
-    let h = 1e-6;
-
-    // Both gates must sit clear of the kink, or a central difference straddles
-    // a point of non-differentiability and disagrees for a legitimate reason.
-    let f = net.forward(&x);
-    assert!(
-        f.z1.iter().chain(f.z2.iter()).all(|z| z.abs() > 1e-3),
-        "a pre-activation sits on a ReLU kink; reseed rather than loosen the tolerance"
-    );
-
-    let mut checked = 0;
-    for (which, analytic) in [
-        (0usize, &dw1),
-        (1, &db1),
-        (2, &dw2),
-        (3, &db2),
-        (4, &dw3),
-        (5, &db3),
-    ] {
-        for (idx, &a) in analytic.iter().enumerate() {
-            let orig = match which {
-                0 => net.w1[idx],
-                1 => net.b1[idx],
-                2 => net.w2[idx],
-                3 => net.b2[idx],
-                4 => net.w3[idx],
-                _ => net.b3[idx],
-            };
-            let set = |v: f64, n: &mut Ref2| match which {
-                0 => n.w1[idx] = v,
-                1 => n.b1[idx] = v,
-                2 => n.w2[idx] = v,
-                3 => n.b2[idx] = v,
-                4 => n.w3[idx] = v,
-                _ => n.b3[idx] = v,
-            };
-
-            set(orig + h, &mut net);
-            let up = net.loss(&x, &y);
-            set(orig - h, &mut net);
-            let down = net.loss(&x, &y);
-            set(orig, &mut net);
-
-            let fd = (up - down) / (2.0 * h);
-            let denom = a.abs().max(fd.abs()).max(1e-8);
-            let rel = (a - fd).abs() / denom;
-
-            assert!(
-                rel < 1e-5,
-                "group {which} index {idx}: analytic {a:.12e} vs finite diff {fd:.12e}, \
-                 relative error {rel:.3e}"
-            );
-            checked += 1;
-        }
-    }
-
-    let expected = IN * HID + HID + HID * HID + HID + HID + 1;
-    assert_eq!(checked, expected, "every parameter must be checked");
-    println!("stage 1 (two layers): {checked} parameters matched central differences");
-}
-
-/// Stage 2 for the stacked network: the exact operation sequence
-/// `train_resident` runs, compared against the verified f64 reference.
-#[test]
-fn the_gpu_two_layer_backward_matches_the_reference_gradients() {
-    let Some(ctx) = context() else { return };
-
-    let x64 = fill(BATCH * IN, 101);
-    let y64: Vec<f64> = (0..BATCH).map(|i| (i % 2) as f64).collect();
-    let w1_64 = fill(IN * HID, 102);
-    let b1_64 = fill(HID, 103);
-    let w2_64 = fill(HID * HID, 104);
-    let b2_64 = fill(HID, 105);
-    let w3_64 = fill(HID, 106);
-    let b3_64 = fill(1, 107);
-
-    let net = Ref2 {
-        w1: w1_64.clone(),
-        b1: b1_64.clone(),
-        w2: w2_64.clone(),
-        b2: b2_64.clone(),
-        w3: w3_64.clone(),
-        b3: b3_64.clone(),
-    };
-    let (r_dw1, r_db1, r_dw2, r_db2, r_dw3, r_db3) = net.grads(&x64, &y64);
-
-    let f32v = |v: &[f64]| -> Vec<f32> { v.iter().map(|x| *x as f32).collect() };
-
-    let gx = ctx.upload(&f32v(&x64), BATCH, IN).expect("x");
-    let gy = ctx.upload(&f32v(&y64), BATCH, 1).expect("y");
-    let gw1 = ctx.upload(&f32v(&w1_64), IN, HID).expect("w1");
-    let gb1 = ctx.upload(&f32v(&b1_64), 1, HID).expect("b1");
-    let gw2 = ctx.upload(&f32v(&w2_64), HID, HID).expect("w2");
-    let gb2 = ctx.upload(&f32v(&b2_64), 1, HID).expect("b2");
-    let gw3 = ctx.upload(&f32v(&w3_64), HID, 1).expect("w3");
-    let gb3 = ctx.upload(&f32v(&b3_64), 1, 1).expect("b3");
-
-    let z1 = ctx.matmul_resident(&gx, &gw1).expect("z1");
-    let z1 = ctx.add_bias_resident(&z1, &gb1).expect("z1b");
-    let a1 = ctx.relu_resident(&z1).expect("a1");
-    let z2 = ctx.matmul_resident(&a1, &gw2).expect("z2");
-    let z2 = ctx.add_bias_resident(&z2, &gb2).expect("z2b");
-    let a2 = ctx.relu_resident(&z2).expect("a2");
-    let z3 = ctx.matmul_resident(&a2, &gw3).expect("z3");
-    let z3 = ctx.add_bias_resident(&z3, &gb3).expect("z3b");
-
-    let dz3 = ctx.sigmoid_bce_grad_resident(&z3, &gy).expect("dz3");
-    let a2t = ctx.transpose_resident(&a2).expect("a2t");
-    let dw3 = ctx.matmul_resident(&a2t, &dz3).expect("dw3");
-    let db3 = ctx.column_sums_resident(&dz3).expect("db3");
-
-    let w3t = ctx.transpose_resident(&gw3).expect("w3t");
-    let da2 = ctx.matmul_resident(&dz3, &w3t).expect("da2");
-    let dz2 = ctx.relu_backward_resident(&z2, &da2).expect("dz2");
-
-    let a1t = ctx.transpose_resident(&a1).expect("a1t");
-    let dw2 = ctx.matmul_resident(&a1t, &dz2).expect("dw2");
-    let db2 = ctx.column_sums_resident(&dz2).expect("db2");
-
-    let w2t = ctx.transpose_resident(&gw2).expect("w2t");
-    let da1 = ctx.matmul_resident(&dz2, &w2t).expect("da1");
-    let dz1 = ctx.relu_backward_resident(&z1, &da1).expect("dz1");
-
-    let xt = ctx.transpose_resident(&gx).expect("xt");
-    let dw1 = ctx.matmul_resident(&xt, &dz1).expect("dw1");
-    let db1 = ctx.column_sums_resident(&dz1).expect("db1");
-
-    let cmp = |name: &str, got: &GpuTensor, want: &[f64]| {
-        let g = ctx.read(got).expect("readback");
-        assert_eq!(g.len(), want.len(), "{name}: length");
-        for (i, (a, b)) in g.iter().zip(want).enumerate() {
-            let denom = (*b).abs().max(1e-6);
-            let rel = ((*a as f64) - b).abs() / denom;
-            assert!(
-                rel < 2e-3,
-                "{name}[{i}]: gpu {a:.8e} vs reference {b:.8e}, relative error {rel:.3e}"
-            );
-        }
-        println!("{name}: {} entries matched the f64 reference", g.len());
-    };
-
-    cmp("dw1", &dw1, &r_dw1);
-    cmp("db1", &db1, &r_db1);
-    cmp("dw2", &dw2, &r_dw2);
-    cmp("db2", &db2, &r_db2);
-    cmp("dw3", &dw3, &r_dw3);
-    cmp("db3", &db3, &r_db3);
-}
-
-// ═══════════════════════════════════════════════════════════════════════════════
-// Tile boundaries inside the gradient path
-//
-// Every check above runs batch 5, input 3, hidden 4 -- all below the kernel's
-// 16-wide tile, so no gradient matmul ever spans more than one tile and no
-// dimension has a partial tail tile.
-//
-// That is a demonstrated blind spot rather than a hypothetical one. A mutation
-// run found `matmul_tiled` missing its second barrier passed every test while
-// the largest case was 64x64x64, and failed once the case grew to 128x512x128.
-// A suite whose sizes are all small does not test less; it reports a clean pass
-// on a kernel that computes the wrong thing.
-//
-// These sizes are chosen so every matmul in both passes spans several tiles and
-// leaves a partial tail: 33 = 2*16+1, 17 = 16+1, 48 = 3*16.
-// ═══════════════════════════════════════════════════════════════════════════════
-
-const BIG_BATCH: usize = 33;
-const BIG_IN: usize = 17;
-const BIG_HID: usize = 48;
-
-/// One hidden layer with runtime dimensions, so the same reference can be run
-/// at a size that crosses tile boundaries.
-struct RefDyn {
-    rows: usize,
-    ins: usize,
-    hid: usize,
-    w1: Vec<f64>,
-    b1: Vec<f64>,
-    w2: Vec<f64>,
-    b2: Vec<f64>,
-}
-
-impl RefDyn {
-    fn forward(&self, x: &[f64]) -> (Vec<f64>, Vec<f64>, Vec<f64>) {
-        let mut z1 = vec![0.0; self.rows * self.hid];
-        for i in 0..self.rows {
-            for j in 0..self.hid {
-                let mut s = self.b1[j];
-                for k in 0..self.ins {
-                    s += x[i * self.ins + k] * self.w1[k * self.hid + j];
-                }
-                z1[i * self.hid + j] = s;
-            }
-        }
-        let a1: Vec<f64> = z1.iter().map(|v| v.max(0.0)).collect();
-
-        let mut p = vec![0.0; self.rows];
-        for i in 0..self.rows {
-            let mut s = self.b2[0];
-            for j in 0..self.hid {
-                s += a1[i * self.hid + j] * self.w2[j];
-            }
-            p[i] = 1.0 / (1.0 + (-s).exp());
-        }
-        (z1, a1, p)
-    }
-
-    fn loss(&self, x: &[f64], y: &[f64]) -> f64 {
-        let (_, _, p) = self.forward(x);
-        p.iter()
-            .zip(y)
-            .map(|(p, t)| {
-                let p = p.clamp(1e-12, 1.0 - 1e-12);
-                -(t * p.ln() + (1.0 - t) * (1.0 - p).ln())
-            })
-            .sum::<f64>()
-            / self.rows as f64
-    }
-
-    fn grads(&self, x: &[f64], y: &[f64]) -> (Vec<f64>, Vec<f64>, Vec<f64>, Vec<f64>) {
-        let (z1, a1, p) = self.forward(x);
-
-        let dz2: Vec<f64> = p
-            .iter()
-            .zip(y)
-            .map(|(p, t)| (p - t) / self.rows as f64)
-            .collect();
-
-        let mut dw2 = vec![0.0; self.hid];
-        for j in 0..self.hid {
-            for i in 0..self.rows {
-                dw2[j] += a1[i * self.hid + j] * dz2[i];
-            }
-        }
-        let db2 = vec![dz2.iter().sum::<f64>()];
-
-        let mut dz1 = vec![0.0; self.rows * self.hid];
-        for i in 0..self.rows {
-            for j in 0..self.hid {
-                let gate = if z1[i * self.hid + j] > 0.0 { 1.0 } else { 0.0 };
-                dz1[i * self.hid + j] = dz2[i] * self.w2[j] * gate;
-            }
-        }
-
-        let mut dw1 = vec![0.0; self.ins * self.hid];
-        for k in 0..self.ins {
-            for j in 0..self.hid {
+            let mut dbl = vec![0.0; fan_out];
+            for j in 0..fan_out {
                 for i in 0..self.rows {
-                    dw1[k * self.hid + j] += x[i * self.ins + k] * dz1[i * self.hid + j];
+                    dbl[j] += dz[i * fan_out + j];
                 }
             }
-        }
-        let mut db1 = vec![0.0; self.hid];
-        for j in 0..self.hid {
+            db[l] = dbl;
+
+            if l == 0 {
+                break;
+            }
+
+            // Propagate through W[l], then gate on the *previous* layer's
+            // pre-activation. Gating on the wrong tensor here is the defect the
+            // stacked fixtures exist to catch.
+            let prev_out = self.dims[l];
+            let mut prev_dz = vec![0.0; self.rows * prev_out];
             for i in 0..self.rows {
-                db1[j] += dz1[i * self.hid + j];
+                for k in 0..prev_out {
+                    let mut s = 0.0;
+                    for j in 0..fan_out {
+                        s += dz[i * fan_out + j] * self.w[l][k * fan_out + j];
+                    }
+                    let gate = if f.z[l - 1][i * prev_out + k] > 0.0 {
+                        1.0
+                    } else {
+                        0.0
+                    };
+                    prev_dz[i * prev_out + k] = s * gate;
+                }
             }
+            dz = prev_dz;
         }
 
-        (dw1, db1, dw2, db2)
+        (dw, db)
     }
 }
 
-fn big_fixture() -> (RefDyn, Vec<f64>, Vec<f64>) {
-    let x = fill(BIG_BATCH * BIG_IN, 121);
-    let y: Vec<f64> = (0..BIG_BATCH).map(|i| (i % 2) as f64).collect();
-    let net = RefDyn {
-        rows: BIG_BATCH,
-        ins: BIG_IN,
-        hid: BIG_HID,
-        w1: fill(BIG_IN * BIG_HID, 122),
-        b1: fill(BIG_HID, 123),
-        w2: fill(BIG_HID, 124),
-        b2: fill(1, 125),
-    };
-    (net, x, y)
-}
-
-/// Stage 1 at tile-crossing size, on a sampled subset.
-///
-/// The full sweep is 865 parameters and two forward passes each. Every one is
-/// affordable in release and none of them is in debug, where these tests
-/// normally run, so a fixed stride samples the space instead. The stride is
-/// deterministic, and it covers each parameter group.
-#[test]
-fn the_reference_gradient_holds_at_tile_crossing_sizes() {
-    let (mut net, x, y) = big_fixture();
-    let (dw1, db1, dw2, db2) = net.grads(&x, &y);
-
-    let (z1, _, _) = net.forward(&x);
-    assert!(
-        z1.iter().all(|z| z.abs() > 1e-4),
-        "a pre-activation sits on the ReLU kink at the large size"
-    );
-
-    let h = 1e-6;
-    let mut checked = 0;
-
-    for (which, analytic) in [(0usize, &dw1), (1, &db1), (2, &dw2), (3, &db2)] {
-        let stride = (analytic.len() / 8).max(1);
-        for idx in (0..analytic.len()).step_by(stride) {
-            let a = analytic[idx];
-            let orig = match which {
-                0 => net.w1[idx],
-                1 => net.b1[idx],
-                2 => net.w2[idx],
-                _ => net.b2[idx],
-            };
-            let set = |v: f64, n: &mut RefDyn| match which {
-                0 => n.w1[idx] = v,
-                1 => n.b1[idx] = v,
-                2 => n.w2[idx] = v,
-                _ => n.b2[idx] = v,
-            };
-
-            set(orig + h, &mut net);
-            let up = net.loss(&x, &y);
-            set(orig - h, &mut net);
-            let down = net.loss(&x, &y);
-            set(orig, &mut net);
-
-            let fd = (up - down) / (2.0 * h);
-            let denom = a.abs().max(fd.abs()).max(1e-8);
-            let rel = (a - fd).abs() / denom;
-
-            assert!(
-                rel < 1e-5,
-                "group {which} index {idx}: analytic {a:.12e} vs finite diff {fd:.12e}, \
-                 relative error {rel:.3e}"
-            );
-            checked += 1;
+/// Targets: alternating labels for the sigmoid head, one-hot for softmax.
+fn targets(net: &Net) -> Vec<f64> {
+    match net.head {
+        Head::Sigmoid => (0..net.rows).map(|i| (i % 2) as f64).collect(),
+        Head::Softmax => {
+            let c = net.classes();
+            let mut out = vec![0.0; net.rows * c];
+            for i in 0..net.rows {
+                out[i * c + (i % c)] = 1.0;
+            }
+            out
         }
     }
-
-    assert!(checked >= 20, "sampled only {checked} parameters");
-    println!("stage 1 (tile-crossing): {checked} sampled parameters matched");
 }
 
-/// Stage 2 at tile-crossing size: the full gradient, every entry.
+/// Stage 1: analytic gradients against central differences.
 ///
-/// This is the case the small fixtures cannot produce. Each matmul in the
-/// backward pass now spans several tiles with a partial tail, which is where a
-/// tiling defect lives.
-#[test]
-fn the_gpu_gradient_matches_the_reference_at_tile_crossing_sizes() {
-    let Some(ctx) = context() else { return };
+/// Sweeps every parameter when the network is small and samples on a fixed
+/// stride when it is not. The full sweep at the tile-crossing sizes is
+/// thousands of parameters at two forward passes each, which is affordable in
+/// release and not in debug, where these tests normally run.
+///
+/// Parameters near the ReLU kink are not skipped. The fixture is asserted clear
+/// of it instead, so a seed that drifts onto a kink fails loudly rather than
+/// quietly reducing what is checked.
+fn stage1(label: &str, rows: usize, dims: &[usize], head: Head, seed: u64, max_checks: usize) {
+    let mut net = Net::new(rows, dims, head, seed);
+    let x = fill(rows * dims[0], seed);
+    let y = targets(&net);
 
-    let (net, x64, y64) = big_fixture();
-    let (r_dw1, r_db1, r_dw2, r_db2) = net.grads(&x64, &y64);
-
-    let f32v = |v: &[f64]| -> Vec<f32> { v.iter().map(|x| *x as f32).collect() };
-
-    let gx = ctx.upload(&f32v(&x64), BIG_BATCH, BIG_IN).expect("x");
-    let gy = ctx.upload(&f32v(&y64), BIG_BATCH, 1).expect("y");
-    let gw1 = ctx.upload(&f32v(&net.w1), BIG_IN, BIG_HID).expect("w1");
-    let gb1 = ctx.upload(&f32v(&net.b1), 1, BIG_HID).expect("b1");
-    let gw2 = ctx.upload(&f32v(&net.w2), BIG_HID, 1).expect("w2");
-    let gb2 = ctx.upload(&f32v(&net.b2), 1, 1).expect("b2");
-
-    let z1 = ctx.matmul_resident(&gx, &gw1).expect("z1");
-    let z1 = ctx.add_bias_resident(&z1, &gb1).expect("z1b");
-    let a1 = ctx.relu_resident(&z1).expect("a1");
-    let z2 = ctx.matmul_resident(&a1, &gw2).expect("z2");
-    let z2 = ctx.add_bias_resident(&z2, &gb2).expect("z2b");
-
-    let dz2 = ctx.sigmoid_bce_grad_resident(&z2, &gy).expect("dz2");
-    let a1t = ctx.transpose_resident(&a1).expect("a1t");
-    let dw2 = ctx.matmul_resident(&a1t, &dz2).expect("dw2");
-    let db2 = ctx.column_sums_resident(&dz2).expect("db2");
-
-    let w2t = ctx.transpose_resident(&gw2).expect("w2t");
-    let da1 = ctx.matmul_resident(&dz2, &w2t).expect("da1");
-    let dz1 = ctx.relu_backward_resident(&z1, &da1).expect("dz1");
-
-    let xt = ctx.transpose_resident(&gx).expect("xt");
-    let dw1 = ctx.matmul_resident(&xt, &dz1).expect("dw1");
-    let db1 = ctx.column_sums_resident(&dz1).expect("db1");
-
-    // Looser than the small fixtures because the reduction is now 33 terms deep
-    // instead of 5, so f32 accumulation drifts further from the f64 reference.
+    // A central difference is only invalid if perturbing the parameter flips a
+    // ReLU gate. Perturbing one weight by `h` moves a pre-activation by about
+    // `h * |input|`, which for `h = 1e-6` and inputs in [-0.5, 0.5] is under
+    // 1e-6. The guard sits an order of magnitude above that.
     //
-    // Set from the observed worst case of 6.9e-5 with roughly an order of
-    // magnitude of headroom, not picked for comfort. The first draft used 1e-2,
-    // which is 145 times the observed error and would have accepted a gradient
-    // wrong by more than a percent -- a tolerance that loose is not a check,
-    // it is a formality that passes.
-    let tol = 1e-3;
+    // It was 1e-4 initially, which is 200 times the perturbation and rejected
+    // seeds that were perfectly usable. With 1584 pre-activations in the larger
+    // fixtures, a bound that strict fails on most seeds -- and reseeding until
+    // an over-strict guard passes is choosing the fixture to fit the check
+    // rather than the check to fit the maths.
+    const KINK_MARGIN: f64 = 1e-5;
 
-    let cmp = |name: &str, got: &GpuTensor, want: &[f64]| {
-        let g = ctx.read(got).expect("readback");
-        assert_eq!(g.len(), want.len(), "{name}: length");
-        let mut worst = 0.0f64;
-        for (i, (a, b)) in g.iter().zip(want).enumerate() {
-            let denom = (*b).abs().max(1e-5);
-            let rel = ((*a as f64) - b).abs() / denom;
-            worst = worst.max(rel);
-            assert!(
-                rel < tol,
-                "{name}[{i}]: gpu {a:.8e} vs reference {b:.8e}, relative error {rel:.3e}"
-            );
-        }
-        println!(
-            "{name}: {} entries, worst relative error {worst:.3e}",
-            g.len()
+    let f = net.forward(&x);
+    for (l, zl) in f.z.iter().enumerate().take(net.layers() - 1) {
+        let closest = zl.iter().map(|z| z.abs()).fold(f64::INFINITY, f64::min);
+        assert!(
+            closest > KINK_MARGIN,
+            "{label}: layer {l} has a pre-activation {closest:.3e} from the ReLU \
+             kink, inside the {KINK_MARGIN:.0e} margin; reseed rather than \
+             loosen the gradient tolerance"
         );
-    };
-
-    cmp("dw1", &dw1, &r_dw1);
-    cmp("db1", &db1, &r_db1);
-    cmp("dw2", &dw2, &r_dw2);
-    cmp("db2", &db2, &r_db2);
-}
-
-// ═══════════════════════════════════════════════════════════════════════════════
-// Softmax and categorical cross-entropy
-//
-// The binary path above shares no code with this one past the matmuls: a
-// different output non-linearity, a different loss, and a different fused
-// gradient kernel. Verifying one says nothing about the other, so the whole
-// staged check is repeated rather than assumed to carry over.
-// ═══════════════════════════════════════════════════════════════════════════════
-
-const CLASSES: usize = 3;
-
-/// `x -> W1 -> +b1 -> relu -> W2 -> +b2 -> softmax -> mean categorical CE`.
-struct RefMc {
-    w1: Vec<f64>, // [IN, HID]
-    b1: Vec<f64>, // [HID]
-    w2: Vec<f64>, // [HID, CLASSES]
-    b2: Vec<f64>, // [CLASSES]
-}
-
-impl RefMc {
-    /// Returns `(z1, a1, probabilities)`.
-    fn forward(&self, x: &[f64]) -> (Vec<f64>, Vec<f64>, Vec<f64>) {
-        let mut z1 = vec![0.0; BATCH * HID];
-        for i in 0..BATCH {
-            for j in 0..HID {
-                let mut s = self.b1[j];
-                for k in 0..IN {
-                    s += x[i * IN + k] * self.w1[k * HID + j];
-                }
-                z1[i * HID + j] = s;
-            }
-        }
-
-        let a1: Vec<f64> = z1.iter().map(|v| v.max(0.0)).collect();
-
-        let mut p = vec![0.0; BATCH * CLASSES];
-        for i in 0..BATCH {
-            let mut logits = [0.0f64; CLASSES];
-            for (c, slot) in logits.iter_mut().enumerate() {
-                let mut s = self.b2[c];
-                for j in 0..HID {
-                    s += a1[i * HID + j] * self.w2[j * CLASSES + c];
-                }
-                *slot = s;
-            }
-
-            // Same max subtraction as the kernel, for the same reason.
-            let mx = logits.iter().cloned().fold(f64::NEG_INFINITY, f64::max);
-            let sum: f64 = logits.iter().map(|l| (l - mx).exp()).sum();
-            for c in 0..CLASSES {
-                p[i * CLASSES + c] = (logits[c] - mx).exp() / sum;
-            }
-        }
-
-        (z1, a1, p)
     }
 
-    /// Mean categorical cross-entropy against one-hot targets.
-    fn loss(&self, x: &[f64], y: &[f64]) -> f64 {
-        let (_, _, p) = self.forward(x);
-        let mut total = 0.0;
-        for i in 0..BATCH {
-            for c in 0..CLASSES {
-                if y[i * CLASSES + c] > 0.5 {
-                    total -= p[i * CLASSES + c].clamp(1e-15, 1.0).ln();
-                }
-            }
-        }
-        total / BATCH as f64
-    }
-
-    fn grads(&self, x: &[f64], y: &[f64]) -> (Vec<f64>, Vec<f64>, Vec<f64>, Vec<f64>) {
-        let (z1, a1, p) = self.forward(x);
-
-        // Fused softmax + cross-entropy derivative, matching softmax_xent_grad.
-        let dz2: Vec<f64> = (0..BATCH * CLASSES)
-            .map(|i| (p[i] - y[i]) / BATCH as f64)
-            .collect();
-
-        let mut dw2 = vec![0.0; HID * CLASSES];
-        for j in 0..HID {
-            for c in 0..CLASSES {
-                for i in 0..BATCH {
-                    dw2[j * CLASSES + c] += a1[i * HID + j] * dz2[i * CLASSES + c];
-                }
-            }
-        }
-
-        let mut db2 = vec![0.0; CLASSES];
-        for c in 0..CLASSES {
-            for i in 0..BATCH {
-                db2[c] += dz2[i * CLASSES + c];
-            }
-        }
-
-        let mut dz1 = vec![0.0; BATCH * HID];
-        for i in 0..BATCH {
-            for j in 0..HID {
-                let mut s = 0.0;
-                for c in 0..CLASSES {
-                    s += dz2[i * CLASSES + c] * self.w2[j * CLASSES + c];
-                }
-                let gate = if z1[i * HID + j] > 0.0 { 1.0 } else { 0.0 };
-                dz1[i * HID + j] = s * gate;
-            }
-        }
-
-        let mut dw1 = vec![0.0; IN * HID];
-        for k in 0..IN {
-            for j in 0..HID {
-                for i in 0..BATCH {
-                    dw1[k * HID + j] += x[i * IN + k] * dz1[i * HID + j];
-                }
-            }
-        }
-
-        let mut db1 = vec![0.0; HID];
-        for j in 0..HID {
-            for i in 0..BATCH {
-                db1[j] += dz1[i * HID + j];
-            }
-        }
-
-        (dw1, db1, dw2, db2)
-    }
-}
-
-fn one_hot(labels: &[usize]) -> Vec<f64> {
-    let mut out = vec![0.0; labels.len() * CLASSES];
-    for (i, &c) in labels.iter().enumerate() {
-        out[i * CLASSES + c] = 1.0;
-    }
-    out
-}
-
-/// Stage 1 for the multi-class path.
-#[test]
-fn the_reference_softmax_gradient_matches_central_differences() {
-    let x = fill(BATCH * IN, 51);
-    let y = one_hot(&(0..BATCH).map(|i| i % CLASSES).collect::<Vec<_>>());
-
-    let mut net = RefMc {
-        w1: fill(IN * HID, 52),
-        b1: fill(HID, 53),
-        w2: fill(HID * CLASSES, 54),
-        b2: fill(CLASSES, 55),
-    };
-
-    let (dw1, db1, dw2, db2) = net.grads(&x, &y);
+    let (dw, db) = net.grads(&x, &y);
     let h = 1e-6;
 
-    let (z1, _, _) = net.forward(&x);
-    assert!(
-        z1.iter().all(|z| z.abs() > 1e-3),
-        "a pre-activation sits on the ReLU kink; reseed rather than loosen the tolerance"
-    );
+    let total: usize =
+        dw.iter().map(|v| v.len()).sum::<usize>() + db.iter().map(|v| v.len()).sum::<usize>();
+    let stride = (total / max_checks).max(1);
 
     let mut checked = 0;
-    for (which, analytic) in [(0usize, &dw1), (1, &db1), (2, &dw2), (3, &db2)] {
-        for (idx, &a) in analytic.iter().enumerate() {
-            let orig = match which {
-                0 => net.w1[idx],
-                1 => net.b1[idx],
-                2 => net.w2[idx],
-                _ => net.b2[idx],
-            };
+    let mut seen = 0;
 
-            let set = |v: f64, net: &mut RefMc| match which {
-                0 => net.w1[idx] = v,
-                1 => net.b1[idx] = v,
-                2 => net.w2[idx] = v,
-                _ => net.b2[idx] = v,
-            };
+    for l in 0..net.layers() {
+        for (is_bias, analytic) in [(false, &dw[l]), (true, &db[l])] {
+            for idx in 0..analytic.len() {
+                seen += 1;
+                if seen % stride != 0 {
+                    continue;
+                }
 
-            set(orig + h, &mut net);
-            let up = net.loss(&x, &y);
-            set(orig - h, &mut net);
-            let down = net.loss(&x, &y);
-            set(orig, &mut net);
+                let a = analytic[idx];
+                let orig = if is_bias {
+                    net.b[l][idx]
+                } else {
+                    net.w[l][idx]
+                };
 
-            let fd = (up - down) / (2.0 * h);
-            let denom = a.abs().max(fd.abs()).max(1e-8);
-            let rel = (a - fd).abs() / denom;
+                if is_bias {
+                    net.b[l][idx] = orig + h;
+                } else {
+                    net.w[l][idx] = orig + h;
+                }
+                let up = net.loss(&x, &y);
 
-            assert!(
-                rel < 1e-5,
-                "group {which} index {idx}: analytic {a:.12e} vs finite diff {fd:.12e}, \
-                 relative error {rel:.3e}"
-            );
-            checked += 1;
+                if is_bias {
+                    net.b[l][idx] = orig - h;
+                } else {
+                    net.w[l][idx] = orig - h;
+                }
+                let down = net.loss(&x, &y);
+
+                if is_bias {
+                    net.b[l][idx] = orig;
+                } else {
+                    net.w[l][idx] = orig;
+                }
+
+                let fd = (up - down) / (2.0 * h);
+                let denom = a.abs().max(fd.abs()).max(1e-8);
+                let rel = (a - fd).abs() / denom;
+
+                assert!(
+                    rel < 1e-5,
+                    "{label}: layer {l} {} index {idx}: analytic {a:.12e} vs \
+                     finite diff {fd:.12e}, relative error {rel:.3e}",
+                    if is_bias { "bias" } else { "weight" }
+                );
+                checked += 1;
+            }
         }
     }
 
-    assert_eq!(
-        checked,
-        IN * HID + HID + HID * CLASSES + CLASSES,
-        "every parameter must be checked"
+    assert!(
+        checked >= 10,
+        "{label}: only {checked} parameters checked out of {total}"
     );
-    println!("stage 1 (softmax): {checked} parameters matched central differences");
+    println!("{label}: stage 1 matched {checked} of {total} parameters");
 }
 
-/// Stage 2 for the multi-class path: the GPU kernels against the verified
-/// f64 reference.
-#[test]
-fn the_gpu_softmax_backward_matches_the_reference_gradients() {
-    let Some(ctx) = context() else { return };
-
-    let x64 = fill(BATCH * IN, 61);
-    let y64 = one_hot(&(0..BATCH).map(|i| i % CLASSES).collect::<Vec<_>>());
-    let w1_64 = fill(IN * HID, 62);
-    let b1_64 = fill(HID, 63);
-    let w2_64 = fill(HID * CLASSES, 64);
-    let b2_64 = fill(CLASSES, 65);
-
-    let net = RefMc {
-        w1: w1_64.clone(),
-        b1: b1_64.clone(),
-        w2: w2_64.clone(),
-        b2: b2_64.clone(),
-    };
-    let (ref_dw1, ref_db1, ref_dw2, ref_db2) = net.grads(&x64, &y64);
+/// Stage 2: the GPU kernels against the verified f64 reference, running the
+/// same operation sequence the training examples run.
+fn stage2(
+    ctx: &GpuContext,
+    label: &str,
+    rows: usize,
+    dims: &[usize],
+    head: Head,
+    seed: u64,
+    tol: f64,
+) {
+    let net = Net::new(rows, dims, head, seed);
+    let x64 = fill(rows * dims[0], seed);
+    let y64 = targets(&net);
+    let (r_dw, r_db) = net.grads(&x64, &y64);
 
     let f32v = |v: &[f64]| -> Vec<f32> { v.iter().map(|x| *x as f32).collect() };
+    let layers = net.layers();
 
-    let gx = ctx.upload(&f32v(&x64), BATCH, IN).expect("x");
-    let gy = ctx.upload(&f32v(&y64), BATCH, CLASSES).expect("y");
-    let gw1 = ctx.upload(&f32v(&w1_64), IN, HID).expect("w1");
-    let gb1 = ctx.upload(&f32v(&b1_64), 1, HID).expect("b1");
-    let gw2 = ctx.upload(&f32v(&w2_64), HID, CLASSES).expect("w2");
-    let gb2 = ctx.upload(&f32v(&b2_64), 1, CLASSES).expect("b2");
+    let gy = ctx.upload(&f32v(&y64), rows, net.classes()).expect("y");
 
-    let z1 = ctx.matmul_resident(&gx, &gw1).expect("z1");
-    let z1 = ctx.add_bias_resident(&z1, &gb1).expect("z1b");
-    let a1 = ctx.relu_resident(&z1).expect("a1");
-    let z2 = ctx.matmul_resident(&a1, &gw2).expect("z2");
-    let z2 = ctx.add_bias_resident(&z2, &gb2).expect("z2b");
+    let gw: Vec<GpuTensor> = (0..layers)
+        .map(|l| {
+            ctx.upload(&f32v(&net.w[l]), dims[l], dims[l + 1])
+                .expect("w")
+        })
+        .collect();
+    let gb: Vec<GpuTensor> = (0..layers)
+        .map(|l| ctx.upload(&f32v(&net.b[l]), 1, dims[l + 1]).expect("b"))
+        .collect();
 
-    let dz2 = ctx.softmax_xent_grad_resident(&z2, &gy).expect("dz2");
-    let a1t = ctx.transpose_resident(&a1).expect("a1t");
-    let dw2 = ctx.matmul_resident(&a1t, &dz2).expect("dw2");
-    let db2 = ctx.column_sums_resident(&dz2).expect("db2");
+    // Forward, keeping each layer's pre-activation and input for the backward.
+    let mut z: Vec<GpuTensor> = Vec::with_capacity(layers);
+    let mut a: Vec<GpuTensor> = Vec::with_capacity(layers);
+    let mut cur = ctx.upload(&f32v(&x64), rows, dims[0]).expect("a0");
 
-    let w2t = ctx.transpose_resident(&gw2).expect("w2t");
-    let da1 = ctx.matmul_resident(&dz2, &w2t).expect("da1");
-    let dz1 = ctx.relu_backward_resident(&z1, &da1).expect("dz1");
-
-    let xt = ctx.transpose_resident(&gx).expect("xt");
-    let dw1 = ctx.matmul_resident(&xt, &dz1).expect("dw1");
-    let db1 = ctx.column_sums_resident(&dz1).expect("db1");
-
-    let cmp = |name: &str, got: &GpuTensor, want: &[f64]| {
-        let g = ctx.read(got).expect("readback");
-        assert_eq!(g.len(), want.len(), "{name}: length");
-        for (i, (a, b)) in g.iter().zip(want).enumerate() {
-            let denom = (*b).abs().max(1e-6);
-            let rel = ((*a as f64) - b).abs() / denom;
-            assert!(
-                rel < 2e-3,
-                "{name}[{i}]: gpu {a:.8e} vs reference {b:.8e}, relative error {rel:.3e}"
-            );
+    for l in 0..layers {
+        let zl = ctx.matmul_resident(&cur, &gw[l]).expect("z");
+        let zl = ctx.add_bias_resident(&zl, &gb[l]).expect("zb");
+        a.push(cur);
+        if l + 1 < layers {
+            cur = ctx.relu_resident(&zl).expect("relu");
+        } else {
+            cur = ctx.upload(&[0.0], 1, 1).expect("placeholder");
         }
-        println!("{name}: {} entries matched the f64 reference", g.len());
+        z.push(zl);
+    }
+
+    // Backward.
+    let mut dz = match head {
+        Head::Sigmoid | Head::Softmax => {
+            let logits = z.last().unwrap();
+            if head == Head::Sigmoid {
+                ctx.sigmoid_bce_grad_resident(logits, &gy).expect("dz")
+            } else {
+                ctx.softmax_xent_grad_resident(logits, &gy).expect("dz")
+            }
+        }
     };
 
-    cmp("dw1", &dw1, &ref_dw1);
-    cmp("db1", &db1, &ref_db1);
-    cmp("dw2", &dw2, &ref_dw2);
-    cmp("db2", &db2, &ref_db2);
+    let mut got_dw: Vec<Vec<f32>> = vec![Vec::new(); layers];
+    let mut got_db: Vec<Vec<f32>> = vec![Vec::new(); layers];
+
+    for l in (0..layers).rev() {
+        let at = ctx.transpose_resident(&a[l]).expect("a^T");
+        let dwl = ctx.matmul_resident(&at, &dz).expect("dw");
+        let dbl = ctx.column_sums_resident(&dz).expect("db");
+
+        got_dw[l] = ctx.read(&dwl).expect("read dw");
+        got_db[l] = ctx.read(&dbl).expect("read db");
+
+        if l == 0 {
+            break;
+        }
+
+        let wt = ctx.transpose_resident(&gw[l]).expect("w^T");
+        let da = ctx.matmul_resident(&dz, &wt).expect("da");
+        dz = ctx.relu_backward_resident(&z[l - 1], &da).expect("dz");
+    }
+
+    let mut worst = 0.0f64;
+    let mut entries = 0;
+
+    for l in 0..layers {
+        for (name, got, want) in [("dw", &got_dw[l], &r_dw[l]), ("db", &got_db[l], &r_db[l])] {
+            assert_eq!(got.len(), want.len(), "{label}: layer {l} {name} length");
+            for (i, (g, w)) in got.iter().zip(want).enumerate() {
+                let denom = w.abs().max(1e-5);
+                let rel = ((*g as f64) - w).abs() / denom;
+                worst = worst.max(rel);
+                entries += 1;
+                assert!(
+                    rel < tol,
+                    "{label}: layer {l} {name}[{i}]: gpu {g:.8e} vs reference \
+                     {w:.8e}, relative error {rel:.3e}"
+                );
+            }
+        }
+    }
+
+    println!("{label}: stage 2 matched {entries} entries, worst relative error {worst:.3e}");
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// The matrix
+//
+// Depth x head x size. Every row was previously a separate transcription of the
+// chain rule; the last two rows did not exist at all, because writing a fifth
+// and sixth reference by hand was not worth it.
+//
+// The tile-crossing dimensions are deliberate: 33 = 2*16+1, 17 = 16+1,
+// 48 = 3*16, so every matmul spans several of the kernel's 16-wide tiles and
+// leaves a partial tail. A mutation run showed the suite reports a clean pass on
+// a kernel with a data race when every case fits inside one tile.
+// ═══════════════════════════════════════════════════════════════════════════════
+
+#[test]
+fn one_layer_sigmoid_small() {
+    stage1("1-layer sigmoid 5x3x4", 5, &[3, 4, 1], Head::Sigmoid, 1, 64);
+    if let Some(ctx) = context() {
+        stage2(
+            &ctx,
+            "1-layer sigmoid 5x3x4",
+            5,
+            &[3, 4, 1],
+            Head::Sigmoid,
+            1,
+            2e-3,
+        );
+    }
+}
+
+#[test]
+fn two_layer_sigmoid_small() {
+    stage1(
+        "2-layer sigmoid 5x3x4x4",
+        5,
+        &[3, 4, 4, 1],
+        Head::Sigmoid,
+        11,
+        64,
+    );
+    if let Some(ctx) = context() {
+        stage2(
+            &ctx,
+            "2-layer sigmoid 5x3x4x4",
+            5,
+            &[3, 4, 4, 1],
+            Head::Sigmoid,
+            11,
+            2e-3,
+        );
+    }
+}
+
+#[test]
+fn one_layer_softmax_small() {
+    stage1(
+        "1-layer softmax 5x3x4x3",
+        5,
+        &[3, 4, 3],
+        Head::Softmax,
+        21,
+        64,
+    );
+    if let Some(ctx) = context() {
+        stage2(
+            &ctx,
+            "1-layer softmax 5x3x4x3",
+            5,
+            &[3, 4, 3],
+            Head::Softmax,
+            21,
+            2e-3,
+        );
+    }
+}
+
+#[test]
+fn one_layer_sigmoid_tile_crossing() {
+    stage1(
+        "1-layer sigmoid 33x17x48",
+        33,
+        &[17, 48, 1],
+        Head::Sigmoid,
+        31,
+        32,
+    );
+    if let Some(ctx) = context() {
+        stage2(
+            &ctx,
+            "1-layer sigmoid 33x17x48",
+            33,
+            &[17, 48, 1],
+            Head::Sigmoid,
+            31,
+            1e-3,
+        );
+    }
+}
+
+/// Depth and tile-crossing together, which no earlier fixture covered: the
+/// stacked cases were all small and the large case was all one layer.
+#[test]
+fn two_layer_sigmoid_tile_crossing() {
+    stage1(
+        "2-layer sigmoid 33x17x48x48",
+        33,
+        &[17, 48, 48, 1],
+        Head::Sigmoid,
+        41,
+        32,
+    );
+    if let Some(ctx) = context() {
+        stage2(
+            &ctx,
+            "2-layer sigmoid 33x17x48x48",
+            33,
+            &[17, 48, 48, 1],
+            Head::Sigmoid,
+            41,
+            1e-3,
+        );
+    }
+}
+
+/// The softmax head at a size that crosses tiles, and stacked. Previously the
+/// multi-class gradient was verified only at 5x3x4.
+#[test]
+fn two_layer_softmax_tile_crossing() {
+    stage1(
+        "2-layer softmax 33x17x48x48x5",
+        33,
+        &[17, 48, 48, 5],
+        Head::Softmax,
+        51,
+        32,
+    );
+    if let Some(ctx) = context() {
+        stage2(
+            &ctx,
+            "2-layer softmax 33x17x48x48x5",
+            33,
+            &[17, 48, 48, 5],
+            Head::Softmax,
+            51,
+            1e-3,
+        );
+    }
+}
+
+/// A gradient merely proportional to the truth passes a direction check but
+/// trains at the wrong effective rate, and a missing `1/batch` is the usual
+/// cause. The mean of `(p - y)` is bounded by 1, so its magnitude catches it.
+#[test]
+fn the_gradient_is_scaled_by_the_batch_size_not_merely_proportional() {
+    let net = Net::new(5, &[3, 4, 1], Head::Sigmoid, 61);
+    let x = fill(5 * 3, 61);
+    let y = targets(&net);
+    let (_, db) = net.grads(&x, &y);
+
+    assert!(
+        db[1][0].abs() <= 1.0,
+        "output bias gradient {} exceeds 1, so the 1/batch scaling is missing",
+        db[1][0]
+    );
 }
