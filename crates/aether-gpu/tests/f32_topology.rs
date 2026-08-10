@@ -398,6 +398,173 @@ fn the_distance_kernel_error_is_bounded_by_f32_epsilon() {
     );
 }
 
+/// Displace every point by a random vector of exactly `delta`, which perturbs
+/// pairwise distances by at most `2 * delta` and typically by about `delta`.
+fn perturb(points: &[ManifoldPoint<3>], delta: f64, seed: u64) -> Vec<ManifoldPoint<3>> {
+    let mut s = seed.wrapping_mul(6364136223846793005).wrapping_add(1);
+    let mut next = || {
+        s = s
+            .wrapping_mul(6364136223846793005)
+            .wrapping_add(1442695040888963407);
+        ((s >> 33) as f64 / (1u64 << 31) as f64) - 0.5
+    };
+
+    points
+        .iter()
+        .map(|p| {
+            let (a, b, c) = (next(), next(), next());
+            let norm = (a * a + b * b + c * c).sqrt().max(1e-300);
+            ManifoldPoint::new([
+                p.coords[0] + delta * a / norm,
+                p.coords[1] + delta * b / norm,
+                p.coords[2] + delta * c / norm,
+            ])
+        })
+        .collect()
+}
+
+/// How often a distance perturbation the size of the kernel's error actually
+/// changes a Betti number.
+///
+/// The ordering analysis says the combinatorics stop being guaranteed identical
+/// past about n=32. That is a statement about the worst case: two distances
+/// *can* swap. It says nothing about whether a swap changes the homology, and
+/// most swaps do not — exchanging the entry order of two simplices that are not
+/// both pivotal leaves the barcode alone except for endpoint shifts.
+///
+/// This measures the practical rate directly. Points are displaced by the
+/// measured kernel error, which moves distances by a comparable amount, and the
+/// Betti numbers are compared across the whole filtration.
+///
+/// The distinction matters because "not guaranteed" and "observed to break" are
+/// different findings, and only one of them blocks using the kernel.
+#[test]
+fn how_often_a_kernel_sized_perturbation_changes_the_betti_numbers() {
+    // The relative error measured from the kernel, scaled to the cloud's extent
+    // of roughly 1 unit.
+    const DELTA: f64 = 4e-7;
+
+    let betti_differs = |a: &aether_core::persistence::PersistenceDiagram,
+                         b: &aether_core::persistence::PersistenceDiagram,
+                         dim: usize|
+     -> bool {
+        (1..60).any(|step| {
+            let r = step as f64 * 0.03;
+            let ba = a.betti_at(r);
+            let bb = b.betti_at(r);
+            if dim == 0 {
+                ba.beta_0 != bb.beta_0
+            } else {
+                ba.beta_0 != bb.beta_0 || ba.beta_1 != bb.beta_1
+            }
+        })
+    };
+
+    let mut checked = 0usize;
+    let mut changed = 0usize;
+
+    for (n, dim, cfg, seeds) in [
+        (32usize, 1usize, h1_config(128), 50u64),
+        (64, 1, h1_config(128), 50),
+        (128, 0, h0_config(512), 50),
+        (256, 0, h0_config(512), 30),
+    ] {
+        let mut n_changed = 0usize;
+
+        for seed in 0..seeds {
+            let exact = cloud(n, 100 + seed);
+            let moved = perturb(&exact, DELTA, 900 + seed);
+
+            let da = persistent_homology(&exact, cfg).expect("exact");
+            let db = persistent_homology(&moved, cfg).expect("perturbed");
+
+            checked += 1;
+            if betti_differs(&da, &db, dim) {
+                changed += 1;
+                n_changed += 1;
+            }
+        }
+
+        println!("n={n:>3} H{dim}: {n_changed}/{seeds} clouds changed a Betti number");
+    }
+
+    println!("total at {DELTA:.0e}: {changed}/{checked} clouds affected");
+
+    // With zero events in `checked` trials the rule of three puts the 95%
+    // upper bound at 3/checked, which is what this number is worth: not "it
+    // never happens" but "below this rate".
+    if changed == 0 {
+        println!(
+            "  95% upper bound on the rate: {:.1}% (rule of three)",
+            300.0 / checked as f64
+        );
+    }
+
+    assert!(checked >= 150, "only {checked} clouds were compared");
+}
+
+/// Where a perturbation *does* start changing the topology, and how far that is
+/// from the error the kernel actually produces.
+///
+/// The previous test reports a rate at one displacement. This finds the
+/// displacement at which the rate stops being zero, which is the number that
+/// says whether the kernel has margin or is merely lucky.
+#[test]
+fn the_perturbation_a_diagram_survives_has_margin_over_the_kernel_error() {
+    let cfg = h1_config(128);
+    let n = 64;
+    let seeds = 20u64;
+
+    let betti_differs = |a: &aether_core::persistence::PersistenceDiagram,
+                         b: &aether_core::persistence::PersistenceDiagram|
+     -> bool {
+        (1..60).any(|step| {
+            let r = step as f64 * 0.03;
+            let ba = a.betti_at(r);
+            let bb = b.betti_at(r);
+            ba.beta_0 != bb.beta_0 || ba.beta_1 != bb.beta_1
+        })
+    };
+
+    let mut largest_clean = 0.0f64;
+
+    for exp in [-7i32, -6, -5, -4, -3, -2] {
+        let delta = 10f64.powi(exp);
+        let mut n_changed = 0usize;
+
+        for seed in 0..seeds {
+            let exact = cloud(n, 100 + seed);
+            let moved = perturb(&exact, delta, 900 + seed);
+
+            let da = persistent_homology(&exact, cfg).expect("exact");
+            let db = persistent_homology(&moved, cfg).expect("perturbed");
+
+            if betti_differs(&da, &db) {
+                n_changed += 1;
+            }
+        }
+
+        println!("displacement {delta:.0e}: {n_changed}/{seeds} clouds changed");
+        if n_changed == 0 {
+            largest_clean = delta;
+        }
+    }
+
+    // The kernel's measured relative error, on a cloud of extent ~1.
+    const KERNEL_ERROR: f64 = 4e-7;
+    let margin = largest_clean / KERNEL_ERROR;
+
+    println!(
+        "largest displacement with no observed change: {largest_clean:.0e}, \
+         kernel error {KERNEL_ERROR:.0e}, margin {margin:.0}x"
+    );
+
+    assert!(
+        largest_clean >= KERNEL_ERROR,
+        "the topology changes at displacements at or below the kernel's own error"
+    );
+}
+
 /// The same question for the shape the persistence engine is usually asked
 /// about: does f32 rounding change how many long bars a circle has?
 #[test]
