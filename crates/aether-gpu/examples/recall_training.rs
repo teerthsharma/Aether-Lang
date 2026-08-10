@@ -550,43 +550,67 @@ fn main() {
     println!();
     println!("───────────────────────────────────────────────────────────────────────");
     let pairs = outcomes.len() * (outcomes.len() - 1) / 2;
-    let per_comparison = FAMILY_ALPHA / pairs as f64;
-    let critical = chi2_critical(per_comparison);
+    let bonferroni = chi2_critical(FAMILY_ALPHA / pairs as f64);
 
     println!("  Paired comparison on identical sequences (McNemar)");
     println!(
-        "  {pairs} comparisons, Bonferroni: {:.1}% family-wise, {:.4} each, chi2 > {critical:.2}",
-        100.0 * FAMILY_ALPHA,
-        per_comparison
+        "  {pairs} comparisons, Holm step-down at {:.1}% family-wise",
+        100.0 * FAMILY_ALPHA
     );
+    println!("  Bonferroni would fix the bar at chi2 > {bonferroni:.2} for every row");
     println!();
     println!(
-        "  {:>13} vs {:<13}  {:>6}  {:>6}  {:>8}  {:>14}",
-        "A", "B", "A>B", "B>A", "chi2", "verdict"
+        "  {:>13} vs {:<13}  {:>6}  {:>6}  {:>8}  {:>6}  {:>14}",
+        "A", "B", "A>B", "B>A", "chi2", "bar", "verdict"
     );
     println!(
-        "  {:->13}    {:->13}  {:->6}  {:->6}  {:->8}  {:->14}",
-        "", "", "", "", "", ""
+        "  {:->13}    {:->13}  {:->6}  {:->6}  {:->8}  {:->6}  {:->14}",
+        "", "", "", "", "", "", ""
     );
 
+    let mut comparisons = Vec::with_capacity(pairs);
     for i in 0..outcomes.len() {
         for j in (i + 1)..outcomes.len() {
             let (name_a, ref va) = outcomes[i];
             let (name_b, ref vb) = outcomes[j];
             let (b, c, chi2) = mcnemar(va, vb);
-
-            let verdict = if chi2 > critical {
-                if b > c {
-                    format!("{name_a} better")
-                } else {
-                    format!("{name_b} better")
-                }
-            } else {
-                "not resolved".to_string()
-            };
-
-            println!("  {name_a:>13} vs {name_b:<13}  {b:>6}  {c:>6}  {chi2:>8.2}  {verdict:>14}");
+            comparisons.push((name_a, name_b, b, c, chi2));
         }
+    }
+
+    // Holm's step-down. Strongest evidence first, and the threshold relaxes as
+    // comparisons are consumed: the k-th test is judged at alpha/(m - k + 1)
+    // rather than alpha/m. The first failure stops the procedure and everything
+    // weaker is unresolved regardless of its own statistic — that monotonicity
+    // is what holds the family-wise rate while recovering power Bonferroni gives
+    // away on every row after the first.
+    comparisons.sort_by(|a, b| b.4.total_cmp(&a.4));
+
+    let mut still_testing = true;
+    for (rank, &(name_a, name_b, b, c, chi2)) in comparisons.iter().enumerate() {
+        let step_alpha = FAMILY_ALPHA / (pairs - rank) as f64;
+        let step_critical = chi2_critical(step_alpha);
+
+        if still_testing && chi2 <= step_critical {
+            still_testing = false;
+        }
+
+        let verdict = if still_testing {
+            if b > c {
+                format!("{name_a} better")
+            } else {
+                format!("{name_b} better")
+            }
+        } else {
+            "not resolved".to_string()
+        };
+
+        // The threshold each row actually faced, so a reader can see where the
+        // step-down stopped rather than having to reconstruct it.
+        println!(
+            "  {name_a:>13} vs {name_b:<13}  {b:>6}  {c:>6}  {chi2:>8.2}  \
+             {step_critical:>6.2}  {verdict:>14}"
+        );
     }
 
     println!();
@@ -661,6 +685,68 @@ mod tests {
             "the 600-sequence topological-vs-random statistic of {observed} no \
              longer sits between {uncorrected} and {corrected}, so this test has \
              stopped guarding the case it was written for"
+        );
+    }
+
+    /// Holm must never be stricter than Bonferroni, and must be strictly looser
+    /// after the first comparison.
+    ///
+    /// This is the whole reason to prefer it: it holds the same family-wise rate
+    /// while relaxing the bar as comparisons are consumed. A Holm threshold that
+    /// came out above Bonferroni's on any row would mean the step-down index is
+    /// inverted, which would silently lose true effects while still looking like
+    /// a correction.
+    #[test]
+    fn holm_is_never_stricter_than_bonferroni() {
+        let m = 10;
+        let bonferroni = chi2_critical(FAMILY_ALPHA / m as f64);
+
+        for rank in 0..m {
+            let holm = chi2_critical(FAMILY_ALPHA / (m - rank) as f64);
+            assert!(
+                holm <= bonferroni + 1e-9,
+                "rank {rank}: Holm demanded {holm:.4}, above Bonferroni's \
+                 {bonferroni:.4}; the step-down divisor is running the wrong way"
+            );
+            if rank > 0 {
+                assert!(
+                    holm < bonferroni,
+                    "rank {rank}: Holm matched Bonferroni at {holm:.4} instead of \
+                     relaxing, so the procedure recovers no power at all"
+                );
+            }
+        }
+    }
+
+    /// A weaker comparison cannot be resolved once a stronger one has failed.
+    ///
+    /// The step-down's defining property, and the one an implementation is most
+    /// likely to get wrong by testing each row against its own threshold
+    /// independently. Doing that would inflate the family-wise rate above the
+    /// stated 5% while still carrying the name of a correction.
+    #[test]
+    fn the_step_down_stops_at_the_first_failure() {
+        let m = 10;
+        // Descending statistics with a deliberate dip: rank 4 fails its bar, and
+        // rank 5 would clear its own looser one if the rows were independent.
+        let stats = [900.0, 800.0, 700.0, 600.0, 1.0, 6.9, 6.8, 5.0, 0.5, 0.1];
+
+        let mut still_testing = true;
+        let mut resolved = Vec::new();
+        for (rank, &chi2) in stats.iter().enumerate() {
+            let critical = chi2_critical(FAMILY_ALPHA / (m - rank) as f64);
+            if still_testing && chi2 <= critical {
+                still_testing = false;
+            }
+            resolved.push(still_testing);
+        }
+
+        assert_eq!(
+            resolved,
+            vec![true, true, true, true, false, false, false, false, false, false],
+            "the step-down did not stop at the first failure; a later row was \
+             resolved on its own threshold after a stronger one had already \
+             failed"
         );
     }
 
