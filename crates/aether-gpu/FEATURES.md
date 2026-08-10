@@ -15,7 +15,7 @@ wrong answer is worth keeping — but it means the current state has to be
 reconstructed from a sequence of corrections. This section is the state.
 
 **The backend works and nothing uses it.** 13 WGSL kernels, resident tensors,
-batched submission, 63 tests, 0 of 10 mutants escaping. No line of `aether-core`
+batched submission, 66 tests, 0 of 10 mutants escaping. No line of `aether-core`
 or `aether-lang` calls it.
 
 **Both integrations are measured; neither is made.**
