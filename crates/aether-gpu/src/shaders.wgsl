@@ -301,6 +301,70 @@ fn sgd_update(@builtin(global_invocation_id) gid: vec3<u32>) {
     c[idx] = a[idx] - bitcast<f32>(dims._pad) * b[idx];
 }
 
+// ── Adam ──────────────────────────────────────────────────────────────────────
+//
+// Two dispatches, because the bind group carries three storage buffers and Adam
+// needs parameters, gradients, and two moment estimates. The moments are packed
+// into a single state tensor of 2N floats -- first moment in [0, N), second in
+// [N, 2N) -- so each dispatch stays within three buffers.
+//
+// Beta and epsilon are compile-time constants at their standard values. The
+// learning rate arrives bitcast through the unused dims slot, and dims.k
+// carries the step count, which the bias correction needs.
+
+const ADAM_B1: f32 = 0.9;
+const ADAM_B2: f32 = 0.999;
+const ADAM_EPS: f32 = 1e-8;
+
+// state_out = [b1*m + (1-b1)*g , b2*v + (1-b2)*g^2]
+//
+// a: state in, 2N. b: gradient, N. c: state out, 2N. dims.n = N.
+@compute @workgroup_size(256, 1, 1)
+fn adam_moments(@builtin(global_invocation_id) gid: vec3<u32>) {
+    let idx = gid.x;
+    let n = dims.n;
+
+    if (idx >= n) {
+        return;
+    }
+
+    let g = b[idx];
+    c[idx] = ADAM_B1 * a[idx] + (1.0 - ADAM_B1) * g;
+    c[n + idx] = ADAM_B2 * a[n + idx] + (1.0 - ADAM_B2) * g * g;
+}
+
+// param_out = param - lr * mhat / (sqrt(vhat) + eps)
+//
+// a: parameters, N. b: state, 2N. c: parameters out, N. dims.n = N,
+// dims.k = step (1-based), dims._pad = learning rate as f32 bits.
+//
+// The bias correction is the part that is easy to omit and hard to notice. At
+// step 1 the first moment is 0.1*g, so without correction the first update is
+// an order of magnitude too small, and the model trains -- just slower, from a
+// worse start. Dividing by (1 - b1^t) restores the scale, and the correction
+// decays to nothing as t grows, which is why a late-training comparison cannot
+// see whether it is there.
+@compute @workgroup_size(256, 1, 1)
+fn adam_update(@builtin(global_invocation_id) gid: vec3<u32>) {
+    let idx = gid.x;
+    let n = dims.n;
+
+    if (idx >= n) {
+        return;
+    }
+
+    let t = f32(dims.k);
+    let lr = bitcast<f32>(dims._pad);
+
+    let mhat = b[idx] / (1.0 - pow(ADAM_B1, t));
+    let vhat = b[n + idx] / (1.0 - pow(ADAM_B2, t));
+
+    // Epsilon is added to sqrt(vhat), not inside the root. Inside, it would
+    // change the effective step for every parameter rather than only guarding
+    // the division, and the two are not the same optimiser.
+    c[idx] = a[idx] - lr * mhat / (sqrt(vhat) + ADAM_EPS);
+}
+
 // Elementwise C = A + B, with B broadcast over rows when it holds a single row.
 // Bias addition in a dense layer is the broadcast case.
 @compute @workgroup_size(256, 1, 1)
