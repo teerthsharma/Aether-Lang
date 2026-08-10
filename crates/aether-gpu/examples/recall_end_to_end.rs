@@ -2,6 +2,13 @@
 //!
 //! Run:
 //!   cargo run -p aether-gpu --example recall_end_to_end --release
+//!   cargo run -p aether-gpu --example recall_end_to_end --release -- --gpu-backward
+//!
+//! The flag swaps the f64 CPU backward for the four WGSL kernels. Both produce
+//! the same sixteen figures, which is a check the parity tests cannot make: they
+//! pin the gradient at a point, and this accumulates f32 gradients across 60
+//! epochs of 300 sequences, where a small per-step error would compound into a
+//! different model.
 //!
 //! `recall_training` freezes attention and trains only a head on its output. It
 //! finds the topological, inverted and random schedules indistinguishable at
@@ -31,8 +38,8 @@
 
 use aether_core::scheduled::{
     dense_causal_block_schedule, inverted_topology_block_schedule, random_block_schedule,
-    schedule_budget, scheduled_attention_backward, topology_block_schedule, BlockSchedule,
-    TopologyScheduleConfig,
+    schedule_budget, scheduled_attention_backward, topology_block_schedule, AttentionGradients,
+    BlockSchedule, TopologyScheduleConfig,
 };
 use aether_gpu::GpuContext;
 
@@ -150,6 +157,7 @@ fn step(
     g_wq: &mut [f64],
     g_head: &mut [f64],
     train: bool,
+    gpu_backward: bool,
 ) -> (f64, bool) {
     let q = project(&s.xq, wq);
 
@@ -190,9 +198,39 @@ fn step(
         d_out[(SEQ - 1) * HEAD_DIM + d] = dlogit * head[d];
     }
 
-    let grads =
+    let dq: Vec<f64> = if gpu_backward {
+        // The WGSL backward, in f32. Unit tests pin it against the f64 reference
+        // at a point; running a whole training loop through it tests something
+        // they cannot, which is whether f32 gradients stay usable once they are
+        // accumulated across hundreds of steps. A gradient can be correct
+        // everywhere it is sampled and still drift a run.
+        let (dq, _, _) = ctx
+            .scheduled_attention_backward_resident(
+                &q.iter().map(|&x| x as f32).collect::<Vec<_>>(),
+                &s.k.iter().map(|&x| x as f32).collect::<Vec<_>>(),
+                &s.v.iter().map(|&x| x as f32).collect::<Vec<_>>(),
+                SEQ,
+                HEAD_DIM,
+                schedule,
+                BLOCK,
+                &d_out.iter().map(|&x| x as f32).collect::<Vec<_>>(),
+            )
+            .expect("gpu attention backward");
+        ctx.read(&dq)
+            .expect("read dq")
+            .iter()
+            .map(|&x| x as f64)
+            .collect()
+    } else {
         scheduled_attention_backward(&q, &s.k, &s.v, SEQ, HEAD_DIM, schedule, BLOCK, &d_out)
-            .expect("attention backward");
+            .expect("attention backward")
+            .dq
+    };
+    let grads = AttentionGradients {
+        dq,
+        dk: Vec::new(),
+        dv: Vec::new(),
+    };
 
     // dWq = Xq^T dQ, the only place the query projection appears.
     for row in 0..SEQ {
@@ -229,6 +267,7 @@ fn main() {
         topk_topology_blocks: 2,
     };
 
+    let gpu_backward = std::env::args().any(|a| a == "--gpu-backward");
     let split = SAMPLES * 3 / 4;
     let info = ctx.adapter_info();
 
@@ -297,6 +336,7 @@ fn main() {
                     &mut sink_wq,
                     &mut sink_head,
                     false,
+                    gpu_backward,
                 );
                 if ok {
                     correct += 1;
@@ -338,6 +378,7 @@ fn main() {
                     &mut g_wq,
                     &mut g_head,
                     true,
+                    gpu_backward,
                 );
             }
             let n = split as f64;
@@ -364,6 +405,7 @@ fn main() {
                     &mut g_wq,
                     &mut g_head,
                     true,
+                    gpu_backward,
                 );
             }
 

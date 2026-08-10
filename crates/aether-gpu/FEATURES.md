@@ -173,12 +173,38 @@ untrainable, and the two requirements pull against each other. At `MATCH = 5` th
 softmax is still informative and still differentiable, the control recovers in
 every arm, and the numbers above mean something.
 
+#### The f32 backward drives the same training outcome
+
+The table above was produced with the f64 CPU backward. `--gpu-backward` runs the
+identical experiment through the four WGSL kernels instead, and every one of the
+sixteen figures is unchanged — all four arms, both columns, and all four control
+pairs.
+
+That is a check the parity tests cannot make. They pin the gradient against the
+reference at a point; this accumulates f32 gradients across 60 epochs of 300
+sequences, which is where a small per-step error would compound into a different
+model. It does not.
+
+What the agreement does *not* establish: accuracy on 100 held-out sequences moves
+in 1% steps, so identical accuracy means the training *outcome* is the same, not
+that the trajectories or the learned weights are. A weaker claim than bitwise
+agreement and the one the measurement supports.
+
+The GPU backward took 623 s against 216 s for the CPU one, on the same tree and
+back to back. Unlike the ratios elsewhere in this file that figure is not fragile
+— each run aggregates roughly 36,000 backward calls, so per-call variance
+averages out — and the cause is structural rather than mysterious: every call
+uploads its operands, runs four dispatches, and reads the row statistics back to
+re-upload them, because the shared four-binding layout has nowhere to leave them.
+That download is the `ponytail:` marker in `scheduled_attention_backward_resident`
+and is the first thing to remove if this path ever needs to be fast.
+
 Limits: 400 sequences with 100 held out, so a 5-point difference is inside the
 sampling error and only the 25-point dense gap is resolved. `Wq` is 8×8 with
 plain gradient descent, no momentum and one learning rate for every arm. The
 control establishes that training moves accuracy, not that it reaches any
 optimum — a better optimiser might extract more from a sparse schedule than this
-one does.
+one does. One run per backend, not a distribution.
 
 ### The function that makes the ablation fair had no test
 
