@@ -23,9 +23,31 @@
 //! crate means the embedded build cannot silently acquire a dependency on it.
 
 use std::borrow::Cow;
+use std::cell::RefCell;
 
 use bytemuck::{Pod, Zeroable};
 use wgpu::util::DeviceExt;
+
+/// Commands recorded but not yet submitted.
+///
+/// Every resident operation used to build its own encoder and submit it, so a
+/// training step cost one queue submission per operation. Submission is not
+/// free: it is a driver transition, and at this network's size the step was
+/// dominated by making twenty of them rather than by arithmetic.
+///
+/// Work now accumulates into a single encoder and is submitted once, at the
+/// next [`GpuContext::read`] or [`GpuContext::flush`].
+///
+/// `bind_groups` and `dims_buffers` are held until submission. The recorded
+/// commands reference them, and dropping them early would free resources the
+/// queue is about to read.
+#[derive(Default)]
+struct Pending {
+    encoder: Option<wgpu::CommandEncoder>,
+    bind_groups: Vec<wgpu::BindGroup>,
+    dims_buffers: Vec<wgpu::Buffer>,
+    recorded: usize,
+}
 
 /// Uniform block matching `struct Dims` in `shaders.wgsl`.
 ///
@@ -113,6 +135,7 @@ pub struct GpuContext {
     sigmoid: wgpu::ComputePipeline,
     sigmoid_bce_grad: wgpu::ComputePipeline,
     layout: wgpu::BindGroupLayout,
+    pending: RefCell<Pending>,
 }
 
 /// A tensor that lives in GPU memory across operations.
@@ -246,7 +269,33 @@ impl GpuContext {
             queue,
             info,
             layout,
+            pending: RefCell::new(Pending::default()),
         })
+    }
+
+    /// Submit everything recorded so far.
+    ///
+    /// Called automatically by [`GpuContext::read`]. Call it directly when
+    /// device-side state must land without reading anything back -- a sequence
+    /// of parameter updates whose result is not inspected until later, for
+    /// instance. Recorded work that is never flushed is never executed.
+    pub fn flush(&self) {
+        let mut pending = self.pending.borrow_mut();
+        if let Some(encoder) = pending.encoder.take() {
+            self.queue.submit(Some(encoder.finish()));
+        }
+        pending.bind_groups.clear();
+        pending.dims_buffers.clear();
+        pending.recorded = 0;
+    }
+
+    /// How many dispatches are recorded and not yet submitted.
+    ///
+    /// Exposed so a test can assert that batching actually batches, rather than
+    /// inferring it from a timing difference that a faster kernel would also
+    /// produce.
+    pub fn pending_dispatches(&self) -> usize {
+        self.pending.borrow().recorded
     }
 
     // ── Resident tensors ──────────────────────────────────────────────────────
@@ -295,12 +344,26 @@ impl GpuContext {
             mapped_at_creation: false,
         });
 
-        let mut encoder = self
-            .device
-            .create_command_encoder(&wgpu::CommandEncoderDescriptor { label: None });
-        encoder.copy_buffer_to_buffer(&t.buffer, 0, &staging, 0, bytes);
-        self.queue.submit(Some(encoder.finish()));
+        // Record the copy into whatever batch is open, so the readback rides
+        // the same submission as the work that produced the data rather than
+        // forcing a second one.
+        {
+            let mut pending = self.pending.borrow_mut();
+            if pending.encoder.is_none() {
+                pending.encoder = Some(self.device.create_command_encoder(
+                    &wgpu::CommandEncoderDescriptor {
+                        label: Some("aether-gpu batch"),
+                    },
+                ));
+            }
+            pending
+                .encoder
+                .as_mut()
+                .expect("encoder just created")
+                .copy_buffer_to_buffer(&t.buffer, 0, &staging, 0, bytes);
+        }
 
+        self.flush();
         self.map_and_read(&staging)
     }
 
@@ -607,10 +670,18 @@ impl GpuContext {
             ],
         });
 
-        let mut encoder = self
-            .device
-            .create_command_encoder(&wgpu::CommandEncoderDescriptor { label: None });
+        let mut pending = self.pending.borrow_mut();
+
+        if pending.encoder.is_none() {
+            pending.encoder = Some(self.device.create_command_encoder(
+                &wgpu::CommandEncoderDescriptor {
+                    label: Some("aether-gpu batch"),
+                },
+            ));
+        }
+
         {
+            let encoder = pending.encoder.as_mut().expect("encoder just created");
             let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
                 label: None,
                 timestamp_writes: None,
@@ -619,7 +690,12 @@ impl GpuContext {
             pass.set_bind_group(0, &bind_group, &[]);
             pass.dispatch_workgroups(groups.0, groups.1, groups.2);
         }
-        self.queue.submit(Some(encoder.finish()));
+
+        // Parked, not dropped: the recorded commands reference these, and the
+        // queue reads them at submission. Released in `flush`.
+        pending.bind_groups.push(bind_group);
+        pending.dims_buffers.push(dims_buf);
+        pending.recorded += 1;
     }
 
     fn map_and_read(&self, staging: &wgpu::Buffer) -> Result<Vec<f32>, GpuError> {
@@ -787,6 +863,10 @@ impl GpuContext {
         dims: Dims,
         groups: (u32, u32, u32),
     ) -> Result<Vec<f32>, GpuError> {
+        // This path submits on its own. Anything recorded by the resident API
+        // has to land first, or the two get reordered relative to each other.
+        self.flush();
+
         let out_bytes = (out_len * std::mem::size_of::<f32>()) as u64;
 
         let a_buf = self
@@ -891,6 +971,27 @@ impl GpuContext {
         staging.unmap();
 
         Ok(out)
+    }
+}
+
+impl Drop for GpuContext {
+    /// Submit anything still recorded, then block until the device is idle.
+    ///
+    /// Two reasons. Recorded-but-unflushed work would otherwise be dropped
+    /// silently, so a caller that updates parameters and never reads them back
+    /// would lose the update with no error. And tearing down a device while the
+    /// queue still has work in flight is a documented way to fault a driver.
+    ///
+    /// A single `STATUS_ACCESS_VIOLATION` at process exit was observed once
+    /// here, on the first run after a rebuild, and did not reproduce in twelve
+    /// subsequent runs of the same binary. The cause was never established, so
+    /// this is hardening against a plausible mechanism rather than a fix for a
+    /// diagnosed one, and it is recorded that way rather than claimed as a fix.
+    fn drop(&mut self) {
+        if let Some(encoder) = self.pending.borrow_mut().encoder.take() {
+            self.queue.submit(Some(encoder.finish()));
+        }
+        let _ = self.device.poll(wgpu::PollType::wait_indefinitely());
     }
 }
 

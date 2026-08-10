@@ -300,6 +300,96 @@ fn a_resident_matmul_rejects_disagreeing_inner_dimensions() {
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
+// Batched submission
+// ═══════════════════════════════════════════════════════════════════════════════
+
+/// Asserts the batching is real, by counting recorded dispatches rather than
+/// by observing that something got faster. A faster kernel would also produce
+/// a timing improvement, so timing alone cannot distinguish the two.
+#[test]
+fn resident_operations_accumulate_into_one_submission() {
+    let Some(ctx) = context() else { return };
+
+    let a = ctx.upload(&fill(64, 1), 8, 8).expect("upload");
+    let b = ctx.upload(&fill(64, 2), 8, 8).expect("upload");
+
+    assert_eq!(
+        ctx.pending_dispatches(),
+        0,
+        "nothing recorded before any work"
+    );
+
+    let mut cur = ctx.matmul_resident(&a, &b).expect("matmul");
+    for _ in 0..5 {
+        cur = ctx.matmul_resident(&cur, &b).expect("matmul");
+    }
+
+    assert_eq!(
+        ctx.pending_dispatches(),
+        6,
+        "six matmuls must accumulate, not submit one at a time"
+    );
+
+    let _ = ctx.read(&cur).expect("read");
+
+    assert_eq!(
+        ctx.pending_dispatches(),
+        0,
+        "read must flush the batch it depends on"
+    );
+}
+
+/// Deferring work must not change it. Same chain, forced to submit after every
+/// step, has to produce the same bytes as the batched version.
+#[test]
+fn batching_does_not_change_the_result() {
+    let Some(ctx) = context() else { return };
+
+    let a = ctx.upload(&fill(256, 3), 16, 16).expect("upload");
+    let b = ctx.upload(&fill(256, 4), 16, 16).expect("upload");
+
+    let mut batched = ctx.matmul_resident(&a, &b).expect("matmul");
+    for _ in 0..3 {
+        batched = ctx.matmul_resident(&batched, &b).expect("matmul");
+    }
+    let batched = ctx.read(&batched).expect("read");
+
+    let mut stepwise = ctx.matmul_resident(&a, &b).expect("matmul");
+    ctx.flush();
+    for _ in 0..3 {
+        stepwise = ctx.matmul_resident(&stepwise, &b).expect("matmul");
+        ctx.flush();
+    }
+    let stepwise = ctx.read(&stepwise).expect("read");
+
+    assert_eq!(
+        batched, stepwise,
+        "batching changed the result; submission grouping must be invisible"
+    );
+}
+
+/// Work that is recorded and never flushed is never executed. That is a
+/// deliberate property of the design and is pinned so it cannot regress into
+/// an implicit flush that silently costs a submission per operation.
+#[test]
+fn flush_is_required_for_recorded_work_to_execute() {
+    let Some(ctx) = context() else { return };
+
+    let a = ctx.upload(&fill(64, 5), 8, 8).expect("upload");
+    let b = ctx.upload(&fill(64, 6), 8, 8).expect("upload");
+
+    let _ = ctx.matmul_resident(&a, &b).expect("matmul");
+    assert_eq!(ctx.pending_dispatches(), 1);
+
+    ctx.flush();
+    assert_eq!(ctx.pending_dispatches(), 0);
+
+    // Flushing an empty batch is a no-op, not an error.
+    ctx.flush();
+    assert_eq!(ctx.pending_dispatches(), 0);
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
 // Pairwise distance -- the op that matters to this repository specifically
 // ═══════════════════════════════════════════════════════════════════════════════
 
