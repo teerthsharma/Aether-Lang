@@ -15,8 +15,17 @@ wrong answer is worth keeping — but it means the current state has to be
 reconstructed from a sequence of corrections. This section is the state.
 
 **The backend works and nothing uses it.** 14 WGSL kernels, resident tensors,
-batched submission, 81 tests, 0 of 15 mutants escaping. No line of
+batched submission, 83 tests, 0 of 15 mutants escaping. No line of
 `aether-core` or `aether-lang` calls it.
+
+`scheduled_attention_resident` returns a `GpuTensor` so attention output can feed
+another kernel without a round trip. It was the last kernel here without a
+resident path, which meant every use downloaded a full `[seq, head_dim]` result
+even when the next operation was a matmul on the device — the transfer pattern
+this file already records as dominating `pairwise_sqdist`. The read-back call is
+now that path plus a download rather than a second implementation, and a test
+asserts the two agree bitwise so a later change cannot quietly give them separate
+dispatches.
 
 The newest kernel is the exception worth naming: `scheduled_attention` is the
 GPU port of this repository's headline mechanism, which until now ran only on

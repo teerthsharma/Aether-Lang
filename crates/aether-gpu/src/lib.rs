@@ -851,7 +851,7 @@ impl GpuContext {
     /// Computes in f32 against `aether-core`'s f64. Parity is asserted in
     /// `tests/attention_parity.rs` against the CPU kernel and against the
     /// quadratic reference, at an f32 tolerance.
-    pub fn scheduled_attention(
+    pub fn scheduled_attention_resident(
         &self,
         q: &[f32],
         k: &[f32],
@@ -860,7 +860,7 @@ impl GpuContext {
         head_dim: usize,
         schedule: &BlockSchedule,
         block_size: usize,
-    ) -> Result<Vec<f32>, GpuError> {
+    ) -> Result<GpuTensor, GpuError> {
         if head_dim == 0 || block_size == 0 || seq == 0 {
             return Err(GpuError::ShapeMismatch(format!(
                 "seq, head_dim and block_size must all be non-zero, got \
@@ -920,12 +920,20 @@ impl GpuContext {
             .chain(schedule.indices.iter())
             .map(|&i| i as f32)
             .collect();
+        let csr_len = csr.len();
 
-        self.dispatch(
+        // Uploaded rather than passed through `dispatch`, so the result can stay
+        // on the device. `dispatch` flushes and reads back, which is the wrong
+        // shape for an operation whose output usually feeds another kernel.
+        let operands = self.upload(&operands, 3 * seq, head_dim)?;
+        let csr = self.upload(&csr, 1, csr_len)?;
+        let out = self.alloc(seq, head_dim);
+
+        self.dispatch_resident(
             &self.scheduled_attention,
-            &operands,
-            &csr,
-            expected,
+            &operands.buffer,
+            &csr.buffer,
+            &out.buffer,
             Dims {
                 m: seq as u32,
                 k: head_dim as u32,
@@ -933,7 +941,31 @@ impl GpuContext {
                 _pad: num_blocks as u32,
             },
             (seq.div_ceil(64) as u32, 1, 1),
-        )
+        );
+
+        Ok(out)
+    }
+
+    /// [`GpuContext::scheduled_attention_resident`] with the result read back.
+    ///
+    /// Kept because most callers want the values, and because every parity test
+    /// in the crate compares against a host-side reference. It is the resident
+    /// path plus a download, not a separate implementation, so the two cannot
+    /// drift — a test asserts they agree bitwise, which is a weaker claim than it
+    /// looks precisely because of that.
+    pub fn scheduled_attention(
+        &self,
+        q: &[f32],
+        k: &[f32],
+        v: &[f32],
+        seq: usize,
+        head_dim: usize,
+        schedule: &BlockSchedule,
+        block_size: usize,
+    ) -> Result<Vec<f32>, GpuError> {
+        let out =
+            self.scheduled_attention_resident(q, k, v, seq, head_dim, schedule, block_size)?;
+        self.read(&out)
     }
 
     fn dispatch_resident(
