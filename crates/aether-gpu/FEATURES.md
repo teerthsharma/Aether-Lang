@@ -7,6 +7,52 @@ A row is only added once the thing works; planned work lives in **Next**.
 Measured on NVIDIA GeForce RTX 4060 Laptop GPU, Vulkan, `DiscreteGpu`, driver
 595.79, Windows 11, f32 throughout (WGSL has no f64).
 
+## What is true now
+
+Everything below this section is in discovery order and includes conclusions
+that were later retracted. That is deliberate — the reasoning that produced a
+wrong answer is worth keeping — but it means the current state has to be
+reconstructed from a sequence of corrections. This section is the state.
+
+**The backend works and nothing uses it.** 13 WGSL kernels, resident tensors,
+batched submission, 63 tests, 0 of 10 mutants escaping. No line of `aether-core`
+or `aether-lang` calls it.
+
+**Both integrations are measured; neither is made.**
+
+| candidate | verdict | why |
+|---|---|---|
+| `Tensor::matmul` | **worth doing above n=128** | 38× at n=512 with f64↔f32 conversion counted. Blocked on a semantic decision, not a measurement: may `ml::Tensor` drop to f32? |
+| `pairwise_sqdist` | **not worth doing at any size** | 90–100% of its time is transfer, and the persistence reduction is CPU-side so the matrix must come back |
+
+**One rule predicts both**, and is the single most portable thing here: with a
+CPU consumer, an operation pays according to its arithmetic per byte returned.
+Matmul is O(n³) over O(n²) bytes, so the ratio grows with n and must cross over.
+Pairwise distance is O(n²d) over O(n²) bytes, so the ratio is fixed at d and
+never does. See [the rule](#the-rule-arithmetic-per-byte-returned).
+
+**Precision is settled for both.** f32 costs ~5e-7 relative on matmul — fine for
+training and thresholding, not for anything asserting at 1e-9. For topology, an
+end-to-end diagram built from real kernel output has Betti numbers identical to
+f64, though the *guarantee* of identical combinatorics is unavailable past n≈32.
+
+**Open defects:** an exit-time crash in wgpu's multi-backend instance teardown,
+worked around by instantiating one backend
+([details](#a-crash-now-reproducible-at-1-in-5)).
+
+### Conclusions this document reached and then withdrew
+
+Listed here so a reader is not misled by encountering them mid-file:
+
+| claim | status |
+|---|---|
+| "The cross-validated accuracy numbers were measuring interpolation" | **withdrawn** — interleaved CV and independent draws agree; the distance ratio does not detect leakage |
+| "Buffer churn from unread dispatches causes the crash" | **withdrawn** — a pattern with zero dispatches crashes at the highest rate |
+| "Allocation churn causes the crash" | **withdrawn** — it is the multi-backend instance |
+| "f32 is viable for the filtration" | **narrowed** — true in practice, not guaranteed past n≈32 |
+| "The GPU kernel's output needs symmetrising" | **withdrawn** — it is bitwise symmetric by construction |
+| "The suite never reports success for work that did not happen" | **withdrawn** — it did exactly that for twenty-odd commits |
+
 ## Shipped
 
 ### Device and context
@@ -143,6 +189,11 @@ floor rather than a formality — but nothing measured on it transfers to real
 data, and this row is not evidence about real datasets.
 
 ## Correction: the split investigation overstated its conclusion
+
+> **Read the section after this one first.** This correction precedes the
+> investigation it corrects, because both are in the order they happened rather
+> than the order they make sense in. The short version: the finding below was
+> wrong, and the reason it was wrong is more useful than the finding was.
 
 The section below concluded that every accuracy figure in this crate was
 measuring interpolation between near-duplicates, on the evidence that held-out
