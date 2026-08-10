@@ -104,6 +104,45 @@ fn the_documented_mutant_count_matches_the_harness() {
     );
 }
 
+/// Every command the provenance table offers must name a binary or test target
+/// that exists.
+///
+/// The table's whole purpose is telling a reader which figures are self-checking
+/// and which need re-running, so a row pointing at a deleted example is worse
+/// than no row: it promises reproducibility that is not there. The commands
+/// themselves are not executed — several need an adapter and one needs thirty
+/// runs — but the targets they name are checked to exist.
+#[test]
+fn the_provenance_table_points_at_targets_that_exist() {
+    let doc = features_md();
+
+    assert!(
+        doc.contains("Which numbers here are checked, and which are snapshots"),
+        "the provenance table is gone from FEATURES.md"
+    );
+
+    let examples = crate_root().join("examples");
+    let tests = crate_root().join("tests");
+
+    for named in ["gpu_bench", "tensor_crossover", "teardown_repro"] {
+        assert!(
+            doc.contains(named),
+            "FEATURES.md no longer references the {named} example"
+        );
+        assert!(
+            examples.join(format!("{named}.rs")).exists(),
+            "FEATURES.md points at examples/{named}.rs, which does not exist"
+        );
+    }
+
+    for named in ["features_doc", "gradcheck", "f32_topology"] {
+        assert!(
+            tests.join(format!("{named}.rs")).exists(),
+            "FEATURES.md points at tests/{named}.rs, which does not exist"
+        );
+    }
+}
+
 /// The withdrawn-claims table is the part most likely to rot, since it is
 /// maintained by hand and only grows when someone remembers.
 ///

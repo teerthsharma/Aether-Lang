@@ -15,7 +15,7 @@ wrong answer is worth keeping — but it means the current state has to be
 reconstructed from a sequence of corrections. This section is the state.
 
 **The backend works and nothing uses it.** 13 WGSL kernels, resident tensors,
-batched submission, 66 tests, 0 of 10 mutants escaping. No line of `aether-core`
+batched submission, 67 tests, 0 of 10 mutants escaping. No line of `aether-core`
 or `aether-lang` calls it.
 
 **Both integrations are measured; neither is made.**
@@ -39,6 +39,36 @@ f64, though the *guarantee* of identical combinatorics is unavailable past n≈3
 **Open defects:** an exit-time crash in wgpu's multi-backend instance teardown,
 worked around by instantiating one backend
 ([details](#a-crash-now-reproducible-at-1-in-5)).
+
+### Which numbers here are checked, and which are snapshots
+
+Two counts in this file are bound to the repository and fail the build when they
+drift. Everything else is a measurement taken once, and the distinction matters
+more than it looks: a reader has no way to tell a self-checking figure from one
+that was true in August unless the document says which is which.
+
+| figure | status | how to re-derive |
+|---|---|---|
+| test count | **checked** — `the_documented_test_count_matches_the_tests_that_exist` | `cargo test -p aether-gpu --test features_doc` |
+| mutant count | **checked** — `the_documented_mutant_count_matches_the_harness` | same |
+| f32 matmul error ~5e-7 | **bounded** — a test asserts it stays within 1e-9…1e-4 | `cargo test -p aether-gpu --features gpu f32_matmul` |
+| gradient agreement, 7,732 entries | **bounded** — tolerances asserted per fixture | `cargo test -p aether-gpu --features gpu --test gradcheck` |
+| Betti numbers unchanged under f32 | **checked** — asserted, not reported | `cargo test -p aether-gpu --features gpu --test f32_topology` |
+| every timing, every ratio | **snapshot** | `cargo run -p aether-gpu --example gpu_bench --release` |
+| crossover n=128, 38× at n=512 | **snapshot** | `cargo run -p aether-gpu --example tensor_crossover --release` |
+| crash rates (8/60, 0/180) | **snapshot** | `crates/aether-gpu/examples/teardown_repro.rs`, 30 runs a variant |
+
+The snapshots cannot be bound and it is not a gap in the tooling. A timing
+depends on the adapter, the driver, the thermal state and what else the machine
+was doing; asserting one would produce a test that fails for reasons unrelated
+to the code, which is worse than a number carrying a date. What they can carry
+is the command that reproduces them, and every row above has one.
+
+The bounded rows are the middle case: the *value* moves between runs, but the
+*claim* — that it stays inside a stated range — is asserted. That is the
+strongest form available for a measured quantity, and it is why those tests
+assert both an upper and a lower bound rather than only the direction that
+would embarrass the code.
 
 ### Conclusions this document reached and then withdrew
 
