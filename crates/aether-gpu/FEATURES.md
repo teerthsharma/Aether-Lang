@@ -382,6 +382,45 @@ The `Drop` impl earns its place independently: without it, work recorded and
 never flushed is discarded silently, so a caller that updates parameters and
 never reads them back would lose the update with no error.
 
+## Is f32 good enough for the topology?
+
+The question standing between this crate and the thing the repository is about.
+`pairwise_sqdist` exists because the O(n²d) distance computation dominates every
+Vietoris–Rips filtration in `aether-core`, but the engine computes in f64 and
+WGSL has no f64. Routing distances through the GPU means computing the
+filtration from f32 values.
+
+That is a topological question, and the engine can be asked it directly.
+Coordinates are rounded through f32 and back — exactly what a GPU path does to
+its inputs — and the two diagrams compared. The stability theorem the engine's
+own invariant suite already asserts gives the bound in advance:
+
+$$d_B(\mathrm{Dgm}(X), \mathrm{Dgm}(X')) \le 2\varepsilon, \quad \varepsilon = \max \lVert x - x' \rVert$$
+
+| fixture | ε | bottleneck | bound 2ε |
+|---|---:|---:|---:|
+| random cloud, seed 1 | 2.318e-8 | 2.081e-8 | 4.636e-8 |
+| random cloud, seed 2 | 2.000e-8 | **2.618e-8** | 3.999e-8 |
+| random cloud, seed 3 | 1.951e-8 | **2.225e-8** | 3.902e-8 |
+| random cloud, seed 5 | 1.809e-8 | **2.570e-8** | 3.618e-8 |
+| random cloud, seed 8 | 1.948e-8 | **2.062e-8** | 3.896e-8 |
+| circle n=12, H₁ | 1.554e-8 | 7.772e-9 | 3.109e-8 |
+| circle n=18, H₁ | 2.617e-8 | 1.342e-8 | 5.234e-8 |
+| circle n=24, H₁ | 1.711e-8 | **2.126e-8** | 3.423e-8 |
+
+**Betti numbers are identical** across 39 filtration radii × 6 seeds, and the
+count of long H₁ bars on a circle is unchanged at every n tested.
+
+So f32 is viable for this engine. The bar endpoints move by about 2e-8, and the
+discrete invariants — which is what the language's seal loop actually terminates
+on — do not move at all. A convergence rule comparing integers cannot see a
+1e-8 shift in a birth time.
+
+The bolded rows are worth noting: in five of eight fixtures the bottleneck
+distance **exceeds ε** while staying under 2ε. The factor of 2 in the theorem is
+load-bearing here, not slack — a test written against ε rather than 2ε would
+fail on real data and look like a precision bug.
+
 ## Negative results
 
 **The distance kernel does not currently help the persistence engine.**
