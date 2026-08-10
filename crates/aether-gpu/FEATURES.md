@@ -187,6 +187,29 @@ against, one level up.
 | `sgd_update` ascends instead of descending | **caught** | survives |
 | `softmax_rows` max subtraction removed | **caught** | survives |
 | `relu_backward` gates on the gradient, not the pre-activation | **caught** | **caught** |
+| `adam_update` bias correction dropped | **caught** | survives |
+| `adam_update` epsilon inside the square root | **caught** | survives |
+
+The epsilon-placement mutant escaped every suite on its first run. At ordinary
+gradient magnitudes `sqrt(vhat) + eps` and `sqrt(vhat + eps)` differ by about
+5e-5 relative, inside any tolerance the other Adam tests can justify. It is only
+visible where `vhat` is comparable to epsilon: at a gradient of 1e-6 the second
+form gives a denominator a hundred times larger and a step a hundred times
+smaller. That is the general shape of an epsilon bug — invisible in the regime
+the code normally runs in, decisive in the regime epsilon exists for — so the
+test that catches it uses a deliberately tiny gradient.
+
+### The harness deleted uncommitted work
+
+The harness restores by `git checkout`, which discards uncommitted changes to
+the shader. Running it while the Adam kernels were written but not committed
+deleted them, and the output never said so: it reported that every Adam pattern
+failed to match, which reads as a harness bug, then that the clean tree failed,
+because the Rust side still referenced pipelines the shader no longer defined.
+
+It now refuses to run against a dirty shader. A destructive restore is fine; a
+destructive restore that reports the damage as a pattern-matching problem is
+not.
 
 **Every defect is now caught by at least one suite. Two were not, before this
 run added tests for them.**
