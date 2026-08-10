@@ -134,6 +134,52 @@ zeroes — `dk` and `dv` walk the schedule in the opposite direction from every
 other kernel here, testing block membership per query block, and a test that
 answered yes too often would write gradient where there should be none.
 
+### End-to-end training does not rescue a sparse schedule
+
+`recall_training` freezes attention and records its narrowest assumption: a model
+trained end to end could reshape its queries to suit whatever schedule it was
+handed, so a frozen comparison might understate what a schedule is worth. With a
+verified backward pass that assumption is testable, and `recall_end_to_end` tests
+it by learning a query projection `Wq` through the attention kernel with keys,
+values and schedule fixed. Learning only the queries is not a simplification of
+the question — reshaping queries was the question.
+
+| schedule | identity | trained | change | control: scrambled → trained |
+|---|---:|---:|---:|---|
+| dense | 51.0% | **86.0%** | +35.0% | 40.0% → 55.0% |
+| topological | 56.0% | 61.0% | +5.0% | 48.0% → 54.0% |
+| inverted | 52.0% | 56.0% | +4.0% | 46.0% → 55.0% |
+| random | 53.0% | 59.0% | +6.0% | 50.0% → 53.0% |
+
+**Training does not close the gap.** Dense reaches 86% while every sparse arm
+plateaus between 56% and 61%, and the three remain indistinguishable from each
+other. A model can learn a great deal from blocks it can see and cannot learn its
+way to blocks it never sees. The frozen result stands, and its stated limit is
+discharged rather than merely acknowledged.
+
+The first run of this said the opposite by saying nothing: every arm moved by ±1
+to 3% and the gap survived, which reads as the same conclusion. The positive
+control refused it. Starting from a scrambled `Wq`, training recovered **42.0% to
+42.0%** — not a small improvement, exactly none — so the null described an
+optimiser that could not move rather than a schedule that could not be
+compensated for.
+
+The cause is in the design. `recall_training` plants the query at `MATCH = 30` so
+the target dominates the softmax and the frozen features carry the label cleanly.
+A softmax collapsed onto one column has a vanishing Jacobian: `ds = p (dp -
+delta)` cancels when a single `p` approaches 1, so almost no gradient reaches
+`Wq`. Sharp retrieval is what makes the task learnable and what makes it
+untrainable, and the two requirements pull against each other. At `MATCH = 5` the
+softmax is still informative and still differentiable, the control recovers in
+every arm, and the numbers above mean something.
+
+Limits: 400 sequences with 100 held out, so a 5-point difference is inside the
+sampling error and only the 25-point dense gap is resolved. `Wq` is 8×8 with
+plain gradient descent, no momentum and one learning rate for every arm. The
+control establishes that training moves accuracy, not that it reaches any
+optimum — a better optimiser might extract more from a sparse schedule than this
+one does.
+
 ### The function that makes the ablation fair had no test
 
 The selection code in `aether-core` produces every number in the two sections
