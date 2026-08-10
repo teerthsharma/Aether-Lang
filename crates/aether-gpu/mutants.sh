@@ -166,11 +166,23 @@ done
 restore
 
 echo
+# The point of this check is that a mutation run leaves nothing behind. It used
+# to report a failure here as "the shader was not restored correctly", which is
+# one cause among several and was wrong the first time it fired -- the shader was
+# clean and a documentation guard was failing for an unrelated reason. Naming a
+# cause the check cannot distinguish sends the reader to the wrong file, so it
+# now reports what it observed and prints the output that says why.
 echo "verifying the restored tree still passes"
-if cargo test -p aether-gpu >/dev/null 2>&1; then
+if clean="$(cargo test -p aether-gpu 2>&1)"; then
     echo "  clean tree: pass"
 else
-    echo "  clean tree: FAIL -- the shader was not restored correctly" >&2
+    echo "  clean tree: FAIL" >&2
+    if ! git diff --quiet -- "$shader"; then
+        echo "  the shader differs from HEAD, so restore did not complete" >&2
+    else
+        echo "  the shader matches HEAD, so the failure is elsewhere" >&2
+    fi
+    printf '%s\n' "$clean" >&2
     exit 99
 fi
 
