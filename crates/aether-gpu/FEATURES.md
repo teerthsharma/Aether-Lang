@@ -15,7 +15,7 @@ wrong answer is worth keeping — but it means the current state has to be
 reconstructed from a sequence of corrections. This section is the state.
 
 **The backend works and nothing uses it.** 18 WGSL kernels, resident tensors,
-batched submission, 86 tests, 0 of 20 mutants escaping. No line of
+batched submission, 87 tests, 0 of 20 mutants escaping. No line of
 `aether-core` or `aether-lang` calls it.
 
 `scheduled_attention_resident` returns a `GpuTensor` so attention output can feed
@@ -199,12 +199,43 @@ re-upload them, because the shared four-binding layout has nowhere to leave them
 That download is the `ponytail:` marker in `scheduled_attention_backward_resident`
 and is the first thing to remove if this path ever needs to be fast.
 
+#### f32 gradient error grows about linearly with the sequence
+
+The agreement above was measured at 64 positions, which left open whether f32
+holds at the 512 the ablation uses — every softmax there sums four times as many
+terms, and both `attention_row_stats` and the `dk`/`dv` accumulations grow
+linearly in the sequence.
+
+Worst `|gpu - cpu|` across `dq`, `dk` and `dv`, dense schedule, `head_dim` 16:
+
+| seq | worst error | ratio to previous |
+|---:|---:|---:|
+| 64 | 1.159e-7 | — |
+| 128 | 1.635e-7 | 1.41× |
+| 256 | 4.500e-7 | 2.75× |
+| 512 | 1.251e-6 | 2.78× |
+
+Eight times the sequence costs 10.8× the error, which is growth of roughly
+`length^1.14` — essentially linear, and nowhere near the quadratic the test
+permits. At 512 the disagreement is 160× below the tolerance the other parity
+tests assert, so f32 is not the limiting factor anywhere this repository
+currently measures, and on this trend would not become one until the sequence is
+two orders of magnitude longer.
+
+The test pins the growth rate rather than the magnitude. An absolute bound would
+pass on a kernel whose error was about to explode one size later; the ratio
+between consecutive rows is the quantity that says whether f32 remains viable at
+lengths not yet run.
+
 Limits: 400 sequences with 100 held out, so a 5-point difference is inside the
 sampling error and only the 25-point dense gap is resolved. `Wq` is 8×8 with
 plain gradient descent, no momentum and one learning rate for every arm. The
 control establishes that training moves accuracy, not that it reaches any
 optimum — a better optimiser might extract more from a sparse schedule than this
-one does. One run per backend, not a distribution.
+one does. One run per backend, not a distribution. The error table is one seed
+per size and a dense schedule, which is the worst case for accumulation and the
+best case for cancellation; a sparse schedule sums fewer terms and a different
+seed would move the last digit.
 
 ### The function that makes the ablation fair had no test
 
