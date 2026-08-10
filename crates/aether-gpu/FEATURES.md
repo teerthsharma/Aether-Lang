@@ -513,9 +513,23 @@ Diagrams from real `pairwise_sqdist` output against exact f64 distances:
 
 | n | homology | distance error | bottleneck | Betti |
 |---:|---|---:|---:|---|
-| 32 | H₁ | — | — | identical |
+| 32 | H₁ | 9.021e-8 | 2.463e-8 | identical |
 | 64 | H₁ | 9.435e-8 | 3.389e-8 | identical |
 | 128 | H₀ | 1.127e-7 | 2.384e-8 | identical |
+
+The kernel output goes in unmodified — square root, then straight to the engine.
+An earlier version averaged `d(i,j)` with `d(j,i)` on the stated assumption that
+f32 rounding made them differ in the last bit. **That was wrong.** IEEE-754
+subtraction is exactly antisymmetric, so `a − b` and `b − a` differ only in sign
+bit, their squares are bitwise identical, and the kernel accumulates both orders
+over the same range. Symmetry is a property of the arithmetic, not an
+approximation.
+
+The averaging was harmless and still worth deleting: it hid the property rather
+than relying on it, and would have masked a genuine indexing bug. The symmetry
+test now asserts bitwise equality rather than agreement to 1e-5 — a tolerance
+that loose would have accepted a transposition producing slightly different
+entries.
 
 The bottleneck distance comes in *below* the distance error every time, which is
 what the bound predicts: perturbing every filtration value by at most δ moves
