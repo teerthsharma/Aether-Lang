@@ -133,6 +133,48 @@ Any mutation run on a file consumed through `include_str!` has to force the
 modification time forward, or verify the mutant is present in the built
 artifact rather than only in the source.
 
+## Submission batching, and the regression it caused first
+
+Every resident operation used to build its own encoder and submit it, so a
+training step cost one queue submission per operation. Work now accumulates
+into a single encoder, submitted at `flush()` or at the next `read()`.
+
+Batching alone made things **worse**:
+
+| variant | wall clock, 5 folds x 100 epochs |
+|---|---:|
+| one submission per operation | 0.48 s |
+| batched, flush once per fold | **0.65 s** |
+| batched, flush once per step | **0.27 s** |
+
+Flushing per fold records the entire run into one encoder. The GPU idles while
+the CPU builds roughly two thousand dispatches, every intermediate buffer from
+every epoch stays alive until the end, and the CPU/GPU overlap that the
+unbatched version got for free is gone. The win only appears with a flush
+boundary at the training step: batch within a step, submit per step.
+
+Recorded because the intuition "fewer submissions is faster" is what produced
+the 0.65 s version, and the measurement is the only thing that contradicted it.
+
+Final: **0.27 s against the 7.76 s round-tripping baseline, 28.55x**, with the
+CV accuracy unchanged at 0.8220 +/- 0.0271.
+
+## An unreproduced crash
+
+One `STATUS_ACCESS_VIOLATION` (`0xc0000005`) at process exit, on the first run
+of `train_resident` after a rebuild. It did not reproduce in twelve subsequent
+runs of the same binary, and has not reappeared since.
+
+Not diagnosed. `GpuContext` now implements `Drop` to submit any recorded work
+and block until the device is idle, which closes a plausible mechanism --
+tearing down a device with queue work in flight -- but no evidence links that
+mechanism to the observed fault. It is hardening, not a fix, and it is listed
+here rather than in **Shipped** for that reason.
+
+The `Drop` impl earns its place independently: without it, work recorded and
+never flushed is discarded silently, so a caller that updates parameters and
+never reads them back would lose the update with no error.
+
 ## Negative results
 
 **The distance kernel does not currently help the persistence engine.**

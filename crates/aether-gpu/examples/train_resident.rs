@@ -161,6 +161,16 @@ impl ResidentMlp {
         self.b2 = ctx.sgd_update_resident(&self.b2, &db2, lr).expect("b2");
         self.w3 = ctx.sgd_update_resident(&self.w3, &dw3, lr).expect("w3");
         self.b3 = ctx.sgd_update_resident(&self.b3, &db3, lr).expect("b3");
+
+        // Submit once per step, not once per operation and not once per fold.
+        //
+        // Per operation costs a driver transition twenty times a step. Per fold
+        // is worse: the whole run records into one encoder, so the GPU idles
+        // while the CPU builds two thousand dispatches and every intermediate
+        // buffer from every epoch stays resident until the end. Measured at
+        // 0.65 s against 0.48 s for the unbatched version -- batching without a
+        // flush boundary is a regression, not an optimisation.
+        ctx.flush();
     }
 
     fn predict(&self, ctx: &GpuContext, x: &GpuTensor) -> Vec<f32> {
