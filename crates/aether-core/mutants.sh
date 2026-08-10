@@ -51,7 +51,7 @@ trap restore EXIT
 
 # A baseline run must pass, or every mutant is "caught" by a failure that was
 # already there and the whole table means nothing.
-if ! cargo test -p aether-core --test ablation_baselines >/dev/null 2>&1; then
+if ! cargo test -p aether-core --test ablation_baselines --test scheduled_attention >/dev/null 2>&1; then
     echo "the clean tree already fails ablation_baselines." >&2
     echo "Every mutant would be reported as caught by a pre-existing failure." >&2
     exit 100
@@ -66,10 +66,32 @@ mutants=(
 "random_block_schedule: shuffle is a no-op|s/let j = i \+ \(next\(\) as usize\) % \(candidates - i\);/let j = i;/"
 "inverted selector: admits the zero-salience block|s/\.filter\(\|&b\| salience\[b\] != 0\.0\)//"
 "schedule_budget: reports one block too many|s/\.map\(\|q_block\| schedule\.row\(q_block\)\.len\(\)\)/.map(|q_block| schedule.row(q_block).len() + 1)/"
+# ── block_salience and topology_block_schedule ──────────────────────────────
+#
+# The mechanism itself, and the reason it is covered here rather than trusted.
+# This repository concluded that the salience ranking is anti-correlated with
+# attention mass because it scores blocks by isolation. That explanation assumes
+# `block_salience` computes the H0 death times it claims to; if it does not, the
+# anti-correlation is an artefact and the explanation is a story told about a
+# bug. The tests asserting it were never measured either.
+"block_salience: elder rule inverted|s/if members\[root_left\]\.len\(\) > members\[root_right\]\.len\(\) \{/if members[root_left].len() < members[root_right].len() {/"
+"block_salience: death recorded for the surviving component|s/for &block in &members\[root_left\] \{/for \&block in \&members[root_right] {/"
+"block_salience: merges in decreasing distance|s/a\.0\.total_cmp\(&b\.0\)/b.0.total_cmp(\&a.0)/"
+"block_salience: centroids summed not averaged|s/centroids\[block \* dim \+ d\] \/= block_size as f64;/centroids[block * dim + d] \/= 1.0;/"
+"block_salience: squared distance left unrooted|s/edges\.push\(\(sqrt\(sum\), i, j\)\);/edges.push((sum, i, j));/"
+"topology_block_schedule: local window narrowed to the diagonal|s/for block in q_block\.saturating_sub\(config\.local_radius_blocks\)\.\.=q_block \{/for block in q_block..=q_block {/"
+"topology_block_schedule: sink blocks dropped|s/for block in 0\.\.config\.sink_blocks\.min\(num_blocks\)\.min\(q_block \+ 1\) \{/for block in 0..0usize {/"
 )
 
-printf '%-58s %-10s\n' "MUTANT" "ablation"
-printf '%-58s %-10s\n' "----------------------------------------------------------" "----------"
+# Suites run against each mutant. A mutant escapes only if it survives every one.
+suites=(ablation_baselines scheduled_attention)
+
+printf '%-58s' "MUTANT"
+for suite in "${suites[@]}"; do printf ' %-12s' "$suite"; done
+printf '\n'
+printf '%-58s' "----------------------------------------------------------"
+for _ in "${suites[@]}"; do printf ' %-12s' "------------"; done
+printf '\n'
 
 escaped=0
 
@@ -85,7 +107,9 @@ for entry in "${mutants[@]}"; do
     # A pattern that matches nothing tests nothing. Counting it as an escape is
     # deliberate: the alternative reports a stale mutant as coverage.
     if [ "$before" = "$after" ]; then
-        printf '%-58s %-10s  <- pattern did not match\n' "$name" "SKIPPED"
+        printf '%-58s' "$name"
+        for _ in "${suites[@]}"; do printf ' %-12s' "SKIPPED"; done
+        printf '  <- pattern did not match\n'
         escaped=$((escaped + 1))
         continue
     fi
@@ -94,11 +118,22 @@ for entry in "${mutants[@]}"; do
 
     # A mutant that fails to compile is caught: the change is not a silent
     # behaviour difference, which is the class this harness is looking for.
-    if cargo test -p aether-core --test ablation_baselines >/dev/null 2>&1; then
+    any_caught=0
+    printf '%-58s' "$name"
+    for suite in "${suites[@]}"; do
+        if cargo test -p aether-core --test "$suite" >/dev/null 2>&1; then
+            printf ' %-12s' "survives"
+        else
+            printf ' %-12s' "CAUGHT"
+            any_caught=1
+        fi
+    done
+
+    if [ "$any_caught" -eq 0 ]; then
         escaped=$((escaped + 1))
-        printf '%-58s %-10s  <- ESCAPED\n' "$name" "survives"
+        printf '  <- ESCAPED EVERY SUITE\n'
     else
-        printf '%-58s %-10s\n' "$name" "CAUGHT"
+        printf '\n'
     fi
 done
 
@@ -106,7 +141,7 @@ restore
 
 echo
 echo "verifying the restored tree still passes"
-if clean="$(cargo test -p aether-core --test ablation_baselines 2>&1)"; then
+if clean="$(cargo test -p aether-core --test ablation_baselines --test scheduled_attention 2>&1)"; then
     echo "  clean tree: pass"
 else
     echo "  clean tree: FAIL" >&2
