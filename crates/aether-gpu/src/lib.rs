@@ -1254,16 +1254,32 @@ pub fn tensor_matmul(
 
     let (m, k, n) = (a.shape[0], a.shape[1], b.shape[1]);
 
-    // Borrow, convert, release. The borrows end before the dispatch so a caller
-    // can hold other references to the same tensors meanwhile.
-    let a32: Vec<f32> = {
-        let d = a.data.borrow();
-        d.iter().map(|v| *v as f32).collect()
+    // Gather through the strides rather than reading the buffer flat.
+    //
+    // `Tensor::matmul` indexes `data[i * strides[0] + l * strides[1]]`, so it
+    // honours a non-contiguous layout. Reading the backing vector in order
+    // instead would make this bridge strictly weaker than the function it
+    // mirrors, and wrong rather than slow: a caller who swapped one for the
+    // other would get a silently different answer.
+    //
+    // No operation in `aether-core` currently produces a non-contiguous tensor
+    // — `transpose` copies into a fresh one — so this costs nothing today. It
+    // exists because the failure it prevents is silent, and the first view or
+    // slice operation added to `Tensor` would introduce it without touching
+    // this file.
+    let gather = |t: &aether_core::ml::tensor::Tensor, rows: usize, cols: usize| -> Vec<f32> {
+        let d = t.data.borrow();
+        let mut out = Vec::with_capacity(rows * cols);
+        for i in 0..rows {
+            for j in 0..cols {
+                out.push(d[i * t.strides[0] + j * t.strides[1]] as f32);
+            }
+        }
+        out
     };
-    let b32: Vec<f32> = {
-        let d = b.data.borrow();
-        d.iter().map(|v| *v as f32).collect()
-    };
+
+    let a32 = gather(a, m, k);
+    let b32 = gather(b, k, n);
 
     let out = ctx.matmul(&a32, &b32, m, k, n)?;
     let out64: Vec<f64> = out.iter().map(|v| *v as f64).collect();
