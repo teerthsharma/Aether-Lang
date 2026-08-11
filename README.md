@@ -13,7 +13,7 @@
   <a href=".github/workflows/ci.yml"><img src="https://img.shields.io/github/actions/workflow/status/teerthsharma/Aether-Lang/ci.yml?branch=master&label=CI&style=flat-square" alt="CI"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-00aaff?style=flat-square" alt="License: MIT"></a>
   <a href="rust-toolchain.toml"><img src="https://img.shields.io/badge/rust-nightly-orange?style=flat-square&logo=rust" alt="Rust nightly"></a>
-  <a href="#results"><img src="https://img.shields.io/badge/tests-229%20passing%2C%2077%20ignored-brightgreen?style=flat-square" alt="229 passing, 77 ignored"></a>
+  <a href="#results"><img src="https://img.shields.io/badge/tests-229%20passing%2C%2078%20ignored-brightgreen?style=flat-square" alt="229 passing, 78 ignored"></a>
   <a href="#mutation-testing-or-how-i-learned-to-stop-trusting-green-checkmarks"><img src="https://img.shields.io/badge/mutants-52%20injected-purple?style=flat-square" alt="52 mutants"></a>
   <a href="#what-we-got-wrong"><img src="https://img.shields.io/badge/claims%20killed-6-red?style=flat-square" alt="6 claims killed"></a>
   <a href="docs/reference/status.md"><img src="https://img.shields.io/badge/claim%20ledger-live-blue?style=flat-square" alt="Claim ledger"></a>
@@ -216,7 +216,7 @@ All fixed; receipts in [PR #177](https://github.com/teerthsharma/Aether-Lang/pul
 
 The rule: a row is **Active** only if a command in [`.github/workflows/ci.yml`](.github/workflows/ci.yml) produces its evidence. Test count in a file is not evidence if the file never runs.
 
-A third status was needed once the GPU backend arrived. 🖥️ **Hardware-gated** means the tests need an adapter no CI runner has. They were briefly worse than useless: a test that returns early on a missing adapter *passes*, so `cargo test --workspace` reported roughly forty GPU tests green while executing none of them — the exact green checkmark this document spends a section warning about, built by its own author. They are now `#[ignore]`d behind an off-by-default `gpu` feature, so the same run prints `77 ignored` across the hardware suites. CI still compiles them with `cargo build -p aether-gpu --tests --features gpu`, so a broken one is caught rather than hidden behind the ignore. Asking for the hardware tests and finding no adapter now fails rather than skipping, so the feature flag is the only switch and cannot be half-honoured. The honest reading of a hardware-gated row is "verified on one developer machine", which is weaker than every other Active row here.
+A third status was needed once the GPU backend arrived. 🖥️ **Hardware-gated** means the tests need an adapter no CI runner has. They were briefly worse than useless: a test that returns early on a missing adapter *passes*, so `cargo test --workspace` reported roughly forty GPU tests green while executing none of them — the exact green checkmark this document spends a section warning about, built by its own author. They are now `#[ignore]`d behind an off-by-default `gpu` feature, so the same run prints `78 ignored` across the hardware suites. CI still compiles them with `cargo build -p aether-gpu --tests --features gpu`, so a broken one is caught rather than hidden behind the ignore. Asking for the hardware tests and finding no adapter now fails rather than skipping, so the feature flag is the only switch and cannot be half-honoured. The honest reading of a hardware-gated row is "verified on one developer machine", which is weaker than every other Active row here.
 
 | Subsystem | Status | Evidence |
 |---|---|---|
@@ -248,7 +248,7 @@ A third status was needed once the GPU backend arrived. 🖥️ **Hardware-gated
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
   cargo fmt --all -- --check                                   clean
   cargo clippy -D correctness -D suspicious                     clean
-  cargo test --workspace --exclude aether-kernel   229 passed 77 ignored
+  cargo test --workspace --exclude aether-kernel   229 passed 78 ignored
   cargo build -p aether-kernel --target x86_64-unknown-none        ok
   cargo build -p aether-core  --target thumbv7m-none-eabi          ok
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -2433,7 +2433,7 @@ The guards live in `crates/aether-gpu/tests/features_doc.rs`.
 
 | Claim | Where | Command |
 |---|---|---|
-| 215 passed, 🔒 77 ignored | [Status](#honest-status-dashboard) | `cargo test --workspace --exclude aether-kernel` |
+| 215 passed, 🔒 78 ignored | [Status](#honest-status-dashboard) | `cargo test --workspace --exclude aether-kernel` |
 | 12 persistence invariants | [Theory](#theoretical-foundation) | `cargo test -p aether-core --test persistence_invariants` |
 | 17 diagram-metric tests | [Test suite](#diagram_distancers--17-tests-381-lines) | `cargo test -p aether-core --test diagram_distance` |
 | 29 attention contracts | [Test suite](#attention_contractsrs--29-tests-1124-lines) | `cargo test -p aether-core --test attention_contracts -- --nocapture` |
