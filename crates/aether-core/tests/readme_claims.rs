@@ -113,6 +113,75 @@ fn claims(doc: &str) -> Vec<(String, usize, usize)> {
     found
 }
 
+/// The README says nothing in `aether-core` or `aether-lang` calls the GPU
+/// backend. That must stay true, or stop being said.
+///
+/// It is the most prominent limitation on the front page and the one a reader is
+/// most likely to act on: it decides whether the topology engine is a CPU library
+/// or a GPU-accelerated one. Every other claim this file binds is a count; this
+/// one is about the architecture, and it would go false the moment somebody wired
+/// the backend in — silently, because the wiring is the interesting part and the
+/// sentence three thousand words away is not.
+///
+/// # Why it reads the manifests rather than grepping
+///
+/// `grep -rn aether.gpu crates/aether-core/src` returns five hits today, all of
+/// them doc comments naming a reproduction command, and
+/// `crates/aether-lang/Cargo.toml` contains the string in a comment recording
+/// that its phantom `wgpu` dependency was deleted. A text search over this
+/// repository finds prose, which is how a check for this was briefly reported as
+/// failing when it is not.
+///
+/// A dependency edge is the thing that decides it, so the dependency sections are
+/// what get read.
+#[test]
+fn no_cpu_crate_depends_on_the_gpu_backend() {
+    let root = repo_root();
+    let mut offenders = Vec::new();
+    let mut checked = 0;
+
+    for crate_name in ["aether-core", "aether-lang", "aether-cli", "aether-kernel"] {
+        let manifest = root.join("crates").join(crate_name).join("Cargo.toml");
+        let Ok(src) = fs::read_to_string(&manifest) else {
+            continue;
+        };
+        checked += 1;
+
+        let mut in_dependency_section = false;
+        for line in src.lines() {
+            let t = line.trim();
+
+            if t.starts_with('[') {
+                in_dependency_section = t.contains("dependencies");
+                continue;
+            }
+            // Comments are not dependencies, which is the entire point.
+            if !in_dependency_section || t.starts_with('#') || t.is_empty() {
+                continue;
+            }
+            if t.split('#').next().unwrap_or(t).contains("aether-gpu") {
+                offenders.push(format!("{crate_name}: {t}"));
+            }
+        }
+    }
+
+    assert!(
+        checked >= 3,
+        "only {checked} manifests were read, so this check is looking at less of \
+         the workspace than it claims"
+    );
+
+    assert!(
+        offenders.is_empty(),
+        "these crates now depend on aether-gpu:\n  {}\nThe README states that \
+         nothing in aether-core or aether-lang calls the GPU backend, in the \
+         section a reader reaches first. If the integration was made, that \
+         sentence and the status table beside it are now false and need changing \
+         with it.",
+        offenders.join("\n  ")
+    );
+}
+
 #[test]
 fn the_readme_suite_counts_match_the_suites() {
     let root = repo_root();
