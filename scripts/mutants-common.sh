@@ -44,6 +44,13 @@ mutant_run_suite() {
         out="$(cargo test -p "$pkg" $extra --test "$suite" 2>&1)"
         if [ "$attempt" -eq 1 ] && printf '%s' "$out" \
             | grep -qE 'STATUS_ACCESS_VIOLATION|test exited abnormally|didn.t exit successfully'; then
+            # Counted, because the fault being retried is a known and unfixed
+            # one. A silent retry hides how often it fires, so a rising crash
+            # rate — a driver update, a change that makes teardown more likely —
+            # would stay invisible until cells began failing twice and the
+            # harness started reporting escapes that were not there. The count
+            # is the only signal that the workaround is still only a workaround.
+            MUTANT_RETRIES=$((${MUTANT_RETRIES:-0} + 1))
             continue
         fi
         break
@@ -137,6 +144,13 @@ mutant_report_catchers() {
         echo "one of them has stopped matching. The table above is still correct," >&2
         echo "which is what would have made this quiet." >&2
         exit 98
+    fi
+
+    if [ "${MUTANT_RETRIES:-0}" -gt 0 ]; then
+        echo
+        echo "$MUTANT_RETRIES cell(s) crashed and were retried."
+        echo "This is the wgpu teardown intermittent, worked around and not fixed."
+        echo "A number that climbs between runs is the workaround wearing out."
     fi
 
     echo
