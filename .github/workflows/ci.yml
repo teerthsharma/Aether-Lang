@@ -171,6 +171,18 @@ jobs:
           cargo build -p aether-core --no-default-features --features no_std
           -Z build-std=core,alloc --target thumbv7m-none-eabi
 
+      # aegis-core declares `std` and `alloc` features and nothing built the
+      # configuration without `std`. It is not a dependency of aether-kernel, so
+      # unlike aether-core and aether-lang it was never compiled for a bare-metal
+      # target even indirectly, and its `extern crate alloc` -- which a host build
+      # reports as unused and a no_std build requires -- was protected by nothing.
+      #
+      # Built here rather than a comment asked to hold the invariant.
+      - name: Build Aegis Core (no_std)
+        run: >
+          cargo build -p aegis-core --no-default-features --features alloc
+          -Z build-std=core,alloc --target thumbv7m-none-eabi
+
   # ═══════════════════════════════════════════════════════════════════════════
   # Bare-metal kernel
   # ═══════════════════════════════════════════════════════════════════════════
