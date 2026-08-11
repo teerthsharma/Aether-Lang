@@ -2452,7 +2452,7 @@ The guards live in `crates/aether-gpu/tests/features_doc.rs`.
 | `nalgebra` has zero call sites | [What We Got Wrong §6](#6-nalgebra-a-second-phantom-dependency) | `grep -rn nalgebra crates/ --include=*.rs` |
 | 102 GPU tests, 76 hardware-gated, RTX 4060 / Vulkan | [Status](#honest-status-dashboard) | `cargo test -p aether-gpu --features gpu --release` |
 | 🔒 20 WGSL kernels | [FEATURES.md](crates/aether-gpu/FEATURES.md) | `grep -c '^@compute' crates/aether-gpu/src/shaders.wgsl` |
-| 0 of 24 GPU mutants escape, 0 of 26 in core | [FEATURES.md](crates/aether-gpu/FEATURES.md) | `./crates/aether-gpu/mutants.sh`, `./crates/aether-core/mutants.sh` |
+| 0 of 25 GPU mutants escape, 0 of 26 in core | [FEATURES.md](crates/aether-gpu/FEATURES.md) | `./crates/aether-gpu/mutants.sh`, `./crates/aether-core/mutants.sh` |
 | matmul crossover n=128 (magnitude not reproducible; 10×–63× observed) | [FEATURES.md](crates/aether-gpu/FEATURES.md) | `cargo run -p aether-gpu --example tensor_crossover --release`, and `-- --samples` for the raw timings |
 | 🔒 11,637 Lean lines, 48 theorems, 0 `sorry` | [Lean](#the-lean-formalization) | `(Get-ChildItem Aether -Recurse -Filter *.lean \| Get-Content).Count`, then `Select-String "^\s*(theorem\|lemma)\s"` and `Select-String "\bsorry\b"` |
 
@@ -2611,6 +2611,7 @@ The scheduled-attention module is a port of [`triton-lang/kernels#22`](https://g
   <em>Every number above was measured. Every claim names its control.<br>
   The section where I am wrong is a third of the document, and that is the feature.</em>
 </p>
+
 
 
 
