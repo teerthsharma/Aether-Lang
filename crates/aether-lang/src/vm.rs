@@ -19,8 +19,6 @@
 //
 
 #[cfg(not(feature = "std"))]
-use alloc::boxed::Box;
-#[cfg(not(feature = "std"))]
 use alloc::string::{String, ToString};
 #[cfg(not(feature = "std"))]
 use alloc::vec;
@@ -224,10 +222,13 @@ impl TitanVM {
                 }
 
                 OpCode::PRINT => {
-                    let val = self.stack.pop().ok_or("Stack underflow")?;
-                    // In no_std we might print differently, for now simple debug
+                    // Popped whether or not anything prints it: PRINT
+                    // consumes its operand, and `?` is what reports an empty
+                    // stack. The underscore matches EMBED below, which already
+                    // spells this pattern that way.
+                    let _val = self.stack.pop().ok_or("Stack underflow")?;
                     #[cfg(feature = "std")]
-                    println!("{:?}", val);
+                    println!("{:?}", _val);
                 }
 
                 OpCode::EMBED => {
