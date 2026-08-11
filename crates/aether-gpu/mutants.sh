@@ -121,9 +121,15 @@ if printf '%s' "$probe" | grep -q "device_type=Cpu"; then
     exit 100
 fi
 
-printf '%-46s %-10s %-10s %-10s\n' "MUTANT" "gpu_parity" "gradcheck" "attention"
-printf '%-46s %-10s %-10s %-10s\n' "----------------------------------------------" \
-    "----------" "----------" "----------"
+# A mutant escapes only if it survives every one of these.
+suites=(gpu_parity gradcheck attention_parity)
+
+printf '%-46s' "MUTANT"
+for suite in "${suites[@]}"; do printf ' %-10s' "$suite"; done
+printf '\n'
+printf '%-46s' "----------------------------------------------"
+for _ in "${suites[@]}"; do printf ' %-10s' "----------"; done
+printf '\n'
 
 escaped=0
 
@@ -144,30 +150,51 @@ for entry in "${mutants[@]}"; do
 
     touch "$shader"
 
-    if cargo test -p aether-gpu $features --test gpu_parity >/dev/null 2>&1; then
-        parity="survives"
-    else
-        parity="CAUGHT"
-    fi
+    # A non-zero exit used to mean "caught", which conflates three outcomes that
+    # are not the same evidence: tests that ran and failed, a shader the
+    # validator rejected, and cargo never running at all. The third is a fault in
+    # this script, and counting it as caught marks every mutant caught for the
+    # same reason -- a clean sweep of nothing, reported in the same words as a
+    # clean sweep of everything.
+    #
+    # The same conflation was found and removed in crates/aether-core/mutants.sh.
+    # It matters more here: this harness has already spent twenty-odd commits
+    # measuring nothing, when it ran the suites without --features gpu and every
+    # hardware test was ignored.
+    any_caught=0
+    printf '%-46s' "$name"
+    for suite in "${suites[@]}"; do
+        out="$(cargo test -p aether-gpu $features --test "$suite" 2>&1)"
+        if printf '%s' "$out" | grep -q "test result: ok"; then
+            printf ' %-10s' "survives"
+        else
+            counts="$(printf '%s' "$out" | grep -oE '[0-9]+ passed; [0-9]+ failed' | head -1)"
+            if [ -n "$counts" ]; then
+                passed="${counts%% passed;*}"
+                failed="${counts##*; }"
+                failed="${failed%% failed}"
+                printf ' %-10s' "$failed/$((passed + failed))"
+            elif printf '%s' "$out" | grep -qE 'error\[E[0-9]+\]|error: could not compile'; then
+                printf ' %-10s' "build"
+            else
+                printf '\n'
+                echo "cargo produced neither a test result nor a compile error for" >&2
+                echo "  mutant: $name" >&2
+                echo "  suite:  $suite" >&2
+                echo "Counting this as caught would mark every mutant caught for the" >&2
+                echo "same reason and report a clean sweep of nothing." >&2
+                printf '%s\n' "$out" >&2
+                exit 97
+            fi
+            any_caught=1
+        fi
+    done
 
-    if cargo test -p aether-gpu $features --test gradcheck >/dev/null 2>&1; then
-        grad="survives"
-    else
-        grad="CAUGHT"
-    fi
-
-    if cargo test -p aether-gpu $features --test attention_parity >/dev/null 2>&1; then
-        attn="survives"
-    else
-        attn="CAUGHT"
-    fi
-
-    if [ "$parity" = "survives" ] && [ "$grad" = "survives" ] && [ "$attn" = "survives" ]; then
+    if [ "$any_caught" -eq 0 ]; then
         escaped=$((escaped + 1))
-        printf '%-46s %-10s %-10s %-10s  <- ESCAPED EVERY SUITE\n' \
-            "$name" "$parity" "$grad" "$attn"
+        printf '  <- ESCAPED EVERY SUITE\n'
     else
-        printf '%-46s %-10s %-10s %-10s\n' "$name" "$parity" "$grad" "$attn"
+        printf '\n'
     fi
 done
 
