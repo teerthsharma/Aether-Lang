@@ -1811,6 +1811,19 @@ The prior six example tests missed two of three defects **entirely**. That is th
 | Image hardcodes the Gaussian width, ignoring σ | 1 / 17 |
 | Bottleneck forbids diagonal projection | not run — infinite costs diverge the matching search |
 
+All four runnable defects are in the harness and every count reproduces exactly:
+2/17, 1/17, 1/17, 1/17. The fifth stays out rather than being quietly dropped —
+adding a mutant that hangs the run would trade one unverified claim for an
+unusable one.
+
+Across the whole section that is **six of seven reproducible claims landing on
+their original figures**, and one that had rotted: the filtration epsilon above,
+now 1/12 against a claimed 4/11. Three of the four here are caught by a single
+test of seventeen, which is the state the epsilon reached before it reached zero.
+Nothing is added to pad those numbers — a second test written to make a fraction
+look better would test the fixture, not the code. The harness is the guard: the
+epsilon slipped because no command re-ran it, and now one does.
+
 **Two of those five survived the first version of the suite.**
 
 The level-ordering test used *nested* bars, whose tent values already arrive in descending order, so an implementation skipping the sort passed anyway. And **no test referenced σ at all**, so every image property — shape, non-negativity, weighting, translation equivariance — held for any fixed kernel width whatsoever.

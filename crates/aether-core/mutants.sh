@@ -107,6 +107,22 @@ mutants=(
 "persistence: triangle filtration drops one of three edges|crates/aether-core/src/persistence.rs|s/distances\[j \* n \+ k\],/distances[i * n + j],/"
 "persistence: absolute epsilon added to the filtration radius|crates/aether-core/src/persistence.rs|s/if r <= config\.max_radius \{/if r <= config.max_radius + 0.001 {/"
 "persistence: column reduction stops after one operation|crates/aether-core/src/persistence.rs|s/            column = xor_sorted\(&column, owner_column\);/            column = xor_sorted(\&column, owner_column);\n            break;/"
+# ── the diagram metrics ─────────────────────────────────────────────────────
+#
+# The four runnable defects the README reports under "Diagram metrics", with
+# claimed counts of 2/17, 1/17, 1/17 and 1/17. Three of those are a single test
+# away from zero coverage, which is the state the filtration epsilon was already
+# found to have reached: caught by four, then by none, without any assertion
+# being touched.
+#
+# The fifth defect in that table, bottleneck forbidding diagonal projection, is
+# recorded there as never having run because infinite costs diverge the matching
+# search. It is left out rather than quietly dropped -- adding a mutant that
+# hangs the harness would trade one unverified claim for an unusable one.
+"landscape: per-sample descending sort skipped|crates/aether-core/src/diagram.rs|s/    tents\.sort_by\(\|a, b\| b\.total_cmp\(a\)\);//"
+"image: linear persistence weight dropped|crates/aether-core/src/diagram.rs|s/let weight = persistence;/let weight = 1.0;/"
+"image: gaussian width hardcoded, sigma ignored|crates/aether-core/src/diagram.rs|s/let two_sigma_sq = 2\.0 \* config\.sigma \* config\.sigma;/let two_sigma_sq = 2.0 * 0.1 * 0.1;/"
+"wasserstein: returns the max instead of the sum|crates/aether-core/src/diagram.rs|s/\(1\.\.=n\)\.map\(\|j\| cost\[assignment\[j\] - 1\]\[j - 1\]\)\.sum\(\)/(1..=n).map(|j| cost[assignment[j] - 1][j - 1]).fold(0.0, f64::max)/"
 )
 
 # Suites run against each mutant. A mutant escapes only if it survives every one.
