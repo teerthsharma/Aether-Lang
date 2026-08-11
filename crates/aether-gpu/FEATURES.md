@@ -1262,6 +1262,42 @@ The change loosens the bound at unit magnitude by the reference scale, so the
 teeth were re-checked rather than assumed: the injected 1e-5 error still fails
 the same seven tests, the three `tolerance()` callers among them.
 
+##### Trying to break it with cancellation, and failing
+
+Scaling by the largest reference value should fail where a result is small
+*because* it cancelled: the terms are large, the error is proportional to them,
+and the scale collapses. Three fixtures were built to produce that, and none did.
+
+| fixture | worst error | verdict |
+|---|---:|---|
+| `±1000` alternating against ones | 0 | exactly representable, nothing rounds |
+| `1000 + δ` alternating, inexact cancellation | 0 | Sterbenz: subtracting nearby values is exact |
+| entries spanning `10⁻³` to `10³`, random signs | 6.250e-02 | passes a 5.235e0 bound, 84× headroom |
+
+The first two are the fixture's fault and the third is the point. Two structural
+facts protect the bound, and neither was designed in.
+
+`tolerance` compares a GPU f32 accumulation against `cpu_matmul`, which is **also
+f32**. It bounds the disagreement between two orderings of the same products, not
+the departure from the exact result — so it is bounded by reordering effects
+rather than by absolute rounding, and the catastrophic-cancellation bound from
+numerical analysis is answering a question this assertion does not ask. The
+untiled kernel and the CPU reference sum in the same order and frequently agree
+bit for bit, which is why the first two fixtures measured exactly zero even
+through the tiled kernel.
+
+The scale is the maximum over the **whole result matrix**, not per entry. One
+entry cancelling to nothing leaves every other entry at full size, so the scale
+stays representative of the term magnitudes that the error is proportional to. A
+per-entry relative bound would have the weakness this section went looking for;
+the matrix-wide maximum does not.
+
+Recorded as a negative result: the risk named in the previous revision is real in
+general and not reachable on this kernel with these assertions. What would reach
+it is a reference computed in f64, which would make the comparison one of absolute
+accuracy rather than of ordering — a different and stricter test than the one
+these fixtures perform, and not one this crate currently makes.
+
 The tightening has teeth, demonstrated rather than asserted. Injecting a 1e-5
 relative error into `matmul` and running the suite under both bounds:
 
