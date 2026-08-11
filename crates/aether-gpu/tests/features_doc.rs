@@ -448,6 +448,70 @@ fn the_readme_ignored_count_matches_the_gated_tests() {
     );
 }
 
+/// The f32 decision brief must point at sections and tests that exist.
+///
+/// The brief consolidates evidence made in five other places so the integration
+/// question can be decided from one table instead of five. Consolidating means
+/// pointing, and a pointer is the thing in this document most able to rot without
+/// looking wrong: a renamed heading leaves the brief reading exactly as it did,
+/// with a reference that resolves to nothing.
+///
+/// This is the same check the provenance table gets, applied to the newer table
+/// for the same reason — that one was added after a row was found naming a
+/// deleted example.
+#[test]
+fn the_f32_decision_brief_points_at_sections_and_tests_that_exist() {
+    let doc = features_md();
+
+    assert!(
+        doc.contains("The decision this leaves open, and the evidence for it in one place"),
+        "the f32 decision brief is gone from FEATURES.md"
+    );
+
+    // Headings the brief sends a reader to. Each must still be a heading, not
+    // merely a string that survives somewhere in the prose.
+    for section in [
+        "The f32 backward drives the same training outcome",
+        "f32 gradient error grows about linearly",
+        "Is f32 good enough for the topology",
+    ] {
+        let is_heading = doc
+            .lines()
+            .any(|l| l.trim_start().starts_with('#') && l.contains(section));
+        assert!(
+            is_heading,
+            "the brief points at a section titled {section:?}, which is no longer \
+             a heading in this file. The brief still reads correctly, which is why \
+             this is checked rather than noticed."
+        );
+    }
+
+    // Tests it cites by name, which carry the two numbers it quotes.
+    let parity = fs::read_to_string(crate_root().join("tests/gpu_parity.rs"))
+        .expect("gpu_parity.rs is missing");
+
+    for test in [
+        "per_entry_error_stays_inside_the_condition_number_bound",
+        "the_condition_number_of_every_entry_costs_one_extra_matmul",
+    ] {
+        assert!(
+            doc.contains(test),
+            "the brief no longer cites {test}, so the row quoting its measurement \
+             has lost its provenance"
+        );
+        assert!(
+            parity.contains(&format!("fn {test}")),
+            "the brief cites {test}, which no longer exists in tests/gpu_parity.rs"
+        );
+    }
+
+    assert!(
+        crate_root().join("tests/f32_topology.rs").exists(),
+        "the brief names tests/f32_topology.rs as the source of the Betti result, \
+         and it does not exist"
+    );
+}
+
 /// The precision budget must quote tolerances the suites actually assert.
 ///
 /// That table is the only place the crate says how much numerical error is
