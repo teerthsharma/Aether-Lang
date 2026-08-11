@@ -1000,6 +1000,77 @@ so dropping any single suite would let nineteen defects through — which is why
 the harness runs them separately and reports per-suite rather than combining
 them into one pass or fail.
 
+### Mutants nobody chose
+
+`mutants.sh` injects defects someone picked, which bounds the suite from below
+and says nothing about defects nobody imagined. The curated set and the tests
+that score it were written by the same person with the same idea of what breaks,
+so a blind spot shared between them is invisible to both.
+
+`mutants-mechanical.sh` removes the choosing. It enumerates every comparison
+operator in the shader and flips each one — `<` to `<=`, `>=` to `>`, `==` to
+`!=` — so a survivor is a defect class nobody selected for.
+
+The enumeration requires whitespace on both sides of the operator, and that is
+the only reason the result means anything. WGSL spells generics with angle
+brackets, so a pattern matching bare `<` and `>` finds 174 sites of which only 92
+are comparisons; the other 82 are `vec3<u32>` and friends. Flipping one produces
+a file that does not parse, and the harness scores a compile error as **caught** —
+correctly, for a real defect the type system rejects, and disastrously here. It
+would have reported 82 phantom catches and a coverage figure mostly measuring the
+WGSL grammar.
+
+| | count |
+|---|---:|
+| comparison sites | 92 |
+| inside `//` comments, skipped | 2 |
+| flips run | 90 |
+| **surviving every suite** | **52** |
+
+Against 0 of 24 for the curated set. **That number is not a coverage figure**, and
+reading it as one would repeat the mistake this file spends most of its length
+correcting.
+
+A flip that does not change what the program computes is an *equivalent mutant*.
+No test can catch it, because there is nothing to catch. Deciding which survivors
+are equivalent needs evidence the suites cannot supply: a suite reports pass or
+fail against a tolerance, so "survives" means the outputs agreed within that
+tolerance, not that they were identical. `examples/equivalence_probe.rs` closes
+that gap by checksumming the raw bits of each kernel's output, so a mutant can be
+run against a clean baseline and compared exactly.
+
+Three survivors, one per class, measured this way:
+
+| site | flip | combined checksum | verdict |
+|---|---|---|---|
+| 1 | `matmul` guard, `row >= m` → `row > m` | `0x88cb576d1452b4a3` | identical — equivalent |
+| 3 | `matmul` loop, `i < k` → `i <= k` | `0x88cb576d1452b4a3` | identical — equivalent |
+| 46 | `scheduled_attention` max, `>` → `>=` | `0x88cb576d1452b4a3` | identical — equivalent |
+
+Baseline `0x88cb576d1452b4a3`. All three agree with it bit for bit.
+
+The mechanism differs per class and the outcome does not. wgpu bounds-checks
+every access, so the guard flip's extra thread writes out of range and the write
+is discarded, and the loop flip's extra iteration reads out of range and gets
+zero, which contributes nothing to a sum of products. The max flip changes only
+which of two equal candidates is selected, and the maximum is the same value
+either way.
+
+**So a boundary mutant in a bounds-checked shading language is equivalent by
+construction far more often than in a language where the same defect corrupts
+memory.** A naive mutation score for WGSL understates coverage badly, and the
+figure to quote is the curated 0 of 24 with the mechanical sweep as context, not
+52 of 90 as though it were a hole count.
+
+Limits: three of the fifty-two are classified and forty-nine are not. The probe
+dispatches five of the twenty kernels, so a survivor in `softmax_rows`,
+`adam_update`, `transpose`, `column_sums`, `sigmoid`, `pairwise_sqdist` or any
+backward kernel produces an identical checksum because nothing ran it — which is
+indistinguishable, in that output, from a mutation that ran and changed nothing.
+Classifying the rest means extending the probe first. Only comparison operators
+were swept; arithmetic and index expressions are untouched, and the two comment
+sites were found by reading survivors rather than by anticipating them.
+
 ### The harness deleted uncommitted work
 
 The harness restores by `git checkout`, which discards uncommitted changes to
