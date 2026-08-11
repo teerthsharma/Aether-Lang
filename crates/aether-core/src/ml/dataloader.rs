@@ -71,7 +71,16 @@ impl DataLoader {
             let mut rng = 42u64; // Should ideally take a seed
             for i in (1..n).rev() {
                 rng = rng.wrapping_mul(6364136223846793005).wrapping_add(1);
-                let j = (rng as usize) % (i + 1);
+                // High bits, not low. A power-of-two-modulus LCG has period
+                // 2^(k+1) in bit k, so `rng as usize` hands the modulo the
+                // worst bits it has: bit 0 of this sequence is
+                // 1010101010101010101, and the low two bits cycle 3,0,1,2. The
+                // final swaps of a Fisher-Yates are the ones with the smallest
+                // bounds, so they were driven entirely by those bits -- at
+                // i = 1 the choice was `rng % 2`, which alternates rather than
+                // chooses. `datasets::Lcg` in aether-gpu already takes `>> 33`
+                // for this reason.
+                let j = ((rng >> 33) as usize) % (i + 1);
                 indices.swap(i, j);
             }
         }
