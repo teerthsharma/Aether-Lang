@@ -58,25 +58,22 @@ jobs:
       # leaving them as warnings. That is not the preference, it is the only
       # option: `-D warnings` is a blanket cap that promotes anything emitting a
       # warning into an error, and a later `-W clippy::style` does not override
-      # it — tried, and the job fails with the same 15 errors. Keeping the
-      # rustc-warning denial therefore costs visibility of the clippy style
+      # it — tried, and the job fails on every style lint just the same. Keeping
+      # the rustc-warning denial therefore costs visibility of the clippy style
       # groups, and this comment said they "stay warnings" until someone ran it.
       #
-      # Consequence worth knowing: `aether-core`'s library carries 15 of these
-      # today, with one more in each of two of its test targets — mostly
-      # `needless_range_loop`, three `neg_cmp_op_on_partial_ord`, one
-      # `too_many_arguments` — and nothing here will ever mention them. To see
-      # them:
+      # What is being silenced is printed by the advisory step below rather than
+      # counted here. An earlier revision of this comment stated the number, which
+      # is the kind of claim this repository keeps finding stale — and it was
+      # already understated, naming only `aether-core` when `aether-gpu`,
+      # `aether-lang` and most of the examples carry them too.
       #
-      #   cargo clippy -p aether-core --all-targets --
-      #     -W clippy::style -W clippy::complexity -W clippy::perf
-      #
-      # They are also the standing exposure in this configuration: a nightly that
-      # promotes one of those lints into `correctness` or `suspicious` turns this
-      # job red with no commit touching the code, and the toolchain is unpinned
-      # nightly. Three of them are `neg_cmp_op_on_partial_ord` on floats, where
-      # the mechanical rewrite changes NaN behaviour, so this is a list to read
-      # before acting on rather than one to apply with `--fix`.
+      # The standing exposure is worth stating and does not go stale: the
+      # toolchain is unpinned nightly, so a release that promotes one of these
+      # lints into `correctness` or `suspicious` turns this job red with no commit
+      # touching the code. Several are `neg_cmp_op_on_partial_ord` on floats,
+      # where the mechanical rewrite changes NaN behaviour, so the advisory output
+      # is a list to read before acting on rather than one to hand to `--fix`.
       - name: Clippy (correctness + suspicious)
         run: >
           cargo clippy --workspace --exclude aether-kernel --all-targets --
@@ -86,6 +83,31 @@ jobs:
           -A clippy::style
           -A clippy::complexity
           -A clippy::perf
+
+      # Prints what the gate above silences. Never fails.
+      #
+      # Documenting the count in a comment was the previous arrangement and it is
+      # the weaker one: a number in a comment is exactly the claim this repository
+      # keeps finding stale, and it would drift the first time somebody wrote
+      # another indexed loop. This puts the current list in the log of every run
+      # instead, where it costs nothing to read and cannot go out of date.
+      #
+      # Separate from the gate rather than folded into it because `-D warnings`
+      # and a visible style lint are mutually exclusive in one invocation: the cap
+      # promotes anything that warns into an error, so the only way to have both a
+      # denied unused import and a printed `needless_range_loop` is two runs.
+      #
+      # `continue-on-error` is belt and braces. Clippy exits zero on warnings, so
+      # this step passes on its own; the flag states that it must never do
+      # otherwise, so a future lint promoted to deny-by-default cannot quietly
+      # turn an advisory step into a gate.
+      - name: Clippy (style, advisory - never fails)
+        continue-on-error: true
+        run: >
+          cargo clippy --workspace --exclude aether-kernel --all-targets --
+          -W clippy::style
+          -W clippy::complexity
+          -W clippy::perf
 
       # The aether-gpu hardware tests are #[ignore]d unless its `gpu` feature is
       # on, so this run reports them as "ignored" rather than "passed". That
