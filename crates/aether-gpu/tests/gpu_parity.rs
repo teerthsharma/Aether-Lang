@@ -949,6 +949,111 @@ fn a_single_entry_is_far_less_accurate_than_the_matrix_figure_suggests() {
     );
 }
 
+/// The tiled kernel's accuracy, against an f64 reference.
+///
+/// Every f64 comparison in this file goes through `ctx.matmul`, which dispatches
+/// the untiled kernel. `matmul_resident` dispatches `matmul_tiled`, a separate
+/// kernel that stages 16×16 blocks into workgroup memory and accumulates in a
+/// different order — and it is the one the resident training path runs, so it is
+/// the one whose precision matters most.
+///
+/// Nothing measured it. Quantising the tiled accumulator to 2⁻²⁰, the same defect
+/// that fails three tests in the untiled kernel:
+///
+/// | suite | result |
+/// |---|---|
+/// | `gpu_parity` | **47 passed, 0 failed** |
+/// | `gradcheck` | caught, 4 of 14 |
+/// | `attention_parity` | 21 passed |
+///
+/// So it was caught, by the gradient suite, and by accident. Finite differences
+/// amplify precision loss, which makes `gradcheck` sensitive to it as a side
+/// effect of measuring something else. That is coverage held by a coincidence: a
+/// tolerance loosened there, or a fixture changed, and the tiled kernel would
+/// silently lose bits with the entire parity suite green.
+///
+/// This measures it on purpose, and the first attempt did not work. Bounding the
+/// tiled error by `8·ε·√k` — the bound the untiled test uses — let the same
+/// quantisation through: it costs about 1e-06 and the bound at k=23 is 4.6e-06.
+/// A tolerance wide enough to describe f32 accumulation is wide enough to hide a
+/// defect that only costs precision, which is the whole difficulty with testing
+/// for precision at all.
+///
+/// The two kernels turn out to agree **bitwise**. Across 703, 4096 and 40 entries
+/// on three shapes, zero differ — because tiling changes where the operands are
+/// staged and not the order they are summed in, so the same additions happen in
+/// the same sequence. That is a far stronger statement than any tolerance and it
+/// is the sensitive one: any change to either kernel's arithmetic breaks it
+/// immediately, including one too small for a bound to see.
+///
+/// Bitwise equality between two kernels is a strong claim to assert and could
+/// fail on an adapter that contracts one of them into fused multiply-adds and not
+/// the other. That would be worth knowing rather than a defect in this test, and
+/// the message says so — these tests need an adapter and run on one machine, so
+/// the risk is a surprise on someone else's hardware and not a broken CI.
+#[test]
+#[cfg_attr(not(feature = "gpu"), ignore = "needs a GPU adapter: --features gpu")]
+fn the_tiled_kernel_is_as_accurate_as_the_untiled_one_against_f64() {
+    let ctx = require_context();
+
+    for (m, k, n) in [(37usize, 23usize, 19usize), (64, 64, 64), (8, 128, 5)] {
+        let a32 = fill(m * k, 501 + k as u64);
+        let b32 = fill(k * n, 502 + k as u64);
+        let a64: Vec<f64> = a32.iter().map(|v| f64::from(*v)).collect();
+        let b64: Vec<f64> = b32.iter().map(|v| f64::from(*v)).collect();
+
+        let ga = ctx.upload(&a32, m, k).expect("upload a");
+        let gb = ctx.upload(&b32, k, n).expect("upload b");
+        let tiled = ctx
+            .read(&ctx.matmul_resident(&ga, &gb).expect("tiled matmul"))
+            .expect("readback");
+        let untiled = ctx.matmul(&a32, &b32, m, k, n).expect("untiled matmul");
+        let exact = f64_matmul(&a64, &b64, m, k, n);
+
+        let scale = exact.iter().fold(0.0f64, |acc, v| acc.max(v.abs()));
+        let worst = |got: &[f32]| {
+            got.iter()
+                .zip(&exact)
+                .map(|(g, e)| (f64::from(*g) - e).abs())
+                .fold(0.0f64, f64::max)
+                / scale
+        };
+
+        let (wt, wu) = (worst(&tiled), worst(&untiled));
+        let bound = 8.0 * 1.19e-7 * (k as f64).sqrt();
+        println!("{m}x{k}x{n}: tiled {wt:.3e}, untiled {wu:.3e}, bound {bound:.3e}");
+
+        // Both must still satisfy the ordinary accuracy bound. This is the weak
+        // half of the test and it is kept because it is the half that survives an
+        // adapter where the bitwise claim below does not.
+        assert!(
+            wt < bound,
+            "{m}x{k}x{n}: the tiled kernel's relative error {wt:e} exceeds \
+             {bound:e}. The untiled kernel measures {wu:e} on the same operands, \
+             so this is the tiling and not the arithmetic"
+        );
+
+        // The strong half. Same additions, same order, so the same bits.
+        let differing = tiled
+            .iter()
+            .zip(&untiled)
+            .filter(|(t, u)| t.to_bits() != u.to_bits())
+            .count();
+
+        assert_eq!(
+            differing,
+            0,
+            "{m}x{k}x{n}: {differing} of {} entries differ bitwise between the \
+             tiled and untiled kernels. They stage operands differently and sum \
+             them in the same order, so they agreed exactly when this was \
+             written. A difference means one of them changed how it accumulates — \
+             or that this adapter contracts one into fused multiply-adds and not \
+             the other, which is worth knowing and is not a defect in either.",
+            tiled.len()
+        );
+    }
+}
+
 /// Absolute accuracy at rectangular shapes, against an f64 reference.
 ///
 /// Every other matmul parity assertion compares the kernel to `cpu_matmul`,
