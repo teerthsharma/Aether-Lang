@@ -14,8 +14,8 @@ that were later retracted. That is deliberate — the reasoning that produced a
 wrong answer is worth keeping — but it means the current state has to be
 reconstructed from a sequence of corrections. This section is the state.
 
-**The backend works and nothing uses it.** 18 WGSL kernels, resident tensors,
-batched submission, 91 tests, 0 of 20 mutants escaping. No line of
+**The backend works and nothing uses it.** 20 WGSL kernels, resident tensors,
+batched submission, 92 tests, 0 of 20 mutants escaping. No line of
 `aether-core` or `aether-lang` calls it.
 
 `scheduled_attention_resident` returns a `GpuTensor` so attention output can feed
