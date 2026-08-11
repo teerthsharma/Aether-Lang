@@ -49,9 +49,34 @@ jobs:
         run: cargo fmt --all -- --check
         if: matrix.os == 'ubuntu-latest'
 
-      # Denies the two lint groups that find real defects. Style, complexity and
-      # perf lints stay warnings: a gate nobody can keep green gets switched off,
-      # and then correctness lints stop being enforced too.
+      # Denies the two lint groups that find real defects, plus every rustc
+      # warning — an unused import fails this job. The reasoning for not denying
+      # more: a gate nobody can keep green gets switched off, and then the
+      # correctness lints stop being enforced with it.
+      #
+      # Style, complexity and perf are `-A`, which silences them rather than
+      # leaving them as warnings. That is not the preference, it is the only
+      # option: `-D warnings` is a blanket cap that promotes anything emitting a
+      # warning into an error, and a later `-W clippy::style` does not override
+      # it — tried, and the job fails with the same 15 errors. Keeping the
+      # rustc-warning denial therefore costs visibility of the clippy style
+      # groups, and this comment said they "stay warnings" until someone ran it.
+      #
+      # Consequence worth knowing: `aether-core`'s library carries 15 of these
+      # today, with one more in each of two of its test targets — mostly
+      # `needless_range_loop`, three `neg_cmp_op_on_partial_ord`, one
+      # `too_many_arguments` — and nothing here will ever mention them. To see
+      # them:
+      #
+      #   cargo clippy -p aether-core --all-targets --
+      #     -W clippy::style -W clippy::complexity -W clippy::perf
+      #
+      # They are also the standing exposure in this configuration: a nightly that
+      # promotes one of those lints into `correctness` or `suspicious` turns this
+      # job red with no commit touching the code, and the toolchain is unpinned
+      # nightly. Three of them are `neg_cmp_op_on_partial_ord` on floats, where
+      # the mechanical rewrite changes NaN behaviour, so this is a list to read
+      # before acting on rather than one to apply with `--fix`.
       - name: Clippy (correctness + suspicious)
         run: >
           cargo clippy --workspace --exclude aether-kernel --all-targets --
