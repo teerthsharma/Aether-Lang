@@ -6,13 +6,13 @@
 //!
 //! ═══════════════════════════════════════════════════════════════════════════════
 
+#![warn(missing_docs)]
 // ═══════════════════════════════════════════════════════════════════════════════
 // Aether-Lang — invented by Teerth Sharma
 // https://github.com/teerthsharma/Aether-Lang
 // Copyright (c) 2026 Teerth Sharma. All Rights Reserved.
 // ═══════════════════════════════════════════════════════════════════════════════
 //
-
 #![allow(dead_code)]
 
 use crate::ml::neural::Activation;
@@ -48,11 +48,16 @@ pub struct Conv2D {
     pub activation: Activation,
 
     // Cache for backprop
-    pub last_input: [[[[f64; MAX_IMG_DIM]; MAX_IMG_DIM]; MAX_CHANNELS_IN]; 1], // Batch size 1 for now
+    /// Forward input retained for the backward pass. One batch element: this
+    /// layer is a reference implementation and does not batch.
+    pub last_input: [[[[f64; MAX_IMG_DIM]; MAX_IMG_DIM]; MAX_CHANNELS_IN]; 1],
+    /// Spatial dimensions the last forward pass produced, needed to walk the
+    /// gradient back through a stride the input shape alone does not determine.
     pub last_output_dim: (usize, usize),
 }
 
 impl Conv2D {
+    /// A layer with the given geometry and randomly initialised kernels.
     pub fn new(
         in_channels: usize,
         out_channels: usize,

@@ -20,13 +20,13 @@
 //!
 //! ═══════════════════════════════════════════════════════════════════════════════
 
+#![warn(missing_docs)]
 // ═══════════════════════════════════════════════════════════════════════════════
 // Aether-Lang — invented by Teerth Sharma
 // https://github.com/teerthsharma/Aether-Lang
 // Copyright (c) 2026 Teerth Sharma. All Rights Reserved.
 // ═══════════════════════════════════════════════════════════════════════════════
 //
-
 #![allow(dead_code)]
 
 use libm::sqrt;
@@ -68,6 +68,10 @@ pub struct BlockMetadata<const D: usize> {
 }
 
 impl<const D: usize> BlockMetadata<D> {
+    /// A block holding nothing: zero centroid, zero count.
+    ///
+    /// `const` so the fixed-size tree below can be built in a static
+    /// initialiser, which is what keeps this allocation-free on `no_std`.
     pub const fn empty() -> Self {
         Self {
             centroid: [0.0; D],
@@ -192,6 +196,10 @@ pub struct HierarchicalBlockTree<const D: usize> {
 }
 
 impl<const D: usize> HierarchicalBlockTree<D> {
+    /// An empty three-level tree.
+    ///
+    /// The levels are fixed-size arrays rather than growable, so this reserves
+    /// the whole structure up front and never allocates again.
     pub fn new() -> Self {
         Self {
             levels: [[BlockMetadata::empty(); MAX_BLOCKS]; 3],
@@ -404,6 +412,11 @@ pub struct DriftDetector<const D: usize> {
 }
 
 impl<const D: usize> DriftDetector<D> {
+    /// A detector with an empty 32-sample history.
+    ///
+    /// The window is fixed: drift is judged against the last 32 observations
+    /// and nothing older, so the detector cannot grow without bound in a long
+    /// run.
     pub fn new() -> Self {
         Self {
             history: [[0.0; D]; 32],
