@@ -610,18 +610,51 @@ fn the_provenance_table_points_at_targets_that_exist() {
     // failing on a clean tree against the mutant-count row. Reshaping the document
     // to suit the parser would have been the wrong repair; the shorthand is
     // legitimate and carrying it forward is what reading the table means.
+    // The table's own extent decides how many rows must be read, rather than a
+    // floor written here.
+    //
+    // A hardcoded minimum lets the table grow past it: a row added without a
+    // status was skipped by the search below and counted by nothing, so the
+    // check passed while the new figure carried no claim about whether anything
+    // defends it. Reading the table's rows and requiring every one of them to be
+    // classified turns that from invisible into a failure. The table is its own
+    // member list; the previous revision said it had none because it was looking
+    // for one outside itself.
+    // Order matters here and got it wrong once: filtering to `|` lines before
+    // `take_while` removes the blank line that ends the table, so the take never
+    // terminates and every markdown row in the rest of the file is collected.
+    // The blank line is the terminator, so it has to survive until it is used.
+    let table: Vec<&str> = doc
+        .lines()
+        .skip_while(|l| !l.contains("Which numbers here are checked"))
+        .map(str::trim)
+        .skip_while(|l| !l.starts_with('|'))
+        .take_while(|l| l.starts_with('|'))
+        .filter(|l| !l.contains("| figure |") && !l.starts_with("|---"))
+        .collect();
+
+    assert!(
+        table.len() >= 8,
+        "found {} rows in the provenance table, which is fewer than it held when \
+         this was written — the table has been trimmed or its heading reworded",
+        table.len()
+    );
+
     let mut rows = 0;
     let mut previous_command_ran_a_test = false;
 
-    for line in doc.lines() {
-        let t = line.trim();
-        if !t.starts_with('|') || !t.contains("re-derive") && t.matches('|').count() < 4 {
-            continue;
-        }
+    for t in &table {
+        let t = *t;
         let has_status = ["**checked**", "**bounded**", "**snapshot**"]
             .iter()
             .find(|s| t.contains(**s));
-        let Some(status) = has_status else { continue };
+        let Some(status) = has_status else {
+            panic!(
+                "a provenance row carries none of **checked**, **bounded** or \
+                 **snapshot**, so it makes no claim about whether anything defends \
+                 its figure:\n  {t}"
+            )
+        };
         rows += 1;
 
         let inherits = t.contains("| same |");
