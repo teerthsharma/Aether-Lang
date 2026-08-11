@@ -217,6 +217,14 @@ fn the_softmax_layer_gradient_matches_finite_differences() {
     // Weights and biases both. The softmax fix changed `delta`, which is the
     // common factor in both gradients, so a bias gradient that was wrong in the
     // same way would have passed everything here.
+    //
+    // Both halves are demonstrated, not assumed. Substituting pass-through for
+    // the Jacobian-vector product fails at `layer 1 weights[7]`; doubling
+    // `grad_b` in `DenseLayer::backward`, which corrupts the bias path and
+    // leaves the weights correct, fails at `layer 1 biases[1]` with a worst
+    // disagreement of 3.382e-1. The second probe exists because the first aborts
+    // before reaching the bias comparison, so it could not have shown it
+    // rejecting anything.
     for layer in [1usize, 0] {
         for parameter in ["weights", "biases"] {
             let read = |mlp: &MLP| -> Vec<f64> {
