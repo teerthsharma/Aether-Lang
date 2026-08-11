@@ -15,7 +15,7 @@ wrong answer is worth keeping — but it means the current state has to be
 reconstructed from a sequence of corrections. This section is the state.
 
 **The backend works and nothing uses it.** 20 WGSL kernels, resident tensors,
-batched submission, 95 tests, 0 of 20 mutants escaping. No line of
+batched submission, 96 tests, 0 of 24 mutants escaping. No line of
 `aether-core` or `aether-lang` calls it.
 
 `scheduled_attention_resident` returns a `GpuTensor` so attention output can feed
@@ -965,6 +965,40 @@ form gives a denominator a hundred times larger and a step a hundred times
 smaller. That is the general shape of an epsilon bug — invisible in the regime
 the code normally runs in, decisive in the regime epsilon exists for — so the
 test that catches it uses a deliberately tiny gradient.
+
+### The kernels that had no mutant of their own
+
+An audit of the harness against the shader found four kernels carrying no
+injected defect. Two of them, `adam_moments` and `add_broadcast_row`, appear in
+no test by name at all: nothing calls them directly, and they are reached only
+through `adam_update_resident` and `add_bias_resident`. Whether an indirect path
+like that notices a defect in what it calls is an assumption every time it is
+not measured, and it had not been measured here.
+
+Five mutants close it — the two above, `sigmoid_bce_grad`, and a second
+`attention_dk` defect that makes its block-membership test always succeed rather
+than corrupting its arithmetic, since a selection bug and a numerical bug fail
+differently.
+
+| Injected defect | `gpu_parity` | `gradcheck` | `attention_parity` |
+|---|---|---|---|
+| `adam_moments` second moment decays with the first beta | **caught** 1/43 | survives | survives |
+| `adam_moments` second moment accumulates the gradient unsquared | **caught** 3/43 | survives | survives |
+| `add_broadcast_row` broadcasts down the wrong axis | **caught** 1/43 | **caught** 6/14 | survives |
+| `sigmoid_bce_grad` batch averaging dropped | survives | **caught** 4/14 | survives |
+| `attention_dk` membership test always succeeds | survives | survives | **caught** 1/21 |
+
+**The indirect path does notice.** Both untested-by-name kernels are caught, and
+`add_broadcast_row` is caught independently by two suites. The assumption held,
+which is worth stating plainly because it is the outcome that would have been
+assumed anyway — the reason to run it was that an assumption and a measurement
+are the same shape until one of them fails.
+
+Whole-harness result on this tree, RTX 4060 over Vulkan: **0 of 24 escape**, no
+pattern unmatched. Nineteen of the twenty-four are caught by exactly one suite,
+so dropping any single suite would let nineteen defects through — which is why
+the harness runs them separately and reports per-suite rather than combining
+them into one pass or fail.
 
 ### The harness deleted uncommitted work
 
