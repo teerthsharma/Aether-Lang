@@ -32,6 +32,14 @@
 
 #![cfg_attr(not(feature = "std"), no_std)]
 
+// Looks unused under `std` and is required without it.
+//
+// This crate's imports from the alloc crate sit behind
+// `cfg(not(feature = "std"))`, so a host build compiles none of them and
+// `-W unused` reports this line as dead. It is not: deleting it breaks every
+// no_std build. `unused_extern_crates` reports, in one configuration, a fact
+// that is only true in that configuration, which is why this workspace denies
+// `unused_imports` and not the whole `unused` group.
 #[cfg(feature = "alloc")]
 extern crate alloc;
 
