@@ -172,6 +172,23 @@ impl Params {
         Self { t, adam }
     }
 
+    /// Throw away Adam's moments and step counter, keeping the parameters.
+    ///
+    /// This is what resuming a run does. `AdamState` keeps its moments private,
+    /// so a process that stops and restarts cannot carry them across and calls
+    /// `adam_state` again, which zeroes both and resets the counter. Doing it
+    /// mid-run here measures the cost of that without needing two processes.
+    fn rebuild_adam_state(&mut self, ctx: &GpuContext) {
+        if self.adam.is_some() {
+            self.adam = Some(
+                self.t
+                    .iter()
+                    .map(|p| ctx.adam_state(p).expect("state"))
+                    .collect(),
+            );
+        }
+    }
+
     fn apply(&mut self, ctx: &GpuContext, grads: Vec<GpuTensor>, lr: f32) {
         for (i, g) in grads.into_iter().enumerate() {
             self.t[i] = match &mut self.adam {
@@ -267,6 +284,7 @@ fn holdout_accuracy(
     opt: Opt,
     lr: f32,
     seed: u64,
+    rebuild_adam_at: Option<usize>,
 ) -> f32 {
     let gx = ctx.upload(train_x, n_tr, 2).expect("x");
     let gy = ctx.upload(train_hot, n_tr, CLASSES).expect("y");
@@ -274,7 +292,13 @@ fn holdout_accuracy(
 
     let mut rng = datasets::Lcg::new(seed);
     let mut p = Params::new(ctx, &mut rng, opt);
-    for _ in 0..EPOCHS {
+    for epoch in 0..EPOCHS {
+        // A resume: the parameters survive, the optimiser's memory of them does
+        // not. Placed before the step so the epoch it names is the first one
+        // running on rebuilt state.
+        if Some(epoch) == rebuild_adam_at {
+            p.rebuild_adam_state(ctx);
+        }
         step(ctx, &mut p, &gx, &gy, lr);
     }
 
@@ -510,13 +534,88 @@ fn main() {
     for (opt, rates) in [(Opt::Sgd, &SGD_RATES), (Opt::Adam, &ADAM_RATES)] {
         let mut top: (f32, f32) = (f32::NAN, f32::NAN);
         for &lr in rates.iter() {
-            let acc = holdout_accuracy(&ctx, &tr_x, &tr_hot, n_tr, &te_x, &te_y, opt, lr, 0xBEEF);
+            let acc = holdout_accuracy(
+                &ctx, &tr_x, &tr_hot, n_tr, &te_x, &te_y, opt, lr, 0xBEEF, None,
+            );
             println!("  {:>10?}  {lr:>10.4}  {acc:>12.4}", opt);
             if top.1.is_nan() || acc > top.1 {
                 top = (lr, acc);
             }
         }
         holdout.push((opt, top.0, top.1));
+    }
+
+    // What a resumed run costs, on a task with a held-out set.
+    //
+    // `AdamState` keeps its moments private, so a process that stops and
+    // restarts rebuilds them from zero. A unit test measures that the parameters
+    // diverge; it cannot say whether the resumed run is *worse*, which needs a
+    // task and something held out. This is that measurement: the same training,
+    // the same seed, the same learning rate, with the optimiser's state discarded
+    // halfway.
+    if let Some(&(_, best_lr, _)) = holdout.iter().find(|(o, _, _)| *o == Opt::Adam) {
+        println!();
+        println!("  Adam with its state rebuilt mid-run, lr {best_lr:.4}");
+        println!(
+            "  {:>8}  {:>12}  {:>12}  {:>10}",
+            "seed", "continuous", "resumed", "delta"
+        );
+
+        let mut deltas = Vec::new();
+        for seed in [0xBEEFu64, 0xC0FFEE, 0xD00D, 0xFEED, 0xBEAD] {
+            let whole = holdout_accuracy(
+                &ctx,
+                &tr_x,
+                &tr_hot,
+                n_tr,
+                &te_x,
+                &te_y,
+                Opt::Adam,
+                best_lr,
+                seed,
+                None,
+            );
+            let resumed = holdout_accuracy(
+                &ctx,
+                &tr_x,
+                &tr_hot,
+                n_tr,
+                &te_x,
+                &te_y,
+                Opt::Adam,
+                best_lr,
+                seed,
+                Some(EPOCHS / 2),
+            );
+            println!(
+                "  {seed:>8x}  {whole:>12.4}  {resumed:>12.4}  {:>+10.4}",
+                resumed - whole
+            );
+            deltas.push(resumed - whole);
+        }
+
+        let mean = deltas.iter().sum::<f32>() / deltas.len() as f32;
+        let worst = deltas.iter().cloned().fold(0.0f32, |a, d| a.max(d.abs()));
+        println!("  mean delta {mean:+.4}, largest single move {worst:.4}");
+        println!();
+        println!("  A resume discards both moment estimates and the step counter, so");
+        println!("  bias correction restarts at t = 1 while the parameters carry on.");
+        println!("  Whether that costs accuracy is what these five rows answer; the");
+        println!("  unit test alongside them only establishes that it changes them.");
+
+        let saturated = deltas.len() - deltas.iter().filter(|d| d.abs() > f32::EPSILON).count();
+        if saturated > 0 {
+            println!();
+            println!("  Read the ceiling before the delta. The continuous runs reach");
+            println!("  1.0000 here, so there is no headroom for a resume to lose and");
+            println!(
+                "  {saturated} of {} seeds move by exactly zero. This measures",
+                deltas.len()
+            );
+            println!("  that a resume costs nothing on a task the model already solves,");
+            println!("  which is weaker than costing nothing. A task with a gap left to");
+            println!("  close would be the one that could show a cost.");
+        }
     }
 
     println!("───────────────────────────────────────────────────────────────────");
