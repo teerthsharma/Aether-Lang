@@ -25,10 +25,29 @@
 # Arguments: package, suite, mutant name, cell width, extra cargo flags.
 mutant_run_suite() {
     local pkg="$1" suite="$2" mutant="$3" width="$4" extra="${5:-}"
-    local out counts passed failed
+    local out counts passed failed attempt
 
-    # shellcheck disable=SC2086 -- extra is a flag list and must word-split.
-    out="$(cargo test -p "$pkg" $extra --test "$suite" 2>&1)"
+    # A crashed binary is retried once before being scored.
+    #
+    # The crash this handles is a documented intermittent in wgpu's instance
+    # teardown, and what identifies it as environmental is that consecutive runs
+    # put it on different mutants in different suites. A fault that moves every
+    # run is one a single repeat almost always clears, so scoring the first
+    # crash costs a cell that the retry would have measured — and when that cell
+    # is the only suite catching a mutant, the whole run reports an escape that
+    # is not there.
+    #
+    # Only crashes retry. A test that fails is evidence and re-running it to see
+    # whether it fails again would be sampling until the answer is convenient.
+    for attempt in 1 2; do
+        # shellcheck disable=SC2086 -- extra is a flag list and must word-split.
+        out="$(cargo test -p "$pkg" $extra --test "$suite" 2>&1)"
+        if [ "$attempt" -eq 1 ] && printf '%s' "$out" \
+            | grep -qE 'STATUS_ACCESS_VIOLATION|test exited abnormally|didn.t exit successfully'; then
+            continue
+        fi
+        break
+    done
 
     if printf '%s' "$out" | grep -q "test result: ok"; then
         printf " %-${width}s" "survives"
@@ -69,8 +88,9 @@ mutant_run_suite() {
         return 1
     fi
 
-    # A test binary that died rather than reporting. This is a third thing again,
-    # and it is deliberately *not* counted as catching the mutant.
+    # A test binary that died twice rather than reporting — the retry above has
+    # already been spent. This is a third thing again, and it is deliberately
+    # *not* counted as catching the mutant.
     #
     # A crash has two possible causes and the output cannot separate them: the
     # mutant broke something badly enough to take the process down, or something

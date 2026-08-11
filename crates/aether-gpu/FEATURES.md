@@ -111,6 +111,13 @@ escaping and the next reported 0. That is the harness saying *this cell could no
 be measured*, which is different from both "caught" and "escaped" and is the only
 honest thing it can say.
 
+A crashed cell is now retried once before being scored. What identifies this
+fault as environmental — that consecutive runs put it on different mutants in
+different suites — is exactly what makes a single repeat clear it, so scoring the
+first crash discards a cell the retry would have measured. Only crashes retry: a
+test that *fails* is evidence, and re-running it to see whether it fails again is
+sampling until the answer is convenient.
+
 ### Reverse mode, CPU reference and GPU port
 
 `recall_training` freezes attention and trains only a head, and records that as
