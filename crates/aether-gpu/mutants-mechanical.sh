@@ -209,10 +209,35 @@ for ((i = 1; i <= total; i++)); do
         fi
     done
 
+    # A survival is confirmed before it is believed; a catch is not re-run.
+    #
+    # Some mutants are caught intermittently. Flipping `pairwise_sqdist`'s column
+    # guard lets thread `j = m` write `c[i*m + m]`, which is the cell thread
+    # `(i+1, 0)` writes legitimately, so two threads race for it and which value
+    # survives depends on GPU scheduling. Run alone that mutant passed 8 of 8;
+    # run inside the full suite, where the harness executes tests in parallel and
+    # the device is under load, it failed 2 of 3. A single measurement called it
+    # a survivor, and it was reported as a coverage hole it is not.
+    #
+    # Only survivors are re-run, which costs a rerun on the minority of cells and
+    # nothing on the rest. The asymmetry is deliberate: a catch is positive
+    # evidence and repeating it cannot overturn anything, while a survival is the
+    # absence of evidence and is exactly what an unlucky schedule fabricates.
+    #
+    # Two observations do not make this sound, only less wrong. A mutant caught
+    # one run in ten still reads as a survivor most of the time.
+    if [ "$any_caught" -eq 0 ]; then
+        for suite in "${suites[@]}"; do
+            if ! mutant_run_suite aether-gpu "$suite" "site $i: $op -> $rep (confirm)" 0 "$features"; then
+                any_caught=1
+            fi
+        done
+    fi
+
     if [ "$any_caught" -eq 0 ]; then
         survived=$((survived + 1))
         survivors+=("$i|$op -> $rep|$context")
-        printf '  <- SURVIVED\n'
+        printf '  <- SURVIVED (confirmed twice)\n'
     else
         printf '\n'
     fi
