@@ -16,8 +16,6 @@
 #![no_std]
 #![no_main]
 
-extern crate alloc;
-
 use core::panic::PanicInfo;
 
 use aether_core::state::SystemState;
