@@ -16,6 +16,8 @@
 //! the feature vector. A vectorization without that guarantee is a hash, not a
 //! feature.
 
+#![warn(missing_docs)]
+
 extern crate alloc;
 
 use alloc::vec;
@@ -274,7 +276,11 @@ pub struct LandscapeConfig {
     pub levels: usize,
     /// Number of evenly spaced samples across `[min_t, max_t]`, endpoints included.
     pub resolution: usize,
+    /// Left endpoint of the sampling range, in filtration units.
     pub min_t: f64,
+    /// Right endpoint, inclusive. A range narrower than the diagram truncates
+    /// tents rather than rescaling them, so the levels stay comparable across
+    /// diagrams sampled on the same grid.
     pub max_t: f64,
 }
 
@@ -356,12 +362,16 @@ fn fmin(a: f64, b: f64) -> f64 {
 /// Grid and kernel for [`persistence_image`].
 #[derive(Debug, Clone, Copy)]
 pub struct ImageConfig {
+    /// Grid columns, spanning `[min_birth, max_birth]`.
     pub width: usize,
+    /// Grid rows, spanning `[0, max_persistence]`.
     pub height: usize,
     /// Standard deviation of the Gaussian deposited at each bar.
     pub sigma: f64,
     /// Horizontal window, in birth coordinates.
     pub min_birth: f64,
+    /// Upper edge of the birth window. Bars born outside it deposit nothing,
+    /// which makes the image a crop rather than a projection.
     pub max_birth: f64,
     /// Vertical window, in persistence (`death - birth`) coordinates, from 0.
     pub max_persistence: f64,

@@ -12,13 +12,13 @@
 //! This gives us a mathematically principled "stop" condition.
 //! ═══════════════════════════════════════════════════════════════════════════════
 
+#![warn(missing_docs)]
 // ═══════════════════════════════════════════════════════════════════════════════
 // Aether-Lang — invented by Teerth Sharma
 // https://github.com/teerthsharma/Aether-Lang
 // Copyright (c) 2026 Teerth Sharma. All Rights Reserved.
 // ═══════════════════════════════════════════════════════════════════════════════
 //
-
 #![allow(dead_code)]
 
 use heapless::Vec as HVec;
@@ -41,6 +41,7 @@ pub struct BettiNumbers {
 }
 
 impl BettiNumbers {
+    /// Ranks of H0 and H1: connected components and independent loops.
     pub fn new(beta_0: u32, beta_1: u32) -> Self {
         Self { beta_0, beta_1 }
     }
@@ -89,6 +90,12 @@ pub struct ConvergenceDetector {
 }
 
 impl ConvergenceDetector {
+    /// A detector that declares convergence once the Betti numbers hold still.
+    ///
+    /// `epsilon` bounds the filtration scale the numbers are read at, and
+    /// `stability_window` is how many consecutive readings must agree. A window
+    /// of one converges on the first repeat, which is noise rather than a fixed
+    /// point.
     pub fn new(epsilon: f64, stability_window: usize) -> Self {
         Self {
             betti_history: HVec::new(),
@@ -261,6 +268,8 @@ pub struct ResidualAnalyzer<const D: usize> {
 }
 
 impl<const D: usize> ResidualAnalyzer<D> {
+    /// An analyser reading the topology of the residual cloud at scale
+    /// `epsilon`.
     pub fn new(epsilon: f64) -> Self {
         Self {
             residuals: HVec::new(),
