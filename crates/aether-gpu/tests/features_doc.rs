@@ -374,7 +374,7 @@ fn the_precision_budget_quotes_tolerances_that_exist() {
 
     // (documented tolerance, file that must contain it)
     let claims = [
-        ("1e-5 * (k as f32).sqrt()", "gpu_parity.rs"),
+        ("const EPSILONS_ALLOWED: f32 = 8.0;", "gpu_parity.rs"),
         ("const TOL: f64 = 2e-4;", "attention_parity.rs"),
         ("worst <= 1e-4", "attention_parity.rs"),
         ("worst_vs_cpu < 1e-6", "f32_topology.rs"),
