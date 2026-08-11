@@ -25,7 +25,7 @@ use aether_core::scheduled::{
     dense_causal_block_schedule, dense_masked_attention, scheduled_attention,
     scheduled_attention_backward, BlockSchedule,
 };
-use aether_gpu::{GpuContext, GpuError};
+use aether_gpu::{AttentionPath, GpuContext, GpuError};
 
 /// See `gpu_parity.rs`. Callers are `#[ignore]`d without the `gpu` feature, so
 /// a missing adapter here means the feature was requested and cannot be
@@ -1121,6 +1121,93 @@ fn the_backward_rejects_every_launch_the_forward_rejects() {
         .is_ok(),
         "a valid launch was rejected, so the assertions above hold for the wrong \
          reason"
+    );
+}
+
+/// The fallback must take each path where it belongs, and be right on both.
+///
+/// `GpuError::Unsupported` was split out of `ShapeMismatch` so a caller could
+/// tell "this backend cannot" from "you called this wrong", and that distinction
+/// was decorative until something acted on it. This is the something, so it is
+/// tested on all three cases rather than only the interesting one.
+///
+/// A launch inside the ceilings must run on the GPU; one past them must run on
+/// the CPU and return the right answer rather than an error; and a malformed
+/// launch must still fail, because falling back on a caller's bug hides it.
+#[test]
+#[cfg_attr(not(feature = "gpu"), ignore)]
+fn the_fallback_routes_by_capability_and_not_by_error() {
+    let ctx = require_context();
+    let block_size = 8;
+
+    // Inside the ceilings: the GPU serves it.
+    let small = Fixture::new(32, 16, 97);
+    let schedule = dense_causal_block_schedule(small.seq / block_size);
+    let (values, path) = ctx
+        .scheduled_attention_or_cpu(
+            &small.q,
+            &small.k,
+            &small.v,
+            small.seq,
+            small.head_dim,
+            &schedule,
+            block_size,
+        )
+        .expect("valid launch");
+    assert_eq!(path, AttentionPath::Gpu, "a supported launch left the GPU");
+    assert_close(
+        &values.iter().map(|&x| x as f32).collect::<Vec<_>>(),
+        &small.on_cpu(&schedule, block_size),
+        "fallback, gpu path",
+    );
+
+    // Past the head_dim ceiling: the CPU serves it, and the answer is right.
+    // Asserting only the path would pass on a fallback that returned zeros.
+    let wide = Fixture::new(16, 130, 101);
+    let wide_schedule = dense_causal_block_schedule(16 / block_size);
+    let (values, path) = ctx
+        .scheduled_attention_or_cpu(
+            &wide.q,
+            &wide.k,
+            &wide.v,
+            wide.seq,
+            wide.head_dim,
+            &wide_schedule,
+            block_size,
+        )
+        .expect("head_dim 130 is past the ceiling and must fall back, not fail");
+    assert_eq!(
+        path,
+        AttentionPath::Cpu,
+        "an unsupported launch stayed on the GPU"
+    );
+
+    let reference = wide.on_cpu(&wide_schedule, block_size);
+    assert_eq!(values.len(), reference.len());
+    for (i, (&got, &want)) in values.iter().zip(&reference).enumerate() {
+        assert!(
+            (got - want).abs() < 1e-12,
+            "fallback value {i} is {got}, reference {want}: the CPU path is f64              throughout and must agree exactly, not at an f32 tolerance"
+        );
+    }
+
+    // Malformed: still an error. A fallback that swallowed this would turn a
+    // caller's bug into a silently slower correct-looking answer.
+    let operands = vec![0.0f64; 6 * 4];
+    assert!(
+        matches!(
+            ctx.scheduled_attention_or_cpu(
+                &operands,
+                &operands,
+                &operands,
+                6,
+                4,
+                &wide_schedule,
+                4,
+            ),
+            Err(GpuError::ShapeMismatch(_))
+        ),
+        "seq=6 does not divide block_size=4 and must fail rather than fall back"
     );
 }
 
