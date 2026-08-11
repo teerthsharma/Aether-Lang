@@ -31,6 +31,12 @@ pub mod autograd;
 pub mod benchmark;
 pub mod convergence;
 pub mod convolution;
+// Declared after being found outside the module tree by
+// tests/orphaned_sources.rs. The README documented `DataLoader` and
+// `BatchIterator<'a>` in an API table and a file listing while no `mod`
+// reached the file, so the crate did not contain what the front page said it
+// did. Two dead imports were all that stood between it and compiling.
+pub mod dataloader;
 pub mod linalg;
 pub mod regressor;
 pub mod tensor;

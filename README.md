@@ -1138,7 +1138,7 @@ impl Answer {
 | Module | Lines | Surface |
 |---|---:|---|
 | `gossip` | 203 | Distributed averaging, `MAX_DIM = 3` |
-| `dataloader` | 127 | `DataLoader`, `BatchIterator<'a>`, batching + shuffle |
+| `dataloader` | 151 | `DataLoader`, `BatchIterator<'a>`, batching + shuffle |
 | `linalg` | 254 | Scalar reductions and distance primitives underneath the rest |
 | `benchmark` | 255 | `EscalatingBenchmark<D>`, `BenchmarkConfig`, `TestFunction`, `generate_test_function` |
 
@@ -2118,7 +2118,7 @@ crates/aether-core/src/                                    lines
     ├── tensor.rs                                            254   N-d array
     ├── gossip.rs                                            203   distributed averaging
     ├── convolution.rs                                       160   Conv2D  ⚠ forward only
-    ├── dataloader.rs                                        127   batching, shuffle
+    ├── dataloader.rs                                        151   batching, shuffle
     └── mod.rs                                                51
 ```
 
