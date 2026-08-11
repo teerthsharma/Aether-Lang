@@ -596,6 +596,61 @@ fn the_provenance_table_points_at_targets_that_exist() {
             "FEATURES.md points at tests/{named}.rs, which does not exist"
         );
     }
+
+    // Each row's status must match the kind of command beside it.
+    //
+    // The table has three statuses and they are not interchangeable. **checked**
+    // and **bounded** both mean a test decides the figure, so the row must offer
+    // a way to run one; **snapshot** means nothing decides it, so the row offers
+    // a program to re-measure with. A snapshot labelled bounded reads as stronger
+    // than it is, and that is the mislabelling this catches — the statuses are
+    // the only thing telling a reader which figures are defended.
+    // `same` is the table's shorthand for the command in the row above, and the
+    // first version of this check read it as a row offering no command at all —
+    // failing on a clean tree against the mutant-count row. Reshaping the document
+    // to suit the parser would have been the wrong repair; the shorthand is
+    // legitimate and carrying it forward is what reading the table means.
+    let mut rows = 0;
+    let mut previous_command_ran_a_test = false;
+
+    for line in doc.lines() {
+        let t = line.trim();
+        if !t.starts_with('|') || !t.contains("re-derive") && t.matches('|').count() < 4 {
+            continue;
+        }
+        let has_status = ["**checked**", "**bounded**", "**snapshot**"]
+            .iter()
+            .find(|s| t.contains(**s));
+        let Some(status) = has_status else { continue };
+        rows += 1;
+
+        let inherits = t.contains("| same |");
+        let asserts = if inherits {
+            previous_command_ran_a_test
+        } else {
+            t.contains("cargo test")
+        };
+        previous_command_ran_a_test = asserts;
+        match *status {
+            "**checked**" | "**bounded**" => assert!(
+                asserts,
+                "a row marked {status} offers no `cargo test` command, so nothing \
+                 a reader can run decides the figure it claims is decided:\n  {t}"
+            ),
+            "**snapshot**" => assert!(
+                !asserts || t.contains("cargo run"),
+                "a row marked **snapshot** offers a `cargo test` command, which \
+                 means a test does decide it and the row understates itself:\n  {t}"
+            ),
+            _ => unreachable!(),
+        }
+    }
+
+    assert!(
+        rows >= 8,
+        "only {rows} provenance rows carried a recognised status, so this check \
+         read fewer than the table holds and the statuses have been reworded"
+    );
 }
 
 /// The withdrawn-claims table is the part most likely to rot, since it is
