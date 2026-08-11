@@ -1180,7 +1180,7 @@ literal, each with a reason beside it.
 
 | what | requirement | asserted in | why that number |
 |---|---:|---|---|
-| matmul, elementwise | `8 · ε · √k` | `gpu_parity.rs:33` | f32 accumulation over `k` terms grows as `√k`; the constant is twenty times the worst observed ratio, derived below |
+| matmul, elementwise | `8 · ε · √k · max\|reference\|` | `gpu_parity.rs:33` | f32 accumulation over `k` terms grows as `√k` and with the magnitude of the terms; constant is twenty times the worst observed ratio, derived below |
 | attention forward | `2e-4` | `attention_parity.rs:46` | `exp` is its own derivative, so score error passes into weights undamped; still far tighter than the O(1) moves the tests exist to catch |
 | attention backward gradients | `2e-4` (`TOL`) | `attention_parity.rs:926` | same constant as the forward pass, applied to the worst gradient disagreement |
 | resident output chained into another kernel | `1e-5` | `attention_parity.rs:553` | a chained product, tighter than `TOL` because it involves no exponential |
@@ -1228,6 +1228,39 @@ One corroboration was already in the tree.
 independent attempts to say how much error f32 matmul is allowed both landed on
 eight epsilons. Neither was derived from the other, which is the only reason the
 agreement is evidence of anything.
+
+##### The bound had no magnitude in it
+
+The two were not identical, and the difference was the defect. The sqrt-growth
+test divides by the largest exact value before comparing; `tolerance` did not, so
+it was an absolute allowance carrying an unstated assumption about how large the
+operands are. Every fixture here draws from `fill`, which produces values in
+`[-0.5, 0.5]`, and the assumption held invisibly for that reason alone.
+
+Scaling the operands at k=32 and leaving the kernel untouched:
+
+| operand scale | worst absolute error | against a fixed `8·ε·√k` |
+|---:|---:|---:|
+| 1 | 2.384e-07 | 0.04× — passes |
+| 10 | 1.907e-05 | 3.5× — **fails** |
+| 100 | 1.953e-03 | 362× — **fails** |
+| 1000 | 2.500e-01 | 46341× — **fails** |
+
+The error grows with the square of the operand scale, as the product of two
+scaled operands must. A fixed absolute bound therefore rejects a **correct**
+kernel for any input much above unit magnitude. That is not a wrong answer
+escaping — it is the suite failing on correct code the first time someone writes
+a fixture with larger numbers in it, and the kernel getting the blame.
+
+`tolerance` now scales by the largest reference value, which is relative in the
+only sense that survives cancellation: an entry near zero has unbounded relative
+error and says nothing, while the largest entry sets the scale the accumulation
+error is proportional to. Re-measured, the ratio is 0.03, 0.02, 0.02, 0.02 across
+those same four scales — flat, where it had spanned six orders of magnitude.
+
+The change loosens the bound at unit magnitude by the reference scale, so the
+teeth were re-checked rather than assumed: the injected 1e-5 error still fails
+the same seven tests, the three `tolerance()` callers among them.
 
 The tightening has teeth, demonstrated rather than asserted. Injecting a 1e-5
 relative error into `matmul` and running the suite under both bounds:

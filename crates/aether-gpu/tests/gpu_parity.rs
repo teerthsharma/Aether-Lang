@@ -66,11 +66,50 @@ use aether_gpu::{cpu_matmul, cpu_pairwise_sqdist, tensor_matmul, GpuContext};
 /// This is a bound on rounding, not a specification. If a caller ever needs
 /// matmul tighter than eight epsilons, the number to change is here and the
 /// measurement above is what to repeat.
-fn tolerance(k: usize) -> f32 {
+/// # Why it takes the reference values
+///
+/// An absolute bound is only meaningful next to a magnitude. Rounding error in a
+/// dot product scales with the size of the terms being summed, so a fixed
+/// absolute allowance silently encodes an assumption about how large the
+/// operands are. Every fixture in this file draws from `fill`, which produces
+/// values in `[-0.5, 0.5]`, and the assumption held invisibly for exactly that
+/// reason.
+///
+/// Measured at k=32 by scaling the operands and leaving the kernel alone:
+///
+/// | operand scale | worst absolute error | against a fixed `8·ε·√k` |
+/// |---:|---:|---:|
+/// | 1 | 2.384e-07 | 0.04× — passes |
+/// | 10 | 1.907e-05 | 3.5× — fails |
+/// | 100 | 1.953e-03 | 362× — fails |
+/// | 1000 | 2.500e-01 | 46341× — fails |
+///
+/// The error grows with the square of the operand scale, as the product of two
+/// scaled operands must. A fixed absolute bound therefore rejects a correct
+/// kernel for any input much above unit magnitude — not a wrong answer, but a
+/// suite that fails on correct code the first time someone writes a fixture with
+/// larger numbers in it, and blames the kernel.
+///
+/// Scaling by the largest reference value makes the bound relative in the only
+/// sense that survives cancellation: an individual entry near zero has unbounded
+/// relative error and says nothing, while the largest entry sets the scale that
+/// the accumulation error is actually proportional to. This is what
+/// `f32_matmul_error_grows_like_the_square_root_of_the_reduction_depth` already
+/// did, and the disagreement between the two was the clue.
+fn tolerance(k: usize, reference: &[f32]) -> f32 {
     const F32_EPSILON: f32 = 1.192_092_9e-7;
     const EPSILONS_ALLOWED: f32 = 8.0;
 
-    EPSILONS_ALLOWED * F32_EPSILON * (k as f32).sqrt().max(1.0)
+    // A result that is entirely zero has no scale of its own to be judged
+    // against, and a bound of zero would demand bit-exactness from an
+    // accumulation that never promised it. One is the magnitude the fixtures
+    // work at, so it is the floor rather than an arbitrary epsilon.
+    let scale = reference
+        .iter()
+        .fold(0.0f32, |m, v| m.max(v.abs()))
+        .max(1.0);
+
+    EPSILONS_ALLOWED * F32_EPSILON * (k as f32).sqrt().max(1.0) * scale
 }
 
 /// The GPU context, or a failure.
@@ -163,7 +202,7 @@ fn gpu_matmul_matches_the_cpu_reference() {
 
         assert_eq!(gpu.len(), cpu.len(), "output length for {m}x{k}x{n}");
 
-        let tol = tolerance(k);
+        let tol = tolerance(k, &cpu);
         let worst = gpu
             .iter()
             .zip(&cpu)
@@ -191,7 +230,7 @@ fn shapes_around_the_workgroup_boundary_are_handled() {
         let gpu = ctx.matmul(&a, &b, dim, dim, dim).expect("matmul dispatch");
         let cpu = cpu_matmul(&a, &b, dim, dim, dim);
 
-        let tol = tolerance(dim);
+        let tol = tolerance(dim, &cpu);
         let worst = gpu
             .iter()
             .zip(&cpu)
@@ -306,7 +345,7 @@ fn the_tiled_kernel_matches_the_cpu_reference() {
         let gpu = ctx.read(&gc).expect("readback");
 
         let cpu = cpu_matmul(&a, &b, m, k, n);
-        let tol = tolerance(k);
+        let tol = tolerance(k, &cpu);
         let worst = gpu
             .iter()
             .zip(&cpu)
@@ -354,7 +393,7 @@ fn the_tiled_kernel_is_correct_across_many_tile_iterations() {
         .expect("read");
 
     let cpu = cpu_matmul(&a, &b, m, k, n);
-    let tol = tolerance(k);
+    let tol = tolerance(k, &cpu);
     let worst = gpu
         .iter()
         .zip(&cpu)
@@ -407,7 +446,7 @@ fn a_resident_chain_equals_the_same_chain_with_readbacks() {
         .fold(0.0f32, f32::max);
 
     // Tiled and naive round differently, so this is a tolerance, not equality.
-    let tol = tolerance(k.max(n));
+    let tol = tolerance(k.max(n), &abc_host);
     assert!(
         worst <= tol,
         "resident chain diverged from round-tripped chain by {worst:e} > {tol:e}"
@@ -1316,7 +1355,7 @@ fn the_distance_matrix_matches_the_cpu_reference() {
             .map(|(g, c)| (g - c).abs())
             .fold(0.0f32, f32::max);
 
-        assert!(worst <= tolerance(d), "n={n} d={d}: worst {worst:e}");
+        assert!(worst <= tolerance(d, &cpu), "n={n} d={d}: worst {worst:e}");
         println!("sqdist n={n} d={d}: worst {worst:e}");
     }
 }
