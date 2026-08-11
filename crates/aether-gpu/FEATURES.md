@@ -15,7 +15,7 @@ wrong answer is worth keeping — but it means the current state has to be
 reconstructed from a sequence of corrections. This section is the state.
 
 **The backend works and nothing uses it.** 20 WGSL kernels, resident tensors,
-batched submission, 100 tests, 0 of 24 mutants escaping. No line of
+batched submission, 101 tests, 0 of 24 mutants escaping. No line of
 `aether-core` or `aether-lang` calls it.
 
 `scheduled_attention_resident` returns a `GpuTensor` so attention output can feed
@@ -1369,6 +1369,34 @@ the matrix-wide allowance: injecting a **2e-6** relative error into `matmul` fai
 it at entry (0,11), where κ=1.852 permits 1.763e-6. Every other test in this file
 needs 1e-5 before it notices.
 
+##### κ for every entry costs one extra dispatch
+
+The obvious objection to that guidance is cost: computing κ is O(k) per entry,
+which is the whole matmul again in host code, and that is reason enough to ignore
+the advice. It is not host code. The numerator is `Σ|aₗ|·|bₗ|`, which is the
+product of the elementwise magnitudes, so entrywise
+
+```text
+κ = (|A| · |B|) ⊘ |A · B|
+```
+
+— one more `matmul` on operands the caller already holds, on the same hardware,
+using nothing this crate does not already export.
+
+`|A|·|B|` sums only non-negative terms, so nothing cancels in it. It is the one
+product here that is always well conditioned, which is what makes the estimate
+trustworthy exactly where it is needed: the worse the conditioning of `A·B`, the
+more reliable the number reporting it.
+
+Measured against κ computed in f64 on the host, worst disagreement **4.530e-05**
+relative at a worst κ of 2.069e3 — against a quantity that only has to be right
+to a factor of two to sort entries into trustworthy and not.
+
+So the accuracy story ends somewhere useful. The crate can say which entries of a
+matmul to distrust and by how much, for one extra dispatch, and
+`the_condition_number_of_every_entry_costs_one_extra_matmul` keeps that claim
+honest.
+
 The tightening has teeth, demonstrated rather than asserted. Injecting a 1e-5
 relative error into `matmul` and running the suite under both bounds:
 
@@ -1937,6 +1965,7 @@ Ordered by value, highest first.
 6. **f16 storage** with f32 accumulation.
 7. Raise `PersistenceConfig` caps past 1024 so the distance kernel earns its
    dispatch, then route Vietoris–Rips through it.
+
 
 
 

@@ -612,6 +612,113 @@ fn f64_matmul(a: &[f64], b: &[f64], m: usize, k: usize, n: usize) -> Vec<f64> {
     c
 }
 
+/// The conditioning of every entry, for the price of one extra dispatch.
+///
+/// `per_entry_error_stays_inside_the_condition_number_bound` establishes that an
+/// entry's accuracy is set by its condition number, and closes by noting a caller
+/// wanting that guarantee must compute `κ` itself at O(k) per entry — which
+/// sounds like host work proportional to the whole matmul, and is the reason to
+/// dismiss the advice.
+///
+/// It is not host work. The numerator of `κ` is `Σ|aₗ|·|bₗ|`, which is the matrix
+/// product of the elementwise magnitudes, so
+///
+/// ```text
+/// κ = (|A| · |B|) ⊘ |A · B|
+/// ```
+///
+/// entrywise. The whole conditioning matrix is one more `matmul` on operands the
+/// caller already has, on the same hardware, at the same cost as the product it
+/// describes — not a loop in host code.
+///
+/// `|A|·|B|` sums only non-negative terms, so nothing cancels in it and it is the
+/// one product here that is always well conditioned. That is what makes the
+/// estimate trustworthy exactly where it matters: the worse the conditioning of
+/// `A·B`, the more reliable the number reporting it.
+///
+/// Checked against `κ` computed in f64 on the host: worst disagreement 4.5e-05
+/// relative, against a quantity that only has to be right to a factor of two to
+/// be useful for deciding which entries to distrust.
+#[test]
+#[cfg_attr(not(feature = "gpu"), ignore = "needs a GPU adapter: --features gpu")]
+fn the_condition_number_of_every_entry_costs_one_extra_matmul() {
+    let ctx = require_context();
+
+    let (m, k, n) = (32usize, 64usize, 32usize);
+    let mut state = 7u64;
+    let mut next = || {
+        state = state
+            .wrapping_mul(6364136223846793005)
+            .wrapping_add(1442695040888963407);
+        f64::from((state >> 33) as u32) / f64::from(1u32 << 31)
+    };
+    let mut spread = |count: usize| -> Vec<f32> {
+        (0..count)
+            .map(|_| {
+                let exponent = (next() - 0.5) * 2.0;
+                let sign = if next() < 0.5 { -1.0 } else { 1.0 };
+                (sign * 10f64.powf(exponent)) as f32
+            })
+            .collect()
+    };
+
+    let a = spread(m * k);
+    let b = spread(k * n);
+
+    let product = ctx.matmul(&a, &b, m, k, n).expect("matmul");
+
+    let magnitudes_a: Vec<f32> = a.iter().map(|v| v.abs()).collect();
+    let magnitudes_b: Vec<f32> = b.iter().map(|v| v.abs()).collect();
+    let magnitudes = ctx
+        .matmul(&magnitudes_a, &magnitudes_b, m, k, n)
+        .expect("matmul of magnitudes");
+
+    let a64: Vec<f64> = a.iter().map(|v| f64::from(*v)).collect();
+    let b64: Vec<f64> = b.iter().map(|v| f64::from(*v)).collect();
+
+    let mut worst_disagreement = 0.0f64;
+    let mut worst_kappa = 0.0f64;
+
+    for i in 0..m {
+        for j in 0..n {
+            let mut sum = 0.0f64;
+            let mut summed_magnitudes = 0.0f64;
+            for l in 0..k {
+                let term = a64[i * k + l] * b64[l * n + j];
+                sum += term;
+                summed_magnitudes += term.abs();
+            }
+            if sum.abs() < 1e-300 {
+                continue;
+            }
+
+            let exact = summed_magnitudes / sum.abs();
+            let from_gpu = f64::from(magnitudes[i * n + j]) / f64::from(product[i * n + j]).abs();
+
+            worst_disagreement = worst_disagreement.max((exact - from_gpu).abs() / exact);
+            worst_kappa = worst_kappa.max(exact);
+        }
+    }
+
+    println!("worst kappa {worst_kappa:.3e}, GPU estimate disagrees by {worst_disagreement:.3e}");
+
+    // Two orders of margin over the 4.5e-5 observed. The estimate is used to sort
+    // entries into trustworthy and not, a decision that survives being wrong by a
+    // factor of two, so a tight bound here would be precision this does not need
+    // and would fail on an adapter that accumulates differently.
+    assert!(
+        worst_disagreement < 1e-3,
+        "the two-matmul condition estimate disagrees with the f64 computation by \
+         {worst_disagreement:e}, too far to identify which entries cancel"
+    );
+
+    assert!(
+        worst_kappa > 100.0,
+        "worst kappa is only {worst_kappa:e}, so nothing in this fixture is \
+         ill-conditioned and the estimate was never tested where it matters"
+    );
+}
+
 /// Which entries are the inaccurate ones, and how a caller identifies them.
 ///
 /// The measurement beside this one shows a single entry can be a thousand times
