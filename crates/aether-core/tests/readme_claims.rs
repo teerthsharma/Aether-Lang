@@ -56,6 +56,29 @@ fn claims(doc: &str) -> Vec<(String, usize, usize)> {
     let mut found = Vec::new();
 
     for line in doc.lines() {
+        // The file-tree form, which states the same two numbers in the other
+        // order and without backticks:
+        //
+        //     ├── persistence_invariants.rs        740   12 tests
+        //
+        // Reading only the heading form left this free to drift on its own, and
+        // a figure stated twice with one occurrence checked is worse than one
+        // stated once: the checked copy makes the unchecked one look defended.
+        let stripped = line
+            .trim_start_matches(['├', '└', '│', '─', ' '])
+            .trim_start();
+        if let Some((name, tail)) = stripped.split_once(".rs") {
+            let mut fields = tail.split_whitespace();
+            if let (Some(lines), Some(count), Some("tests")) =
+                (fields.next(), fields.next(), fields.next())
+            {
+                let parse = |s: &str| s.replace(',', "").parse::<usize>().ok();
+                if let (Some(l), Some(t)) = (parse(lines), parse(count)) {
+                    found.push((format!("{name}.rs"), t, l));
+                }
+            }
+        }
+
         let mut rest = line;
         while let Some(start) = rest.find('`') {
             let after = &rest[start + 1..];
@@ -130,10 +153,15 @@ fn the_readme_suite_counts_match_the_suites() {
         checked += 1;
     }
 
+    // Ten, not five: each of the five suites is stated twice, once in a section
+    // heading and once in the file tree. Five would pass with one of the two
+    // forms no longer matching, which is exactly the gap this guard was extended
+    // to close — and it would pass while reading as though it covered both.
     assert!(
-        checked >= 5,
-        "only {checked} suite claims were checked against this crate; the README \
-         describes five of its test files, so a lower number means the phrasing \
-         changed and this guard is now checking less than it appears to"
+        checked >= 10,
+        "only {checked} suite claims were checked against this crate. The README \
+         states each of its five test files twice, as a heading and as a file-tree \
+         row, so fewer than ten means one of the two forms has been reworded and \
+         is no longer being read at all"
     );
 }
