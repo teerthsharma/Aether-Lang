@@ -41,20 +41,6 @@ const POINTS_PER_CLASS: usize = 250;
 // Data
 // ═══════════════════════════════════════════════════════════════════════════════
 
-/// Deterministic LCG. A fixed generator rather than `rand` so the reported
-/// numbers reproduce exactly from the seed, on any machine.
-struct Lcg(u64);
-
-impl Lcg {
-    fn next_f32(&mut self) -> f32 {
-        self.0 = self
-            .0
-            .wrapping_mul(6364136223846793005)
-            .wrapping_add(1442695040888963407);
-        (self.0 >> 33) as f32 / (1u64 << 31) as f32
-    }
-}
-
 /// Two interleaved spirals, drawn i.i.d. and shuffled. Returns row-major
 /// `[n, 2]` features and `[n]` labels in {0, 1}.
 ///
@@ -107,7 +93,7 @@ fn spirals(seed: u64) -> (Vec<f32>, Vec<f32>) {
     let y: Vec<f32> = classes.iter().map(|c| *c as f32).collect();
     let n = y.len();
 
-    let mut rng = Lcg(seed ^ 0x5EED);
+    let mut rng = datasets::Lcg::new(seed ^ 0x5EED);
     let mut order: Vec<usize> = (0..n).collect();
     for i in (1..n).rev() {
         let j = (rng.next_f32() * (i + 1) as f32) as usize % (i + 1);
@@ -146,7 +132,7 @@ fn sigmoid(z: &[f32]) -> Vec<f32> {
 /// Kaiming-uniform init, the right choice for ReLU: naive uniform leaves half
 /// the gradient signal dead on arrival and the failure reads as a bad
 /// learning rate.
-fn init_weights(fan_in: usize, fan_out: usize, rng: &mut Lcg) -> Vec<f32> {
+fn init_weights(fan_in: usize, fan_out: usize, rng: &mut datasets::Lcg) -> Vec<f32> {
     let bound = (6.0f32 / fan_in as f32).sqrt();
     (0..fan_in * fan_out)
         .map(|_| (rng.next_f32() * 2.0 - 1.0) * bound)
@@ -167,7 +153,7 @@ struct Mlp {
 }
 
 impl Mlp {
-    fn new(rng: &mut Lcg) -> Self {
+    fn new(rng: &mut datasets::Lcg) -> Self {
         Self {
             w1: init_weights(2, HIDDEN, rng),
             b1: vec![0.0; HIDDEN],
@@ -395,7 +381,7 @@ fn main() {
         let n_te = te_y.len();
 
         // Same init seed every fold: folds differ by data, not by luck.
-        let mut rng = Lcg(0xC0FFEE + fold as u64);
+        let mut rng = datasets::Lcg::new(0xC0FFEE + fold as u64);
         let mut net = Mlp::new(&mut rng);
 
         let mut last_loss = 0.0;

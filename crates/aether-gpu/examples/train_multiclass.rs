@@ -36,19 +36,7 @@ const CLASSES: usize = 3;
 const LEARNING_RATE: f32 = 0.5;
 const PER_CLASS: usize = 300;
 
-struct Lcg(u64);
-
-impl Lcg {
-    fn next_f32(&mut self) -> f32 {
-        self.0 = self
-            .0
-            .wrapping_mul(6364136223846793005)
-            .wrapping_add(1442695040888963407);
-        (self.0 >> 33) as f32 / (1u64 << 31) as f32
-    }
-}
-
-fn init_weights(fan_in: usize, fan_out: usize, rng: &mut Lcg) -> Vec<f32> {
+fn init_weights(fan_in: usize, fan_out: usize, rng: &mut datasets::Lcg) -> Vec<f32> {
     let bound = (6.0f32 / fan_in as f32).sqrt();
     (0..fan_in * fan_out)
         .map(|_| (rng.next_f32() * 2.0 - 1.0) * bound)
@@ -65,7 +53,7 @@ struct Net {
 }
 
 impl Net {
-    fn new(ctx: &GpuContext, rng: &mut Lcg) -> Self {
+    fn new(ctx: &GpuContext, rng: &mut datasets::Lcg) -> Self {
         let up = |v: Vec<f32>, r, c| ctx.upload(&v, r, c).expect("upload");
         Self {
             w1: up(init_weights(2, HIDDEN, rng), 2, HIDDEN),
@@ -211,7 +199,7 @@ fn main() {
     let gtex = ctx.upload(&test_x, n_te, 2).expect("test x");
 
     for run in 0..RUNS {
-        let mut rng = Lcg(0xBEEF + run as u64);
+        let mut rng = datasets::Lcg::new(0xBEEF + run as u64);
         let mut net = Net::new(&ctx, &mut rng);
 
         for _ in 0..EPOCHS {

@@ -43,18 +43,6 @@ enum Opt {
     Adam,
 }
 
-struct Lcg(u64);
-
-impl Lcg {
-    fn next_f32(&mut self) -> f32 {
-        self.0 = self
-            .0
-            .wrapping_mul(6364136223846793005)
-            .wrapping_add(1442695040888963407);
-        (self.0 >> 33) as f32 / (1u64 << 31) as f32
-    }
-}
-
 /// Draws arc positions uniformly at random rather than walking them in order.
 ///
 /// This is what makes an independently generated set a genuine i.i.d. sample
@@ -75,7 +63,7 @@ fn spirals_iid(seed: u64, per_class: usize) -> (Vec<f32>, Vec<usize>) {
 }
 
 fn spirals(seed: u64) -> (Vec<f32>, Vec<usize>) {
-    let mut rng = Lcg(seed);
+    let mut rng = datasets::Lcg::new(seed);
     let mut x = Vec::new();
     let mut y = Vec::new();
     for class in 0..CLASSES {
@@ -147,7 +135,7 @@ fn one_hot(y: &[usize]) -> Vec<f32> {
     out
 }
 
-fn init_weights(fan_in: usize, fan_out: usize, rng: &mut Lcg) -> Vec<f32> {
+fn init_weights(fan_in: usize, fan_out: usize, rng: &mut datasets::Lcg) -> Vec<f32> {
     let bound = (6.0f32 / fan_in as f32).sqrt();
     (0..fan_in * fan_out)
         .map(|_| (rng.next_f32() * 2.0 - 1.0) * bound)
@@ -162,7 +150,7 @@ struct Params {
 }
 
 impl Params {
-    fn new(ctx: &GpuContext, rng: &mut Lcg, opt: Opt) -> Self {
+    fn new(ctx: &GpuContext, rng: &mut datasets::Lcg, opt: Opt) -> Self {
         let up = |v: Vec<f32>, r, c| ctx.upload(&v, r, c).expect("upload");
         let t = vec![
             up(init_weights(2, HIDDEN, rng), 2, HIDDEN),
@@ -284,7 +272,7 @@ fn holdout_accuracy(
     let gy = ctx.upload(train_hot, n_tr, CLASSES).expect("y");
     let gte = ctx.upload(test_x, test_y.len(), 2).expect("test x");
 
-    let mut rng = Lcg(seed);
+    let mut rng = datasets::Lcg::new(seed);
     let mut p = Params::new(ctx, &mut rng, opt);
     for _ in 0..EPOCHS {
         step(ctx, &mut p, &gx, &gy, lr);
@@ -329,7 +317,7 @@ fn cross_validate(
 
         // Same seed per fold across optimisers and rates, so the comparison
         // varies the optimiser and nothing else.
-        let mut rng = Lcg(0xBEEF + fold as u64);
+        let mut rng = datasets::Lcg::new(0xBEEF + fold as u64);
         let mut p = Params::new(ctx, &mut rng, opt);
 
         for _ in 0..EPOCHS {
