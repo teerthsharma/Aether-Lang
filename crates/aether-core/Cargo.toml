@@ -37,3 +37,22 @@ heapless = { workspace = true }
 [lib]
 name = "aether_core"
 path = "src/lib.rs"
+
+# Denied for this package only, not through RUSTFLAGS.
+#
+# An `alloc::boxed::Box` import sat unused in `memory.rs` under
+# `cfg(not(feature = "std"))` with nothing catching it: the workspace clippy gate
+# denies warnings, but it runs for the host target, where that `cfg` is off and
+# the import does not exist. A warning reachable only in the bare-metal
+# configuration had no gate at all.
+#
+# `RUSTFLAGS="-D warnings"` on the CI step would have caught it and would also
+# apply to every dependency, so a future `nalgebra` emitting a warning would fail
+# this build for something outside this repository. A `[lints]` table applies to
+# this package and nothing else.
+#
+# Narrow on purpose. Denying all of `unused` invites a future nightly adding a
+# lint to that group to fail the build with no commit touching the code, which is
+# the standing exposure already documented for the clippy groups in CI.
+[lints.rust]
+unused_imports = "deny"
