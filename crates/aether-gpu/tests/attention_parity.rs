@@ -1030,6 +1030,91 @@ fn a_training_loop_tracks_the_reference_through_either_backward() {
     );
 }
 
+/// The backward pass must reject every launch the forward rejects.
+///
+/// It inherits that validation by construction: `scheduled_attention_backward_resident`
+/// runs the forward first and returns its error, so the two cannot disagree
+/// about what is legal. Inheritance by construction is worth exactly as much as
+/// the construction, and nothing here pinned it — deleting that call would leave
+/// the backward accepting a `head_dim` past the kernel's scratch, where WGSL
+/// clamps an out-of-range private index instead of trapping and the result is
+/// wrong numbers rather than an error.
+///
+/// The cotangent check is the backward's own and is included so this covers what
+/// it adds as well as what it inherits.
+#[test]
+#[cfg_attr(not(feature = "gpu"), ignore)]
+fn the_backward_rejects_every_launch_the_forward_rejects() {
+    let ctx = require_context();
+    let schedule = dense_causal_block_schedule(2);
+
+    let too_wide = vec![0.0f32; 2 * 256];
+    assert!(
+        ctx.scheduled_attention_backward_resident(
+            &too_wide, &too_wide, &too_wide, 2, 256, &schedule, 1, &too_wide,
+        )
+        .is_err(),
+        "a head_dim of 256 exceeds the kernel's scratch and must be rejected by \
+         the backward as well as the forward"
+    );
+
+    let operands = vec![0.0f32; 6 * 4];
+    assert!(
+        ctx.scheduled_attention_backward_resident(
+            &operands, &operands, &operands, 6, 4, &schedule, 4, &operands,
+        )
+        .is_err(),
+        "seq=6 is not a multiple of block_size=4 and must be rejected"
+    );
+
+    let sized = vec![0.0f32; 8 * 4];
+    assert!(
+        ctx.scheduled_attention_backward_resident(
+            &sized, &sized, &sized, 8, 4, &schedule, 1, &sized,
+        )
+        .is_err(),
+        "a schedule covering 2 blocks cannot serve seq=8 at block_size=1"
+    );
+
+    // The backward's own precondition: everything above is shared with the
+    // forward, and a cotangent of the wrong length is the one thing the forward
+    // never sees.
+    let good = vec![0.0f32; 16 * 4];
+    let short_cotangent = vec![0.0f32; 16 * 4 - 1];
+    assert!(
+        ctx.scheduled_attention_backward_resident(
+            &good,
+            &good,
+            &good,
+            16,
+            4,
+            &dense_causal_block_schedule(4),
+            4,
+            &short_cotangent,
+        )
+        .is_err(),
+        "a cotangent shorter than the output must be rejected"
+    );
+
+    // The control. Every assertion above is satisfied by a function that rejects
+    // everything, which would pass this test while making the kernel unusable.
+    assert!(
+        ctx.scheduled_attention_backward_resident(
+            &good,
+            &good,
+            &good,
+            16,
+            4,
+            &dense_causal_block_schedule(4),
+            4,
+            &good,
+        )
+        .is_ok(),
+        "a valid launch was rejected, so the assertions above hold for the wrong \
+         reason"
+    );
+}
+
 /// The host's ceilings must equal the shader's.
 ///
 /// They are declared twice because WGSL cannot import a Rust constant. If they

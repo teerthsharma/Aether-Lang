@@ -59,8 +59,9 @@ if ! git diff --quiet -- "$shader" || ! git diff --cached --quiet -- "$shader"; 
 fi
 
 MUTANT_CATCHERS="$(mktemp)"
+MUTANT_RETRY_LOG="$(mktemp)"
 MUTANT_FAILURES=0
-trap 'restore; rm -f "$MUTANT_CATCHERS"' EXIT
+trap 'restore; rm -f "$MUTANT_CATCHERS" "$MUTANT_RETRY_LOG"' EXIT
 
 # name | perl expression applied to the whole file
 mutants=(

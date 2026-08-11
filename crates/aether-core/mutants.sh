@@ -138,8 +138,9 @@ printf '%-58s' "----------------------------------------------------------"
 for _ in "${suites[@]}"; do printf ' %-12s' "------------"; done
 printf '\n'
 
-MUTANT_CATCHERS="$(mktemp)"
-trap 'restore; rm -f "$MUTANT_CATCHERS"' EXIT
+MUTANT_CATCHERS="197121mktemp)"
+MUTANT_RETRY_LOG="$(mktemp)"
+trap 'restore; rm -f "$MUTANT_CATCHERS" "$MUTANT_RETRY_LOG"' EXIT
 escaped=0
 MUTANT_FAILURES=0
 
