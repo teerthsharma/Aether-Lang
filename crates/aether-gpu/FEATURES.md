@@ -537,6 +537,44 @@ selection.
 | `Tensor::matmul` | **done** — `tensor_matmul` | **crossover n=128**, which is stable across runs. Magnitude is tens of times at n=512, and no tighter — the ratio's run-to-run spread is 96%. Opt-in per call site rather than a change to `Tensor`, so the f32 question is asked by the caller who knows what the result feeds |
 | `pairwise_sqdist` | **not worth doing at any size** | 90–100% of its time is transfer, and the persistence reduction is CPU-side so the matrix must come back |
 
+#### The decision this leaves open, and the evidence for it in one place
+
+`tensor_matmul` exists and nothing calls it. The reason is not missing work: it is
+that routing `ml::Tensor` through it means the result comes back from f32
+arithmetic, and whether that is acceptable depends on what the caller feeds it
+to. That question is answered in five places in this file and nowhere together,
+which makes it hard to decide and easy to defer.
+
+**What f32 is measured to cost.**
+
+| consumer | finding | where |
+|---|---|---|
+| Persistence / Betti numbers | **unchanged.** Bars move by about 1e-7; no Betti number differs across any radius or seed tested | `f32_topology.rs`, *Is f32 good enough for the topology?* |
+| Training gradients | within the suites' tolerances; the f32 backward reaches the same training outcome as the f64 one | *The f32 backward drives the same training outcome* |
+| Attention, per sequence | gradient error grows about **linearly** with sequence length, not quadratically | *f32 gradient error grows about linearly* |
+| A matmul entry | relative error ≤ `κ · ε · √k`, asserted per entry, worst observed 0.202 of that bound | `per_entry_error_stays_inside_the_condition_number_bound` |
+| Knowing which entries | `κ = (\|A\|·\|B\|) ⊘ \|A·B\|`, one extra dispatch, agrees with an f64 computation to 4.5e-05 | `the_condition_number_of_every_entry_costs_one_extra_matmul` |
+
+**What it is measured to buy.** A crossover at n=128, stable across every run.
+The magnitude above it is **not measurable on this machine** — the same ratio has
+been recorded from 10× to 63×, because the GPU term swings 5.2× between runs
+while the CPU term moves 1.6×. Three attempts to stabilise it failed and the
+reason is understood: the variance is not common-mode, so no aggregation removes
+it.
+
+**So the decision is not "is f32 accurate enough".** That has an answer per
+consumer, and for the two consumers in this workspace the answer is yes. The
+decision is whether a speedup whose size is unknown is worth a semantic change to
+a shared type — and the shape of the answer is why `tensor_matmul` is opt-in per
+call site rather than a change to `Tensor::matmul`. A caller that knows its
+result feeds a Betti computation can take it today; one that does not, should not
+have it taken for them.
+
+**What would change the decision.** A machine where the magnitude is measurable,
+which would turn "unknown speedup" into a number; or a consumer whose tolerance
+is tighter than `8·ε·√k`, which none in this workspace currently is. Neither is
+work this crate can do to itself.
+
 **One rule predicts both**, and is the single most portable thing here: with a
 CPU consumer, an operation pays according to its arithmetic per byte returned.
 Matmul is O(n³) over O(n²) bytes, so the ratio grows with n and must cross over.
