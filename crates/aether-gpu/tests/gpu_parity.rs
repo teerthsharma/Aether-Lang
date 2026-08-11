@@ -414,6 +414,123 @@ fn the_tiled_kernel_is_correct_across_many_tile_iterations() {
     }
 }
 
+/// A whole training step, resident against read-back, parameter for parameter.
+///
+/// The resident path is verified op by op and for a chain of matmuls, and for
+/// attention. A training step is neither: it runs seven different kernels in
+/// sequence — matmul, bias, relu, transpose, relu_backward, column_sums, the
+/// update — and threads a tensor from the forward pass into the backward one.
+/// Each kernel agreeing in isolation does not establish that the sequence does,
+/// because what differs between the two paths is not the arithmetic but where the
+/// intermediate lives, and the intermediates a training step keeps alive are the
+/// ones a chain of matmuls does not have.
+///
+/// This is the composition the crate exists for: `train_resident` runs it every
+/// epoch, and until now nothing compared its result against the path it replaced.
+#[test]
+#[cfg_attr(not(feature = "gpu"), ignore = "needs a GPU adapter: --features gpu")]
+fn a_training_step_resident_equals_the_same_step_with_readbacks() {
+    let ctx = require_context();
+
+    let (n, d, h) = (12usize, 5usize, 7usize);
+    let x = fill(n * d, 901);
+    let w1 = fill(d * h, 902);
+    let b1 = fill(h, 903);
+    let target = fill(n * h, 904);
+    let lr = 0.05f32;
+
+    // Read-back path: every intermediate leaves the device and comes back.
+    let readback = {
+        let z1 = ctx.matmul(&x, &w1, n, d, h).expect("z1");
+        let z1 = ctx.add_bias(&z1, &b1, n, h).expect("bias");
+        let a1 = ctx.relu(&z1).expect("relu");
+
+        // dL/da1 for a squared error against the target.
+        let da1: Vec<f32> = a1
+            .iter()
+            .zip(&target)
+            .map(|(a, t)| (a - t) / n as f32)
+            .collect();
+
+        let dz1 = ctx.relu_backward(&z1, &da1).expect("relu_backward");
+        let xt = ctx
+            .read(
+                &ctx.transpose_resident(&ctx.upload(&x, n, d).expect("ux"))
+                    .expect("xt"),
+            )
+            .expect("read xt");
+        let dw1 = ctx.matmul(&xt, &dz1, d, n, h).expect("dw1");
+
+        let gd = ctx.upload(&dw1, d, h).expect("ug");
+        let wp = ctx.upload(&w1, d, h).expect("uw");
+        ctx.read(&ctx.sgd_update_resident(&wp, &gd, lr).expect("sgd"))
+            .expect("read w")
+    };
+
+    // Resident path: nothing leaves the device until the end.
+    let resident = {
+        let gx = ctx.upload(&x, n, d).expect("gx");
+        let gw = ctx.upload(&w1, d, h).expect("gw");
+        let gb = ctx.upload(&b1, 1, h).expect("gb");
+        let gt = ctx.upload(&target, n, h).expect("gt");
+
+        let z1 = ctx.matmul_resident(&gx, &gw).expect("z1");
+        let z1 = ctx.add_bias_resident(&z1, &gb).expect("bias");
+        let a1 = ctx.relu_resident(&z1).expect("relu");
+
+        // The one step with no resident kernel: the loss gradient. Computed on
+        // the host in both paths so the comparison isolates the transfer pattern
+        // rather than measuring a kernel only one path has.
+        let da1: Vec<f32> = ctx
+            .read(&a1)
+            .expect("read a1")
+            .iter()
+            .zip(&ctx.read(&gt).expect("read t"))
+            .map(|(a, t)| (a - t) / n as f32)
+            .collect();
+        let gda1 = ctx.upload(&da1, n, h).expect("uda");
+
+        let dz1 = ctx
+            .relu_backward_resident(&z1, &gda1)
+            .expect("relu_backward");
+        let xt = ctx.transpose_resident(&gx).expect("xt");
+        let dw1 = ctx.matmul_resident(&xt, &dz1).expect("dw1");
+
+        ctx.read(&ctx.sgd_update_resident(&gw, &dw1, lr).expect("sgd"))
+            .expect("read w")
+    };
+
+    assert_eq!(
+        resident.len(),
+        readback.len(),
+        "the two paths returned different shapes"
+    );
+
+    let differing = resident
+        .iter()
+        .zip(&readback)
+        .filter(|(r, b)| r.to_bits() != b.to_bits())
+        .count();
+
+    let worst = resident
+        .iter()
+        .zip(&readback)
+        .map(|(r, b)| (r - b).abs())
+        .fold(0.0f32, f32::max);
+
+    println!(
+        "training step: {differing} of {} parameters differ, worst {worst:e}",
+        resident.len()
+    );
+
+    assert_eq!(
+        differing,
+        0,
+        "{differing} of {} updated parameters differ between the resident and          read-back training steps, worst by {worst:e}. Both run the same kernels          on the same values in the same order; only where the intermediates live          differs, so a difference is the transfer path changing a result rather          than arithmetic.",
+        resident.len()
+    );
+}
+
 /// A chain of resident operations must equal the same chain done through the
 /// upload-and-read-back API. This is what licenses the training loop to keep
 /// intermediates on the device.
