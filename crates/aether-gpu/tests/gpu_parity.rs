@@ -612,6 +612,117 @@ fn f64_matmul(a: &[f64], b: &[f64], m: usize, k: usize, n: usize) -> Vec<f64> {
     c
 }
 
+/// What the accuracy figures do *not* promise about a single entry.
+///
+/// Every accuracy measurement in this file divides by the largest exact entry in
+/// the whole result, and that choice is defended each time as avoiding the
+/// unbounded relative error of a near-zero entry. It is the right normalisation
+/// and it quietly changes the claim: the number that comes out is a statement
+/// about the matrix, not about any element of it. A caller who reads one entry
+/// gets a much weaker guarantee than the headline figure, and nothing said so.
+///
+/// Measured at 32×64×32 against f64, varying how many decades the operand
+/// magnitudes span:
+///
+/// | decades | matrix-relative | worst entry-relative |
+/// |---:|---:|---:|
+/// | 0 | 0 | 0 |
+/// | 1 | 2.883e-07 | 1.143e-04 |
+/// | 3 | 2.483e-07 | 7.201e-05 |
+/// | 6 | 1.542e-07 | 1.064e-05 |
+///
+/// Three things are worth reading off that. The matrix-relative error is flat
+/// across six decades, so the bound the other tests assert is robust to
+/// conditioning — the question three earlier revisions could not settle, because
+/// they compared f32 against f32 and the shared rounding cancelled. Entry-relative
+/// error runs up to a thousand times larger, which is catastrophic cancellation
+/// doing exactly what it does. And zero decades gives exactly zero error, because
+/// products of ±1 and sums of small integers are exact, which is why a fixture
+/// has to span magnitudes before it measures anything at all.
+///
+/// This pins the entry-relative number rather than the matrix one, since the
+/// matrix one is already asserted elsewhere and this exists to record the gap
+/// between them.
+#[test]
+#[cfg_attr(not(feature = "gpu"), ignore = "needs a GPU adapter: --features gpu")]
+fn a_single_entry_is_far_less_accurate_than_the_matrix_figure_suggests() {
+    let ctx = require_context();
+
+    let (m, k, n) = (32usize, 64usize, 32usize);
+    let mut state = 7u64;
+    let mut next = || {
+        state = state
+            .wrapping_mul(6364136223846793005)
+            .wrapping_add(1442695040888963407);
+        f64::from((state >> 33) as u32) / f64::from(1u32 << 31)
+    };
+
+    // Two decades of spread, enough for products to be inexact and for sums to
+    // cancel, without being so wide that most terms are negligible.
+    let mut spread = |count: usize| -> Vec<f32> {
+        (0..count)
+            .map(|_| {
+                let exponent = (next() - 0.5) * 2.0;
+                let sign = if next() < 0.5 { -1.0 } else { 1.0 };
+                (sign * 10f64.powf(exponent)) as f32
+            })
+            .collect()
+    };
+
+    let a32 = spread(m * k);
+    let b32 = spread(k * n);
+    let a64: Vec<f64> = a32.iter().map(|v| f64::from(*v)).collect();
+    let b64: Vec<f64> = b32.iter().map(|v| f64::from(*v)).collect();
+
+    let gpu = ctx.matmul(&a32, &b32, m, k, n).expect("matmul");
+    let exact = f64_matmul(&a64, &b64, m, k, n);
+
+    let scale = exact.iter().fold(0.0f64, |acc, v| acc.max(v.abs()));
+    let matrix_relative = gpu
+        .iter()
+        .zip(&exact)
+        .map(|(g, e)| (f64::from(*g) - e).abs())
+        .fold(0.0f64, f64::max)
+        / scale;
+
+    let entry_relative = gpu
+        .iter()
+        .zip(&exact)
+        .filter(|(_, e)| e.abs() > 1e-30)
+        .map(|(g, e)| (f64::from(*g) - e).abs() / e.abs())
+        .fold(0.0f64, f64::max);
+
+    println!("matrix-relative {matrix_relative:.3e}, worst entry-relative {entry_relative:.3e}");
+
+    // The matrix figure must still hold: this fixture is ill-conditioned, not
+    // broken, and a kernel defect would break both numbers rather than one.
+    let bound = 8.0 * 1.19e-7 * (k as f64).sqrt();
+    assert!(
+        matrix_relative < bound,
+        "matrix-relative error {matrix_relative:e} exceeds {bound:e} even though \
+         only the conditioning changed"
+    );
+
+    // And the entry figure must be visibly worse, or this test is measuring a
+    // fixture that does not cancel and would pass while proving nothing.
+    assert!(
+        entry_relative > 20.0 * matrix_relative,
+        "worst entry-relative error {entry_relative:e} is not meaningfully worse \
+         than the matrix figure {matrix_relative:e}; the fixture has stopped \
+         cancelling and no longer demonstrates the gap it exists to show"
+    );
+
+    // Loose because it is a property of the fixture's conditioning rather than of
+    // the kernel, and a tight bound here would fail on an adapter that reorders
+    // differently without anything being wrong.
+    assert!(
+        entry_relative < 1e-2,
+        "worst entry-relative error {entry_relative:e} is far beyond the 1e-4 \
+         this fixture produced when written, which is a change in the kernel \
+         rather than in the conditioning"
+    );
+}
+
 /// Absolute accuracy at rectangular shapes, against an f64 reference.
 ///
 /// Every other matmul parity assertion compares the kernel to `cpu_matmul`,

@@ -15,7 +15,7 @@ wrong answer is worth keeping — but it means the current state has to be
 reconstructed from a sequence of corrections. This section is the state.
 
 **The backend works and nothing uses it.** 20 WGSL kernels, resident tensors,
-batched submission, 98 tests, 0 of 24 mutants escaping. No line of
+batched submission, 99 tests, 0 of 24 mutants escaping. No line of
 `aether-core` or `aether-lang` calls it.
 
 `scheduled_attention_resident` returns a `GpuTensor` so attention output can feed
@@ -1294,9 +1294,43 @@ the matrix-wide maximum does not.
 
 Recorded as a negative result: the risk named in the previous revision is real in
 general and not reachable on this kernel with these assertions. What would reach
-it is a reference computed in f64, which would make the comparison one of absolute
-accuracy rather than of ordering — a different and stricter test than the one
-these fixtures perform, and not one this crate currently makes.
+it is a reference computed in f64, which makes the comparison one of absolute
+accuracy rather than of ordering.
+
+##### With an f64 reference, the conditioning question resolves
+
+That comparison now exists, and it answers what three revisions of f32-against-f32
+fixtures could not. At 32×64×32 against f64, varying how many decades the operand
+magnitudes span:
+
+| decades | matrix-relative | worst entry-relative |
+|---:|---:|---:|
+| 0 | 0 | 0 |
+| 1 | 2.883e-07 | **1.143e-04** |
+| 3 | 2.483e-07 | 7.201e-05 |
+| 6 | 1.542e-07 | 1.064e-05 |
+
+**The matrix-relative error is flat across six decades.** The bound every other
+test asserts is robust to conditioning, and the worry that motivated three
+revisions of fixtures does not materialise for it.
+
+**Entry-relative error runs up to a thousand times larger.** Every accuracy
+measurement in this crate divides by the largest exact entry in the whole result,
+defended each time as avoiding the unbounded relative error of a near-zero entry.
+That is the right normalisation and it quietly changes the claim: the figure is a
+statement about the matrix, not about any element of it. A caller reading a single
+entry gets a much weaker guarantee than the headline number, and nothing said so
+until now.
+
+Zero decades gives exactly zero error, which is why the earlier cancellation
+fixtures measured nothing: products of ±1 and sums of small integers are exact, so
+a fixture has to span magnitudes before it measures anything at all.
+
+`a_single_entry_is_far_less_accurate_than_the_matrix_figure_suggests` pins the
+gap. It asserts the matrix figure still holds under bad conditioning, and that the
+entry figure is at least twenty times worse — the second assertion existing so
+that a fixture which stops cancelling fails loudly instead of passing while
+demonstrating nothing.
 
 The tightening has teeth, demonstrated rather than asserted. Injecting a 1e-5
 relative error into `matmul` and running the suite under both bounds:
@@ -1866,5 +1900,6 @@ Ordered by value, highest first.
 6. **f16 storage** with f32 accumulation.
 7. Raise `PersistenceConfig` caps past 1024 so the distance kernel earns its
    dispatch, then route Vietoris–Rips through it.
+
 
 
