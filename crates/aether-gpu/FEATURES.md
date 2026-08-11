@@ -1950,6 +1950,15 @@ Dispatch and allocation dominate below roughly 128×128.
 - 0.8220 is what 100 full-batch epochs at lr=0.5 buys on this task. It is a
   fixed budget, not a tuned result, and not the architecture's ceiling.
 
+  **The example now prints 0.9600**, because it was moved off its own swept
+  generator onto `datasets::spirals_iid`. Almost none of that rise is the change
+  of sampling: holding the generator fixed, the swept scheme measures 0.9540 and
+  the i.i.d. one 0.9600, which is 0.006 apart against a ±0.025 spread across
+  folds. The difference is the task — the local generator swept 2.5π with jitter
+  0.35 and 0.12, `spiral_point` uses 2.2π with 0.30 and 0.12, so there are fewer
+  turns and less noise to separate. 0.9600 and 0.8220 are numbers about different
+  problems and neither corrects the other.
+
 ## Next
 
 Ordered by value, highest first.
