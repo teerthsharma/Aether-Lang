@@ -680,6 +680,7 @@ Listed here so a reader is not misled by encountering them mid-file:
 | "The suite never reports success for work that did not happen" | **withdrawn** — it did exactly that for twenty-odd commits |
 | "Ratios are more stable than the timings they divide" | **withdrawn** — measured at 96% spread against 43% and 12% for the terms |
 | "The benchmark noise is short-timescale" | **withdrawn** — inferred from pairing failing; raw samples show the variance is GPU-side and between runs |
+| "Four mechanical mutants escape every suite" | **narrowed to three** — site 13 is caught 2 of 3 runs; one sample was taken of a racing mutant |
 
 ## Shipped
 
@@ -1072,18 +1073,44 @@ and every later verdict is quietly narrower than it looks.
 
 | of 54 survivors | |
 |---|---:|
-| equivalent — identical output, nothing to catch | **50** |
-| **changed a kernel's output with every suite passing** | **4** |
+| equivalent — identical output, nothing to catch | 50 |
+| changed output, then found to be caught on re-run | 1 |
+| **changed output and uncaught in 3 of 3 runs per suite** | **3** |
 
 Fifty are equivalent, which is the expected outcome and the reason the raw
-survivor count is not a coverage figure. The four are not.
+survivor count is not a coverage figure. Three are real.
 
 | site | kernel | flip | what it does |
 |---|---|---|---|
-| 13 | `pairwise_sqdist` | `j >= dims.m` → `j >` | thread `j = m` writes `c[i*m + m]`, the **next row's first entry** |
+| ~~13~~ | `pairwise_sqdist` | `j >= dims.m` → `j >` | **not a hole — see below** |
 | 25 | `softmax_xent_grad` | `j < dims.n` → `<=` | reads one column past the row, into the next row |
 | 43 | `scheduled_attention` | `n < block_size` → `<=` | one extra key per block |
 | 57 | `attention_row_stats` | `d < head_dim` → `<=` | one extra component per row |
+
+**Site 13 was reported as a hole and is not one.** Re-running each mutant three
+times per suite instead of once:
+
+| site | `gpu_parity` | `gradcheck` | `attention_parity` |
+|---|---|---|---|
+| 13 | **caught 2 of 3** | 0/3 | 0/3 |
+| 25 | 0/3 | 0/3 | 0/3 |
+| 43 | 0/3 | 0/3 | 0/3 |
+| 57 | 0/3 | 0/3 | 0/3 |
+
+`the_distance_matrix_matches_the_cpu_reference` does catch site 13, most of the
+time. The flip lets thread `j = m` write `c[i*m + m]`, which is the cell thread
+`(i+1, 0)` writes legitimately, so the two race and which value survives depends
+on scheduling. Run on its own the mutant passed **8 of 8**; run inside the full
+suite, where the test harness executes in parallel and the device is under load,
+it failed **2 of 3**. The sweep took one sample and drew the wrong conclusion
+from it.
+
+So the count is **three holes, not four**, and the harness now confirms a
+survival with a second pass before reporting it. Only survivors are re-run: a
+catch is positive evidence that repetition cannot overturn, while a survival is
+an absence of evidence and is exactly what an unlucky schedule manufactures.
+Two observations do not make it sound, only less wrong — a mutant caught one run
+in ten still reads as a survivor most of the time.
 
 Every one reads or writes into **adjacent, in-bounds** memory. That is exactly
 what separates them from the fifty: a flip that runs off the end of a buffer is
