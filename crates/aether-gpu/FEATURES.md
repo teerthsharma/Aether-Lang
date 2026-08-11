@@ -15,7 +15,7 @@ wrong answer is worth keeping — but it means the current state has to be
 reconstructed from a sequence of corrections. This section is the state.
 
 **The backend works and nothing uses it.** 18 WGSL kernels, resident tensors,
-batched submission, 89 tests, 0 of 20 mutants escaping. No line of
+batched submission, 90 tests, 0 of 20 mutants escaping. No line of
 `aether-core` or `aether-lang` calls it.
 
 `scheduled_attention_resident` returns a `GpuTensor` so attention output can feed
@@ -82,6 +82,36 @@ consistently negative across every allowance. No trained model is involved; this
 measures the schedule against the attention it approximates, not downstream task
 performance, and a selector can in principle lose mass and still serve a model
 well.
+
+### The first place the backend falls back to the CPU
+
+`GpuError::Unsupported` was split out of `ShapeMismatch` because the two ask
+different things of a caller: mismatched shapes are a bug at the call site, while
+a `head_dim` past the kernel's private scratch is a limit of this backend on a
+launch `aether-core` computes perfectly well. That distinction was decorative
+until something acted on it.
+
+`scheduled_attention_or_cpu` acts on it. A supported launch runs on the GPU, one
+past a ceiling runs on `aether_core::scheduled::scheduled_attention`, and a
+malformed launch still fails — falling back on a caller's bug would turn it into
+a silently slower correct-looking answer.
+
+**It returns which path ran, and that is the point of the signature.** The two
+routes do not agree to the same tolerance: WGSL has no f64, so the GPU answer is
+f32 widened on the way out while the CPU answer is f64 throughout. A helper that
+hid the switch would silently change a result's precision with the size of its
+input, which surfaces much later as a number nobody can reproduce. `AttentionPath`
+makes it something a caller can ignore deliberately but not by accident.
+
+The test covers all three routes rather than the interesting one, and checks the
+CPU route's *values* against the reference at 1e-12 — asserting only the path
+would pass on a fallback that returned zeros.
+
+This is also the first thing in the crate that answers the standing sentence at
+the top of this file. The backend still is not called from `aether-core`, and
+cannot be: `aether-core` is `no_std` and `wgpu` is not. But a caller who wants the
+GPU where it helps and correctness everywhere else now has one function to call
+instead of a policy to implement.
 
 ### A crashed test binary is not a caught mutant
 

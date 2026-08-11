@@ -117,6 +117,23 @@ impl core::fmt::Display for GpuError {
 
 impl std::error::Error for GpuError {}
 
+/// Which implementation produced a result from
+/// [`GpuContext::scheduled_attention_or_cpu`].
+///
+/// Returned rather than inferred because the two differ in precision — f32
+/// widened to f64 on the GPU, f64 throughout on the CPU — so which one ran is
+/// part of what the number means and not an implementation detail.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum AttentionPath {
+    /// The WGSL kernels. f32 internally, so agreement with the CPU path is at an
+    /// f32 tolerance and never at the 1e-12 used elsewhere in this workspace.
+    Gpu,
+    /// `aether_core::scheduled::scheduled_attention`, in f64. Taken when the
+    /// launch exceeds a kernel ceiling, which is a limit of the backend rather
+    /// than anything wrong with the call.
+    Cpu,
+}
+
 /// Which physical device the kernels are running on.
 ///
 /// Recorded and reported rather than assumed: a benchmark that does not name
@@ -970,6 +987,65 @@ impl GpuContext {
         );
 
         Ok(out)
+    }
+
+    /// Scheduled attention on the GPU where possible, on the CPU where not.
+    ///
+    /// This is what [`GpuError::Unsupported`] exists for. Splitting that variant
+    /// out of `ShapeMismatch` was pointless while nothing distinguished them at a
+    /// call site, and this is the call site: a launch past the kernel's ceilings
+    /// is coherent and `aether-core` computes it, so the only correct response is
+    /// to compute it there. A malformed launch is still an error and is still
+    /// returned, because falling back on a caller's bug would hide it.
+    ///
+    /// # Precision is not uniform, and that is why the path is returned
+    ///
+    /// The two routes do not agree to the same tolerance: WGSL has no f64, so the
+    /// GPU answer is f32 widened on the way out while the CPU answer is f64
+    /// throughout. A helper that hid which one ran would silently change the
+    /// precision of a result with the size of its input — the sort of thing that
+    /// shows up much later as an unreproducible number.
+    ///
+    /// Returning [`AttentionPath`] alongside the values makes that switch part of
+    /// the signature. A caller that does not care can ignore it; one comparing
+    /// runs cannot ignore it by accident.
+    pub fn scheduled_attention_or_cpu(
+        &self,
+        q: &[f64],
+        k: &[f64],
+        v: &[f64],
+        seq: usize,
+        head_dim: usize,
+        schedule: &BlockSchedule,
+        block_size: usize,
+    ) -> Result<(Vec<f64>, AttentionPath), GpuError> {
+        let narrow = |xs: &[f64]| xs.iter().map(|&x| x as f32).collect::<Vec<f32>>();
+
+        match self.scheduled_attention(
+            &narrow(q),
+            &narrow(k),
+            &narrow(v),
+            seq,
+            head_dim,
+            schedule,
+            block_size,
+        ) {
+            Ok(out) => Ok((
+                out.into_iter().map(|x| x as f64).collect(),
+                AttentionPath::Gpu,
+            )),
+            Err(GpuError::Unsupported(_)) => {
+                // `aether-core` validates the same launch again and its errors
+                // are a different type, so a genuinely malformed call that got
+                // this far surfaces as a shape mismatch rather than a panic.
+                let out = aether_core::scheduled::scheduled_attention(
+                    q, k, v, seq, head_dim, schedule, block_size,
+                )
+                .map_err(|e| GpuError::ShapeMismatch(format!("{e:?}")))?;
+                Ok((out, AttentionPath::Cpu))
+            }
+            Err(other) => Err(other),
+        }
     }
 
     /// Reverse mode through [`GpuContext::scheduled_attention`].
