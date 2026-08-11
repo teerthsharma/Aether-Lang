@@ -1365,3 +1365,113 @@ fn mismatched_shapes_are_rejected_rather_than_dispatched() {
         "a is 6 elements but m*k = 25; this must be an error, not a dispatch"
     );
 }
+
+/// The fused gradient must be the derivative of the loss, not merely `p - y`.
+///
+/// `the_fused_gradient_equals_softmax_minus_target` checks the kernel implements
+/// that formula, with both sides computed from the GPU's own softmax. That pins
+/// the implementation against the intention and cannot notice if the intention
+/// is wrong: `p - y` is the gradient of mean categorical cross-entropy, and
+/// nothing here differentiates a cross-entropy to confirm it.
+///
+/// The equivalent gap on the CPU side was where a real defect hid — a softmax
+/// layer whose gradient was identically zero passed every test that compared it
+/// against a formula, and fell only to a finite difference of the loss.
+///
+/// So this differences the loss. Cross-entropy is computed host-side in f64 from
+/// the logits, and each logit is perturbed to compare `dL/dz` against what the
+/// kernel produced. No GPU softmax appears on the reference side, which is what
+/// makes it an independent check rather than a restatement.
+///
+/// The independence is demonstrated rather than argued. Replacing `exp(x)` with
+/// `exp(2x)` at all three inline softmax sites in the shader is a common-mode
+/// defect: the rows are still a valid probability distribution, the fused
+/// gradient still equals `p - y` because both sides of that comparison move
+/// together, and the row sums are still zero. Three existing tests pass. This one
+/// fails, because its reference never touches the GPU.
+///
+/// A first attempt to show this used a different defect — dropping the `/ rows`
+/// averaging — and did not separate them, since the formula test encodes the
+/// same division on its reference side. Common-mode is the shape that matters:
+/// two wrong things agreeing is invisible to any check that compares them to
+/// each other.
+#[test]
+#[cfg_attr(not(feature = "gpu"), ignore = "needs a GPU adapter: --features gpu")]
+fn the_fused_gradient_is_the_derivative_of_cross_entropy() {
+    let ctx = require_context();
+
+    let (rows, classes) = (4, 3);
+    let logits: Vec<f64> = fill(rows * classes, 61).iter().map(|&v| v as f64).collect();
+    let mut targets = vec![0.0f64; rows * classes];
+    for r in 0..rows {
+        targets[r * classes + (r % classes)] = 1.0;
+    }
+
+    // Mean categorical cross-entropy, in f64, with no GPU involved. The kernel
+    // averages over rows, so the loss it is the gradient of must too.
+    let loss = |z: &[f64]| -> f64 {
+        let mut total = 0.0;
+        for r in 0..rows {
+            let row = &z[r * classes..(r + 1) * classes];
+            let max = row.iter().cloned().fold(f64::NEG_INFINITY, f64::max);
+            let denom: f64 = row.iter().map(|v| (v - max).exp()).sum();
+            for c in 0..classes {
+                if targets[r * classes + c] != 0.0 {
+                    total -= (row[c] - max) - denom.ln();
+                }
+            }
+        }
+        total / rows as f64
+    };
+
+    let gl = ctx
+        .upload(
+            &logits.iter().map(|&v| v as f32).collect::<Vec<f32>>(),
+            rows,
+            classes,
+        )
+        .expect("upload");
+    let gt = ctx
+        .upload(
+            &targets.iter().map(|&v| v as f32).collect::<Vec<f32>>(),
+            rows,
+            classes,
+        )
+        .expect("upload");
+    let analytic = ctx
+        .read(&ctx.softmax_xent_grad_resident(&gl, &gt).expect("grad"))
+        .expect("read");
+
+    let h = 1e-5;
+    let mut worst = 0.0f64;
+    let mut worst_at = 0usize;
+    for i in 0..rows * classes {
+        let mut plus = logits.clone();
+        let mut minus = logits.clone();
+        plus[i] += h;
+        minus[i] -= h;
+
+        let numerical = (loss(&plus) - loss(&minus)) / (2.0 * h);
+        let error = (analytic[i] as f64 - numerical).abs();
+        if error > worst {
+            worst = error;
+            worst_at = i;
+        }
+    }
+
+    // f32 kernel against an f64 difference, so the tolerance is the kernel's
+    // precision rather than the difference's.
+    assert!(
+        worst <= 2e-5,
+        "logit {worst_at}: kernel {} against a central difference of the loss, \
+         worst disagreement {worst:.3e}. The fused gradient is not the derivative \
+         of the cross-entropy it claims to fuse with.",
+        analytic[worst_at]
+    );
+
+    let magnitude = analytic.iter().fold(0.0f32, |m, g| m.max(g.abs()));
+    assert!(
+        magnitude > 1e-6,
+        "the gradient is {magnitude:.3e}, indistinguishable from zero"
+    );
+}
