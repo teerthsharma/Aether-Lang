@@ -654,6 +654,49 @@ mod tests {
         assert!(result.labels[0] != result.labels[2]); // Different clusters
     }
 
+    /// The seed must reach the result, and reach it reproducibly.
+    ///
+    /// `fit` picks its first centroid from the seed and weights the rest with
+    /// draws from it, so a seed that changes nothing means the initialisation is
+    /// not being used — which would make `with_seed` decoration and every
+    /// comparison across seeds a comparison of one thing with itself.
+    ///
+    /// The fixture is deliberately ambiguous: nine points in a ring with no
+    /// separated clusters, so which three seed the search decides where the
+    /// search ends. The well-separated fixture above converges to the same answer
+    /// from anywhere, which is why it cannot see this.
+    #[test]
+    fn the_seed_changes_the_outcome_and_repeats_it() {
+        let mut data = [[0.0f64; 2]; 9];
+        for (i, point) in data.iter_mut().enumerate() {
+            let t = i as f64 * core::f64::consts::TAU / 9.0;
+            *point = [libm::cos(t), libm::sin(t)];
+        }
+
+        let run = |seed: u64| {
+            let result = KMeans::<2>::new(3).with_seed(seed).fit(&data, 9);
+            (result.labels[..9].to_vec(), result.iterations)
+        };
+
+        // Same seed, same answer. Without this the test below could pass on noise.
+        assert_eq!(
+            run(7),
+            run(7),
+            "two runs with seed 7 disagree, so fit is not deterministic"
+        );
+
+        let outcomes: Vec<_> = (0..12u64).map(run).collect();
+        let distinct = outcomes
+            .iter()
+            .collect::<alloc::collections::BTreeSet<_>>()
+            .len();
+
+        assert!(
+            distinct > 1,
+            "twelve seeds produced one outcome, so the seed does not reach the              result and `with_seed` changes nothing"
+        );
+    }
+
     #[test]
     fn test_auto_k() {
         let data = [
