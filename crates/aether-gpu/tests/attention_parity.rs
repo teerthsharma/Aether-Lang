@@ -936,6 +936,100 @@ fn backward_error_stays_bounded_as_the_sequence_grows() {
     );
 }
 
+/// A short training loop must land in the same place through either backward.
+///
+/// The parity tests above compare gradients at a point, on inputs chosen once.
+/// Training compounds them: each step's gradient is taken at parameters the
+/// previous step moved, so an f32 error too small to fail a tolerance can steer
+/// the run somewhere else entirely. Nothing about the point-wise agreement rules
+/// that out.
+///
+/// It was checked once, by running `recall_end_to_end` under both backends and
+/// finding all sixteen reported figures identical. That took about eight minutes
+/// per backend and is not something anyone will re-run. This is the same
+/// property at a size that fits in a test: descend on a query projection through
+/// the GPU kernels and through the f64 reference, and require the two parameter
+/// vectors to still agree after ten steps.
+///
+/// The tolerance is on the *parameters*, not on one gradient, which is what
+/// makes it a statement about accumulation rather than a restatement of the
+/// tests above.
+#[test]
+#[cfg_attr(not(feature = "gpu"), ignore)]
+fn a_training_loop_tracks_the_reference_through_either_backward() {
+    let ctx = require_context();
+    let seq = 32;
+    let head_dim = 8;
+    let block_size = 8;
+    let steps = 10;
+    let lr = 0.5;
+
+    let fixture = Fixture::new(seq, head_dim, 83);
+    let d_out = deterministic_fill(seq * head_dim, 89);
+    let schedule = dense_causal_block_schedule(seq / block_size);
+
+    // Descend on q directly. The projection in `recall_end_to_end` adds a matmul
+    // on each side of the gradient and nothing to the question, which is whether
+    // the two backward passes stay together as the parameters move.
+    let mut q_cpu = fixture.q.clone();
+    let mut q_gpu = fixture.q.clone();
+
+    for step in 0..steps {
+        let cpu = scheduled_attention_backward(
+            &q_cpu, &fixture.k, &fixture.v, seq, head_dim, &schedule, block_size, &d_out,
+        )
+        .expect("cpu backward");
+
+        let (dq, _, _) = ctx
+            .scheduled_attention_backward_resident(
+                &to_f32(&q_gpu),
+                &to_f32(&fixture.k),
+                &to_f32(&fixture.v),
+                seq,
+                head_dim,
+                &schedule,
+                block_size,
+                &to_f32(&d_out),
+            )
+            .expect("gpu backward");
+        let gpu = ctx.read(&dq).expect("read");
+
+        for i in 0..q_cpu.len() {
+            q_cpu[i] -= lr * cpu.dq[i];
+            q_gpu[i] -= lr * gpu[i] as f64;
+        }
+
+        // Checked every step rather than only at the end. A divergence that
+        // appears at step three and is damped by step ten would pass a final
+        // comparison while meaning the two paths had not tracked at all.
+        let worst = q_cpu
+            .iter()
+            .zip(&q_gpu)
+            .map(|(a, b)| (a - b).abs())
+            .fold(0.0f64, f64::max);
+        assert!(
+            worst <= 1e-4,
+            "step {step}: parameters drifted {worst:.3e} apart, above 1e-4; f32 \
+             gradients are not tracking the f64 reference once accumulated"
+        );
+    }
+
+    // The control. If the descent moved nothing, the agreement above would hold
+    // on two runs that both did nothing, and the test would pass without ever
+    // exercising accumulation.
+    let moved = fixture
+        .q
+        .iter()
+        .zip(&q_gpu)
+        .map(|(a, b)| (a - b).abs())
+        .fold(0.0f64, f64::max);
+    assert!(
+        moved > 1e-3,
+        "ten steps moved the parameters by only {moved:.3e}, so the comparison \
+         above holds trivially and says nothing about accumulation"
+    );
+}
+
 /// The host's ceilings must equal the shader's.
 ///
 /// They are declared twice because WGSL cannot import a Rust constant. If they

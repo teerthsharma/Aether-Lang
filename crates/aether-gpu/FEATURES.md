@@ -15,7 +15,7 @@ wrong answer is worth keeping — but it means the current state has to be
 reconstructed from a sequence of corrections. This section is the state.
 
 **The backend works and nothing uses it.** 18 WGSL kernels, resident tensors,
-batched submission, 87 tests, 0 of 20 mutants escaping. No line of
+batched submission, 88 tests, 0 of 20 mutants escaping. No line of
 `aether-core` or `aether-lang` calls it.
 
 `scheduled_attention_resident` returns a `GpuTensor` so attention output can feed
@@ -82,6 +82,34 @@ consistently negative across every allowance. No trained model is involved; this
 measures the schedule against the attention it approximates, not downstream task
 performance, and a selector can in principle lose mass and still serve a model
 well.
+
+### A crashed test binary is not a caught mutant
+
+The mutation harnesses classified any non-`ok` cargo run as evidence about the
+mutant. A test binary that *dies* is a third outcome, and the guard added to
+refuse unclassifiable output found it on its first real encounter: a
+`STATUS_ACCESS_VIOLATION` during `attention_parity`, which produces no test
+result and no compile error.
+
+That is the intermittent this file already documents — a fault in wgpu's instance
+teardown, worked around by pinning a single backend and never eliminated. Two
+consecutive runs put it on different mutants in different suites
+(`softmax scale dropped` in `attention_parity`, then `causal mask never fires` in
+`gpu_parity`), which is what confirms it is environmental rather than caused by
+the mutant it lands on.
+
+A crash is therefore scored as **not caught**. Its two possible causes — the
+mutant taking the process down, or the teardown fault — are indistinguishable
+from the output, and crediting a catch would assign coverage to whichever it was.
+Reporting less coverage than exists is the safe direction for a number whose
+entire purpose is to say how much the suite would notice.
+
+The consequence is visible and worth stating: when the crash lands on the only
+suite that catches a mutant, that run reports an escape. `softmax scale dropped`
+is caught 6/17 by `attention_parity` alone, so the run it crashed reported 1 of 20
+escaping and the next reported 0. That is the harness saying *this cell could not
+be measured*, which is different from both "caught" and "escaped" and is the only
+honest thing it can say.
 
 ### Reverse mode, CPU reference and GPU port
 
