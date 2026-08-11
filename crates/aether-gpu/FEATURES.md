@@ -15,7 +15,7 @@ wrong answer is worth keeping — but it means the current state has to be
 reconstructed from a sequence of corrections. This section is the state.
 
 **The backend works and nothing uses it.** 20 WGSL kernels, resident tensors,
-batched submission, 102 tests, 0 of 24 mutants escaping. No line of
+batched submission, 102 tests, 0 of 25 mutants escaping. No line of
 `aether-core` or `aether-lang` calls it.
 
 `scheduled_attention_resident` returns a `GpuTensor` so attention output can feed
@@ -1014,6 +1014,41 @@ between a matrix figure and a single entry — and a test written to record a
 property can easily assert only what the implementation already does. Each one
 independently fails on an injected defect, so they are carrying detection and not
 just prose.
+
+##### A mutant aimed at what they were built for, and what it showed
+
+Catching *some* mutant is a floor. Every existing mutant breaks the arithmetic —
+an index swapped, a term dropped, a sign flipped — and the result is wrong by
+O(1), which any comparison notices. None of them is the defect these four tests
+exist for: a kernel that computes the right sum and keeps fewer bits of it.
+
+So one was added. `matmul: accumulator quantised` rounds the running sum to about
+2⁻²⁰ each step, leaving the algorithm intact and the precision degraded. Which
+tests notice:
+
+| suite | result |
+|---|---|
+| `gpu_parity` | **caught**, 3 of 47 |
+| `gradcheck` | survives, 14 passed |
+| `attention_parity` | survives, 21 passed |
+
+The three are `f32_matmul_error_grows_like_the_square_root_of_the_reduction_depth`,
+`rectangular_matmul_accuracy_against_f64_tracks_the_reduction_depth`, and
+`tensor_matmul_matches_the_cpu_path` — every one of them a comparison against an
+**f64 reference**. The 44 that survive include every f32-against-`cpu_matmul`
+parity test in the file, which is the point: two f32 implementations of the same
+arithmetic disagree by rounding, and a defect that only costs precision is
+invisible between them.
+
+**It also deflates the claim above.** One of the four new tests catches this, not
+four. The three condition-number tests do not: their bounds scale with κ, and on
+an ill-conditioned fixture a 2⁻²⁰ quantisation sits comfortably inside a bound
+built to accommodate cancellation. They catch defects, as the table shows, but not
+this one — and this is the one they were written alongside.
+
+The useful conclusion is about the suite rather than the tests: **precision loss
+is caught only by f64 comparison**, three of them exist, and two predate this
+work.
 
 One cell crashed and was retried, which is the wgpu teardown intermittent this
 crate works around and has not fixed. Nineteen of the twenty-four are caught by exactly one suite,
