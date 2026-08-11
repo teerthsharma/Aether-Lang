@@ -1751,6 +1751,19 @@ Full tables, controls and the failures behind them are in [`crates/aether-gpu/FE
 
 A passing suite tells you nothing about what it would catch. So: inject known defects, one at a time, and count.
 
+**Whole-tree result, both harnesses, measured on this commit:** 50 defects injected, **0 escape**.
+
+| Harness | Defects | Escaping | Suites run separately | Command |
+|---|---:|---:|---|---|
+| `aether-core` | 26 | **0** | `ablation_baselines`, `scheduled_attention`, `attention_backward`, `persistence_invariants`, `diagram_distance` | `./crates/aether-core/mutants.sh` |
+| `aether-gpu` | 24 | **0** | `gpu_parity`, `gradcheck`, `attention_parity` | `./crates/aether-gpu/mutants.sh` |
+
+The GPU harness needs an adapter and refuses to run without one, because every hardware test is `#[ignore]`d by default and a skipped test is a passing test — a GPU-less run would report all 24 surviving and call that a coverage result. It was measured on an RTX 4060 over Vulkan. The core harness needs no hardware.
+
+Both run their suites separately rather than combining them, and the reason is measured rather than stylistic: in the GPU harness 19 of 24 defects are caught by exactly one of the three suites, so a combined pass/fail would hide which suite is doing the work, and dropping any single one would let 19 defects through.
+
+The sections below are in discovery order and include the counts as they stood when each was written, so their denominators are smaller than the table above.
+
 **Persistence invariants** — 3 defects:
 
 | Injected defect | New suite | Prior suite |
