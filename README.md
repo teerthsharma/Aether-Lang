@@ -1818,11 +1818,28 @@ unusable one.
 
 Across the whole section that is **six of seven reproducible claims landing on
 their original figures**, and one that had rotted: the filtration epsilon above,
-now 1/12 against a claimed 4/11. Three of the four here are caught by a single
-test of seventeen, which is the state the epsilon reached before it reached zero.
-Nothing is added to pad those numbers — a second test written to make a fraction
-look better would test the fixture, not the code. The harness is the guard: the
-epsilon slipped because no command re-ran it, and now one does.
+now 1/12 against a claimed 4/11.
+
+Three of the four here are caught by a single test of seventeen, which is the
+state the epsilon reached before it reached zero — so the harness also reports
+*which* tests catch each defect, since three defects at 1/17 could be three
+independent tests or one test carrying all three, and only the second is
+alarming. They are independent:
+
+| defect | caught by |
+|---|---|
+| Wasserstein returns the max | `wasserstein_sums_where_bottleneck_takes_a_maximum` |
+| Image ignores σ | `sigma_controls_the_kernel_width` |
+| Image drops the persistence weight | `persistence_image_weights_long_bars_more_than_short_ones` |
+
+Those are the tests this section says were written *because* a mutant survived,
+which is now a measurement rather than a memory. Across all 26 mutants no single
+test catches more than two, so nothing in the suite is load-bearing in the way
+the epsilon turned out to be.
+
+Nothing is added to pad the fractions — a second test written to move a number
+tests the fixture, not the code. The harness is the guard: the epsilon slipped
+because no command re-ran it, and now one does.
 
 **Two of those five survived the first version of the suite.**
 
