@@ -23,7 +23,7 @@ use std::path::PathBuf;
 /// Raising this is a deliberate act, which is the point: the number moves when
 /// someone documents a module, and never because a lint attribute was dropped
 /// while tidying.
-const ENFORCED: usize = 6;
+const ENFORCED: usize = 7;
 
 fn source_dir() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("src")

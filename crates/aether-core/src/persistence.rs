@@ -5,6 +5,8 @@
 //! deliberately bounded so topological ML workloads fail fast instead of
 //! exhausting memory.
 
+#![warn(missing_docs)]
+
 extern crate alloc;
 
 use alloc::collections::BTreeMap;
@@ -18,18 +20,48 @@ const SIMPLEX_VERTICES: usize = 4;
 /// A simplex identified by its zero-padded vertex array and its vertex count.
 type SimplexKey = ([usize; SIMPLEX_VERTICES], usize);
 
+/// Which simplicial complex to build over a point cloud.
+///
+/// The choice is a cost/exactness trade and nothing else: both produce a
+/// diagram, and only one of them is a diagram of the cloud you passed in.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ComplexKind {
+    /// Every simplex whose vertices are pairwise within the filtration radius.
+    /// Exact, and O(n^k) in the number of points, which is what `max_simplices`
+    /// exists to bound.
     VietorisRips,
-    Witness { max_landmarks: usize },
+    /// A lazy-witness complex built over a landmark subset.
+    Witness {
+        /// Landmarks chosen by maxmin. Fewer landmarks means a smaller complex
+        /// and an approximation: the diagram is of the landmark set witnessed by
+        /// the rest, not of the full cloud.
+        max_landmarks: usize,
+    },
 }
 
+/// Everything the engine needs to bound its own work.
+///
+/// Every field except `complex_kind` is a refusal threshold rather than a
+/// tuning knob. The engine is `no_std` and cannot grow a complex it did not
+/// reserve, so exceeding a cap returns an error instead of degrading.
 #[derive(Debug, Clone, Copy)]
 pub struct PersistenceConfig {
+    /// Highest homology dimension computed. 0 gives components only, 1 adds
+    /// loops, 2 adds voids; the complex grows by roughly a factor of `n` per
+    /// dimension.
     pub max_homology_dim: usize,
+    /// Refuses point clouds larger than this. A bound rather than a preference:
+    /// the engine is `no_std` and allocates the complex up front.
     pub max_points: usize,
+    /// Refuses complexes larger than this. The point cap alone cannot bound it,
+    /// since the simplex count depends on the radius as well as on `n`.
     pub max_simplices: usize,
+    /// Filtration radius beyond which no simplex is admitted. An **absolute**
+    /// length, so scaling a cloud without scaling this changes the answer —
+    /// `an_edge_just_beyond_the_radius_cap_is_excluded` pins that the comparison
+    /// carries no slack.
     pub max_radius: f64,
+    /// Which complex to build over the points.
     pub complex_kind: ComplexKind,
 }
 
@@ -83,6 +115,11 @@ impl PersistenceConfig {
         }
     }
 
+    /// A configuration sized for the embedded target: H0 and H1 only, small
+    /// caps, Vietoris-Rips.
+    ///
+    /// `const` so it can initialise a static, which is what the bare-metal
+    /// build needs to avoid an allocator at start-up.
     pub const fn low_load() -> Self {
         Self {
             max_homology_dim: 1,
@@ -100,32 +137,75 @@ impl Default for PersistenceConfig {
     }
 }
 
+/// Why a filtration was refused.
+///
+/// All five are refusals before or during construction. There is no variant for
+/// a failed reduction, because the F2 column reduction cannot fail on a
+/// well-formed complex — if it ever appears to, the complex was not one.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum PersistenceError {
+    /// `max_homology_dim` exceeds what the fixed-size simplex key can hold.
     InvalidDimension,
+    /// `max_radius` is negative or not a number. Zero is legal and yields the
+    /// vertex-only complex.
     InvalidRadius,
-    TooManyPoints { actual: usize, max: usize },
-    TooManySimplices { max: usize },
+    /// The cloud is larger than `max_points`.
+    TooManyPoints {
+        /// Points supplied.
+        actual: usize,
+        /// The configured cap.
+        max: usize,
+    },
+    /// The filtration produced more simplices than `max_simplices`.
+    ///
+    /// Returned rather than truncated: a partial complex computes a diagram that
+    /// looks valid and describes a shape nobody asked about.
+    TooManySimplices {
+        /// The configured cap.
+        max: usize,
+    },
+    /// No points were supplied.
     EmptyInput,
 }
 
+/// One topological feature: when it appeared and when it stopped existing.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct PersistencePair {
+    /// Homology dimension: 0 for a component, 1 for a loop, 2 for a void.
     pub dimension: usize,
+    /// Filtration radius at which the feature appeared.
     pub birth: f64,
+    /// Radius at which it merged or filled in. `None` marks an essential class
+    /// that survives the whole filtration, which is a different thing from one
+    /// dying at infinity and is why this is an `Option` rather than `f64::MAX`.
     pub death: Option<f64>,
 }
 
+/// The output of a filtration: every feature it found, across dimensions.
+///
+/// Long bars are structure and short ones are usually sampling noise, but the
+/// engine draws no line between them — where that line goes is a property of
+/// the question, not of the cloud.
 #[derive(Debug, Clone, PartialEq)]
 pub struct PersistenceDiagram {
+    /// Every birth-death pair, in no guaranteed order. A diagram is a *multiset*,
+    /// so comparisons go through bottleneck or Wasserstein distance rather than
+    /// through element-wise equality.
     pub pairs: Vec<PersistencePair>,
 }
 
 impl PersistenceDiagram {
+    /// Wrap a pair list. No validation: the reduction that produces them is the
+    /// thing that guarantees they are well formed.
     pub fn new(pairs: Vec<PersistencePair>) -> Self {
         Self { pairs }
     }
 
+    /// Betti numbers at a filtration radius: how many features are alive there.
+    ///
+    /// A feature counts if it was born at or before `radius` and has not yet
+    /// died. This is the reading a `seal until convergence` loop terminates on,
+    /// which is why it is a query on the diagram rather than a separate pass.
     pub fn betti_at(&self, radius: f64) -> BettiNumbers3 {
         let mut betti = BettiNumbers3::default();
         for pair in &self.pairs {
@@ -142,10 +222,18 @@ impl PersistenceDiagram {
     }
 }
 
+/// Feature counts at one filtration radius, through dimension two.
+///
+/// The statistic a `seal until convergence` loop watches: it stops when these
+/// stop changing, which happens before the scalar loss settles and is more
+/// stable once it does.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct BettiNumbers3 {
+    /// Connected components.
     pub beta_0: u32,
+    /// Independent loops.
     pub beta_1: u32,
+    /// Enclosed voids.
     pub beta_2: u32,
 }
 
@@ -157,6 +245,14 @@ struct Simplex {
     filtration: f64,
 }
 
+/// Persistent homology of a scalar series, via a `D`-dimensional Takens
+/// embedding.
+///
+/// Each point is `D` samples spaced `tau` apart, so a periodic series traces a
+/// loop and shows an H1 bar whose length reflects how cleanly it repeats. `tau`
+/// is the parameter that decides whether that loop is visible: too small and
+/// consecutive coordinates are nearly equal, collapsing the embedding onto its
+/// diagonal.
 pub fn time_delay_persistence<const D: usize>(
     samples: &[f64],
     tau: usize,
@@ -229,6 +325,14 @@ pub fn persistent_homology_from_distances(
     reduce_z2(&simplices, config.max_homology_dim)
 }
 
+/// Persistent homology of a point cloud, exact over F2.
+///
+/// The main entry point. Builds the complex named by `config.complex_kind`,
+/// reduces the boundary matrix, and returns every birth-death pair up to
+/// `config.max_homology_dim`.
+///
+/// Errors rather than truncating when a cap is exceeded, because a diagram from
+/// a partial complex is a valid-looking answer about a shape nobody asked about.
 pub fn persistent_homology<const D: usize>(
     points: &[ManifoldPoint<D>],
     config: PersistenceConfig,
