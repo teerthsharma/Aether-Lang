@@ -52,3 +52,15 @@ pyo3 = { version = "0.20", features = ["extension-module"], optional = true }
 name = "aether_lang"
 path = "src/lib.rs"
 crate-type = ["cdylib", "rlib"]
+
+# Denied for this package only. See the same table in aether-core for why not
+# RUSTFLAGS: that would apply to every dependency, and a future one emitting a
+# warning would fail this build for something outside this repository.
+#
+# Added once the crate's bare-metal warnings had been read rather than counted.
+# Seven were dead code and two were bindings whose only reader is a std-gated
+# `println!` -- both doing load-bearing work, and both of which `cargo fix` would
+# have deleted. Denying a class before surveying it is how a mechanical fix gets
+# reached for; the survey is what makes this narrow lint safe to turn on.
+[lints.rust]
+unused_imports = "deny"
