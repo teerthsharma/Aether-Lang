@@ -87,6 +87,18 @@ pub enum GpuError {
     NoDevice(String),
     /// Shape arguments that no dispatch could satisfy.
     ShapeMismatch(String),
+    /// A launch this backend cannot serve, though nothing about it is malformed.
+    ///
+    /// Distinct from [`GpuError::ShapeMismatch`] because the two ask different
+    /// things of a caller. Mismatched shapes are a bug at the call site and the
+    /// fix is to pass consistent ones. A `head_dim` past the kernel's private
+    /// scratch is a limit of this backend: the arguments are coherent, the CPU
+    /// path in `aether-core` computes them, and the right response is to use it.
+    ///
+    /// Collapsing both into one variant leaves a caller that wants to fall back
+    /// no way to tell "you called this wrong" from "this size needs the other
+    /// implementation", so it either falls back on real bugs or on neither.
+    Unsupported(String),
     /// The readback buffer could not be mapped.
     Readback(String),
 }
@@ -97,6 +109,7 @@ impl core::fmt::Display for GpuError {
             GpuError::NoAdapter => write!(f, "no wgpu adapter available"),
             GpuError::NoDevice(e) => write!(f, "could not create wgpu device: {e}"),
             GpuError::ShapeMismatch(e) => write!(f, "shape mismatch: {e}"),
+            GpuError::Unsupported(e) => write!(f, "unsupported on this backend: {e}"),
             GpuError::Readback(e) => write!(f, "buffer readback failed: {e}"),
         }
     }
@@ -875,16 +888,21 @@ impl GpuContext {
                  seq={seq}, head_dim={head_dim}, block_size={block_size}"
             )));
         }
+        // `Unsupported` rather than `ShapeMismatch`: nothing about these launches
+        // is malformed, and `aether_core::scheduled` computes them. A caller that
+        // wants to fall back needs to tell "this size needs the CPU path" from
+        // "you passed inconsistent shapes", and one variant for both leaves it
+        // falling back on real bugs or on neither.
         if head_dim > MAX_HEAD_DIM {
-            return Err(GpuError::ShapeMismatch(format!(
+            return Err(GpuError::Unsupported(format!(
                 "head_dim {head_dim} exceeds the kernel's private-array ceiling \
-                 of {MAX_HEAD_DIM}"
+                 of {MAX_HEAD_DIM}; the aether-core CPU path has no such limit"
             )));
         }
         if block_size > MAX_BLOCK {
-            return Err(GpuError::ShapeMismatch(format!(
+            return Err(GpuError::Unsupported(format!(
                 "block_size {block_size} exceeds the kernel's private-array \
-                 ceiling of {MAX_BLOCK}"
+                 ceiling of {MAX_BLOCK}; the aether-core CPU path has no such limit"
             )));
         }
         if !seq.is_multiple_of(block_size) {

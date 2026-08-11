@@ -404,18 +404,27 @@ fn launches_beyond_the_kernel_ceilings_are_rejected() {
     let ctx = require_context();
     let schedule = dense_causal_block_schedule(2);
 
+    // Asserted by kind, not merely as an error. A ceiling is a limit of this
+    // backend and not a malformed call, and a caller deciding whether to fall
+    // back to the CPU path has to tell those apart — so a change that reported it
+    // as a shape mismatch would break the only reason the distinction exists,
+    // while still failing an `is_err` assertion in exactly the same way.
     let too_wide = vec![0.0f32; 2 * 256];
     assert!(
-        ctx.scheduled_attention(&too_wide, &too_wide, &too_wide, 2, 256, &schedule, 1)
-            .is_err(),
-        "a head_dim of 256 exceeds the kernel's scratch and must be rejected"
+        matches!(
+            ctx.scheduled_attention(&too_wide, &too_wide, &too_wide, 2, 256, &schedule, 1),
+            Err(GpuError::Unsupported(_))
+        ),
+        "a head_dim of 256 is past the kernel's scratch: unsupported, not malformed"
     );
 
     let operands = vec![0.0f32; 6 * 4];
     assert!(
-        ctx.scheduled_attention(&operands, &operands, &operands, 6, 4, &schedule, 4)
-            .is_err(),
-        "seq=6 is not a multiple of block_size=4 and must be rejected"
+        matches!(
+            ctx.scheduled_attention(&operands, &operands, &operands, 6, 4, &schedule, 4),
+            Err(GpuError::ShapeMismatch(_))
+        ),
+        "seq=6 does not divide by block_size=4: malformed, not a backend limit"
     );
 
     let short = vec![0.0f32; 3];
