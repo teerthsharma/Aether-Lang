@@ -34,11 +34,6 @@ use alloc::vec::Vec;
 #[cfg(not(feature = "std"))]
 use alloc::{format, vec};
 
-#[cfg(not(feature = "std"))]
-macro_rules! println {
-    ($($arg:tt)*) => {};
-}
-
 #[cfg(feature = "std")]
 use std::boxed::Box;
 #[cfg(feature = "std")]
@@ -59,9 +54,6 @@ use aether_core::persistence::{
     persistent_homology, ComplexKind, PersistenceConfig, PersistenceDiagram,
 };
 use libm::{fabs, sqrt};
-
-#[cfg(not(feature = "std"))]
-use alloc::sync::Arc;
 
 #[cfg(feature = "ml")]
 use candle_core::{Device, Tensor as CandleTensor};
@@ -1314,9 +1306,14 @@ impl Interpreter {
             NativeFunction::Print => {
                 for arg in args {
                     if let CallArg::Positional(expr) = arg {
-                        let val = self.evaluate_expr(expr)?;
+                        // Bound with a leading underscore because the only
+                        // reader is the `std` println below, and evaluating is
+                        // the point regardless: the expression may have side
+                        // effects and `?` propagates its error. Discarding the
+                        // binding would discard those too.
+                        let _val = self.evaluate_expr(expr)?;
                         #[cfg(feature = "std")]
-                        println!("{:?}", val);
+                        println!("{:?}", _val);
                     }
                 }
                 Ok(Value::Unit)
