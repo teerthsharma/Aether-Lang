@@ -140,7 +140,43 @@ fn no_cpu_crate_depends_on_the_gpu_backend() {
     let mut offenders = Vec::new();
     let mut checked = 0;
 
-    for crate_name in ["aether-core", "aether-lang", "aether-cli", "aether-kernel"] {
+    // Derived from the workspace, not a list of names.
+    //
+    // Four were named here at first — the crates that existed and mattered when
+    // it was written — which leaves any crate added afterwards outside the check
+    // until somebody remembers to add it, and the whole point is catching a
+    // dependency nobody announced. `aegis-core` and `aegis-cli` were already
+    // outside it on the day it was written; adding the edge to `aegis-core` now
+    // fails this test and did not before.
+    //
+    // The count assertion below covers a member that exists but does not live
+    // under `crates/`. A member named in the workspace with no manifest at all is
+    // not this test's to catch — Cargo refuses to load the workspace and nothing
+    // here runs, which was checked rather than assumed.
+    let workspace = fs::read_to_string(root.join("Cargo.toml")).expect("workspace Cargo.toml");
+    let members: Vec<String> = workspace
+        .lines()
+        .skip_while(|l| !l.trim_start().starts_with("members"))
+        .skip(1)
+        .take_while(|l| !l.contains(']'))
+        .filter_map(|l| {
+            l.trim()
+                .trim_matches(|c| c == '"' || c == ',')
+                .rsplit('/')
+                .next()
+        })
+        .map(str::to_string)
+        .filter(|name| name != "aether-gpu")
+        .collect();
+
+    assert!(
+        members.len() >= 5,
+        "parsed only {} workspace members, so the member list is not being read \
+         and this check covers less than the workspace",
+        members.len()
+    );
+
+    for crate_name in &members {
         let manifest = root.join("crates").join(crate_name).join("Cargo.toml");
         let Ok(src) = fs::read_to_string(&manifest) else {
             continue;
