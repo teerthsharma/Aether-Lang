@@ -38,10 +38,14 @@
 pub struct Lcg(u64);
 
 impl Lcg {
+    /// Seed the generator. Every dataset here is reproducible from its seed,
+    /// which is what lets a fold be re-drawn identically when a result needs
+    /// re-checking.
     pub fn new(seed: u64) -> Self {
         Self(seed)
     }
 
+    /// Next sample in `[0, 1)`.
     pub fn next_f32(&mut self) -> f32 {
         self.0 = self
             .0
@@ -134,8 +138,16 @@ pub fn majority_class(y: &[usize], classes: usize) -> f32 {
 /// cloud. At 1.0 the split has placed a training point as close to each test
 /// point as its own neighbours are, so accuracy measures interpolation.
 pub struct SplitDiagnostic {
+    /// Median distance from a test point to its nearest training point.
     pub median_to_train: f32,
+    /// Median distance between neighbouring training points — the spacing the
+    /// model was fitted at.
     pub median_spacing: f32,
+    /// `median_to_train / median_spacing`. Near 1 the test points sit as close to
+    /// the training set as its own members do, so accuracy measures
+    /// interpolation; well above 1 it measures extrapolation, and this crate has
+    /// already withdrawn one set of cross-validation numbers for reporting the
+    /// first while measuring the second.
     pub ratio: f32,
 }
 

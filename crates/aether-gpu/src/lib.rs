@@ -22,6 +22,15 @@
 //! `std`, an allocator, and a driver stack. Keeping the GPU path in its own
 //! crate means the embedded build cannot silently acquire a dependency on it.
 
+//! Every public item carries a doc comment, enforced rather than intended.
+//!
+//! Turned on after a survey found a doc asserting the opposite of the benchmark
+//! that refuted it: `pairwise_sqdist_resident` called itself the operation where
+//! a GPU matters most, having been measured as not worth offloading at any size.
+//! `missing_docs` cannot catch a wrong doc, but it does catch the absent one,
+//! and an item nobody described is where a wrong description starts.
+#![deny(missing_docs)]
+
 pub mod datasets;
 
 use std::borrow::Cow;
@@ -142,8 +151,16 @@ pub enum AttentionPath {
 /// silently hand back a software rasterizer if that is all it can find.
 #[derive(Clone, Debug)]
 pub struct AdapterInfo {
+    /// The adapter's reported name, e.g. `NVIDIA GeForce RTX 4060 Laptop GPU`.
     pub name: String,
+    /// Which graphics API the device was reached through: `Vulkan`, `Dx12`,
+    /// `Metal` or `Gl`. Recorded because kernels can behave differently across
+    /// them, and this crate pins one at construction after a teardown crash that
+    /// only appeared when several were instantiated together.
     pub backend: String,
+    /// `DiscreteGpu`, `IntegratedGpu`, `Cpu`, `VirtualGpu` or `Other`. The `Cpu`
+    /// case is a software rasterizer, which is why [`AdapterInfo::is_hardware`]
+    /// exists rather than callers trusting that an adapter was found.
     pub device_type: String,
 }
 
@@ -227,18 +244,26 @@ pub struct GpuTensor {
 }
 
 impl GpuTensor {
+    /// Rows in the logical shape. Some buffers are uploaded flat, where this
+    /// carries no meaning beyond `rows * cols == len()`.
     pub fn rows(&self) -> usize {
         self.rows
     }
 
+    /// Columns in the logical shape. See [`GpuTensor::rows`].
     pub fn cols(&self) -> usize {
         self.cols
     }
 
+    /// Element count, which is what the kernels index by — every shader here
+    /// computes its own offsets from the uniform rather than from this shape.
     pub fn len(&self) -> usize {
         self.rows * self.cols
     }
 
+    /// Whether the tensor holds no elements. Present because clippy asks for it
+    /// alongside [`GpuTensor::len`], and a zero-length dispatch is rejected
+    /// before it reaches a kernel.
     pub fn is_empty(&self) -> bool {
         self.len() == 0
     }
