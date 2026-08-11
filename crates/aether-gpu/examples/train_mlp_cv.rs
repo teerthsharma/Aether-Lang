@@ -28,6 +28,7 @@
 
 use std::time::Instant;
 
+use aether_gpu::datasets::report_split;
 use aether_gpu::{cpu_matmul, GpuContext};
 
 const FOLDS: usize = 5;
@@ -321,6 +322,25 @@ fn main() {
     let mut accs = Vec::new();
     let mut losses = Vec::new();
 
+    // What the accuracy below is a number *about*.
+    //
+    // `diagnose_split` and `report_split` were written for this crate after a set
+    // of cross-validation figures was withdrawn for reporting generalisation
+    // while measuring interpolation. They were public, documented, and called by
+    // nothing, so every accuracy this example printed arrived without the
+    // qualification the machinery exists to supply — the same defect the rest of
+    // this crate spends its length correcting, in the one place a reader looks
+    // first.
+    //
+    // Fold 0 stands for all of them: the folds are contiguous blocks of one
+    // shuffled ordering, so they are the same construction with a different
+    // offset and their ratios differ only by sampling noise.
+    let mut is_test = vec![false; n];
+    for flag in is_test.iter_mut().take(fold_size) {
+        *flag = true;
+    }
+    let split = report_split("fold 1 of the shuffled i.i.d. draw", &x, &is_test);
+
     let start = Instant::now();
 
     for fold in 0..FOLDS {
@@ -389,6 +409,18 @@ fn main() {
     println!(
         "  separation          {:+.4} over majority class",
         mean - majority
+    );
+    // Printed next to the number it qualifies rather than only in the diagnostic
+    // block above, because a reader who scrolls to the summary is the reader most
+    // likely to quote the accuracy somewhere else.
+    println!(
+        "  measures            {} (split ratio {:.2}x)",
+        if split.is_extrapolating() {
+            "EXTRAPOLATION -- held-out points lie outside the training data"
+        } else {
+            "interpolation within the sampled region, not extrapolation beyond it"
+        },
+        split.ratio
     );
     println!(
         "  wall clock          {:.2} s for {} folds x {EPOCHS} epochs",
