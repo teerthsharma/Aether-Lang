@@ -13,7 +13,7 @@
   <a href=".github/workflows/ci.yml"><img src="https://img.shields.io/github/actions/workflow/status/teerthsharma/Aether-Lang/ci.yml?branch=master&label=CI&style=flat-square" alt="CI"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-00aaff?style=flat-square" alt="License: MIT"></a>
   <a href="rust-toolchain.toml"><img src="https://img.shields.io/badge/rust-nightly-orange?style=flat-square&logo=rust" alt="Rust nightly"></a>
-  <a href="#results"><img src="https://img.shields.io/badge/tests-214%20passing%2C%2072%20ignored-brightgreen?style=flat-square" alt="214 passing, 72 ignored"></a>
+  <a href="#results"><img src="https://img.shields.io/badge/tests-215%20passing%2C%2076%20ignored-brightgreen?style=flat-square" alt="215 passing, 76 ignored"></a>
   <a href="#mutation-testing-or-how-i-learned-to-stop-trusting-green-checkmarks"><img src="https://img.shields.io/badge/mutants-50%20injected-purple?style=flat-square" alt="50 mutants"></a>
   <a href="#what-we-got-wrong"><img src="https://img.shields.io/badge/claims%20killed-6-red?style=flat-square" alt="6 claims killed"></a>
   <a href="docs/reference/status.md"><img src="https://img.shields.io/badge/claim%20ledger-live-blue?style=flat-square" alt="Claim ledger"></a>
@@ -167,7 +167,7 @@ That last row is the important one and it is deliberately in the table. External
 
 ## Abstract
 
-Aether-Lang is a research programming language in which persistent homology is a first-class primitive rather than a library call. The core insight is that many iterative numerical procedures have a *structural* fixed point that arrives before, and is more stable than, their scalar one: the Betti numbers of the residual point cloud stop changing while the loss is still fluctuating. Aether-Lang exposes that as control flow — a `seal until convergence(ε)` loop terminates on a topological invariant. The implementation is a bounded exact 𝔽₂ persistence engine over Vietoris–Rips and lazy-witness complexes, supporting H₀ through H₂, written in `no_std` Rust with `libm` as its only mathematical dependency, so the same code runs under a CLI on Windows and inside a bare-metal x86_64 kernel with no operating system beneath it. On top of the engine sit the standard diagram metrics (exact bottleneck via threshold-graph matching, exact p-Wasserstein via Hungarian assignment) and vectorizations (landscapes, images, persistent entropy). The engine is validated by 11 property tests encoding the Cohen-Steiner–Edelsbrunner–Harer stability theorem and six other invariants, mutation-tested against 8 injected defects, and checked against a closed-form ground truth it reproduces to 1e-12. Indexing the simplex-face lookup reduced the scale test suite from 29.07 s to 1.10 s, a 26× improvement on identical assertions. A port of the topology-derived sparse attention kernel merged as `triton-lang/kernels#22` reproduces its CSR block schedules exactly and achieves 58.8% block reduction at test scale — and a same-budget ablation against random and oracle selection finds that the schedule's *cost* reduction is real while its *selection* is not: the topological ranking recovers less attention mass than choosing blocks at random, the deficit widens as more budget is given to it, and inverting the ranking beats random by a margin that grows instead.
+Aether-Lang is a research programming language in which persistent homology is a first-class primitive rather than a library call. The core insight is that many iterative numerical procedures have a *structural* fixed point that arrives before, and is more stable than, their scalar one: the Betti numbers of the residual point cloud stop changing while the loss is still fluctuating. Aether-Lang exposes that as control flow — a `seal until convergence(ε)` loop terminates on a topological invariant. The implementation is a bounded exact 𝔽₂ persistence engine over Vietoris–Rips and lazy-witness complexes, supporting H₀ through H₂, written in `no_std` Rust with `libm` as its only mathematical dependency, so the same code runs under a CLI on Windows and inside a bare-metal x86_64 kernel with no operating system beneath it. On top of the engine sit the standard diagram metrics (exact bottleneck via threshold-graph matching, exact p-Wasserstein via Hungarian assignment) and vectorizations (landscapes, images, persistent entropy). The engine is validated by 11 property tests encoding the Cohen-Steiner–Edelsbrunner–Harer stability theorem and six other invariants, mutation-tested against 3 defects injected into the filtration and reduction, part of 26 across the crate of which none escape, and checked against a closed-form ground truth it reproduces to 1e-12. Indexing the simplex-face lookup reduced the scale test suite from 29.07 s to 1.10 s, a 26× improvement on identical assertions. A port of the topology-derived sparse attention kernel merged as `triton-lang/kernels#22` reproduces its CSR block schedules exactly and achieves 58.8% block reduction at test scale — and a same-budget ablation against random and oracle selection finds that the schedule's *cost* reduction is real while its *selection* is not: the topological ranking recovers less attention mass than choosing blocks at random, the deficit widens as more budget is given to it, and inverting the ranking beats random by a margin that grows instead.
 
 ---
 
@@ -248,7 +248,7 @@ A third status was needed once the GPU backend arrived. 🖥️ **Hardware-gated
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
   cargo fmt --all -- --check                                   clean
   cargo clippy -D correctness -D suspicious                     clean
-  cargo test --workspace --exclude aether-kernel     223 / 223 passed
+  cargo test --workspace --exclude aether-kernel   215 passed 76 ignored
   cargo build -p aether-kernel --target x86_64-unknown-none        ok
   cargo build -p aether-core  --target thumbv7m-none-eabi          ok
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -2428,7 +2428,7 @@ The evidence policy in one rule: **a number without a reproduction command does 
 
 | Claim | Where | Command |
 |---|---|---|
-| 223 / 223 tests pass | [Status](#honest-status-dashboard) | `cargo test --workspace --exclude aether-kernel` |
+| 215 passed, 76 ignored | [Status](#honest-status-dashboard) | `cargo test --workspace --exclude aether-kernel` |
 | 11 persistence invariants | [Theory](#theoretical-foundation) | `cargo test -p aether-core --test persistence_invariants` |
 | 17 diagram-metric tests | [Test suite](#diagram_distancers--17-tests-381-lines) | `cargo test -p aether-core --test diagram_distance` |
 | 29 attention contracts | [Test suite](#attention_contractsrs--29-tests-1124-lines) | `cargo test -p aether-core --test attention_contracts -- --nocapture` |
