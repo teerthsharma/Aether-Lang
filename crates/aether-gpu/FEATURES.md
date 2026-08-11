@@ -15,7 +15,7 @@ wrong answer is worth keeping — but it means the current state has to be
 reconstructed from a sequence of corrections. This section is the state.
 
 **The backend works and nothing uses it.** 20 WGSL kernels, resident tensors,
-batched submission, 106 tests, 0 of 26 mutants escaping. No line of
+batched submission, 107 tests, 0 of 26 mutants escaping. No line of
 `aether-core` or `aether-lang` calls it.
 
 `scheduled_attention_resident` returns a `GpuTensor` so attention output can feed

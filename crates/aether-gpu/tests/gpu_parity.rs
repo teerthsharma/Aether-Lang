@@ -414,6 +414,82 @@ fn the_tiled_kernel_is_correct_across_many_tile_iterations() {
     }
 }
 
+/// What rebuilding Adam's state mid-run costs, measured rather than reasoned.
+///
+/// `AdamState` keeps its moments private, so a caller cannot save them and a run
+/// that stops and resumes must call `adam_state` again — which zeroes both
+/// moments and resets the step counter. The type's documentation says the resumed
+/// run then adapts from nothing while the parameters carry on, and says the loss
+/// keeps falling so the discontinuity is invisible.
+///
+/// That was reasoned from the bias-correction formula. This measures it: six
+/// steps with one state, against six steps with the state rebuilt after the
+/// third, on identical parameters and gradients. A resume is exactly that rebuild,
+/// so the difference between the two is what a resume costs.
+///
+/// The assertion is that they differ. A test claiming a limitation is real should
+/// fail if the limitation is fixed — if someone adds state save and restore and
+/// wires it in here, this test fails and the documentation it pins has to be
+/// revisited with it.
+#[test]
+#[cfg_attr(not(feature = "gpu"), ignore = "needs a GPU adapter: --features gpu")]
+fn rebuilding_adam_state_mid_run_changes_the_parameters() {
+    let ctx = require_context();
+
+    let n = 16usize;
+    let start = fill(n, 931);
+    let grads: Vec<Vec<f32>> = (0..6).map(|s| fill(n, 940 + s as u64)).collect();
+    let lr = 0.02f32;
+
+    let run = |rebuild_after: Option<usize>| -> (Vec<f32>, u32) {
+        let mut p = ctx.upload(&start, 1, n).expect("p");
+        let mut state = ctx.adam_state(&p).expect("state");
+
+        for (step, g) in grads.iter().enumerate() {
+            if Some(step) == rebuild_after {
+                // Exactly what a resume does: the parameters survive, the
+                // optimiser's memory of them does not.
+                state = ctx.adam_state(&p).expect("rebuilt state");
+            }
+            let gg = ctx.upload(g, 1, n).expect("g");
+            p = ctx
+                .adam_update_resident(&p, &gg, &mut state, lr)
+                .expect("step");
+        }
+        (ctx.read(&p).expect("read"), state.step())
+    };
+
+    let (continuous, continuous_steps) = run(None);
+    let (resumed, resumed_steps) = run(Some(3));
+
+    assert_eq!(
+        continuous_steps, 6,
+        "the continuous run should have taken six steps"
+    );
+    assert_eq!(
+        resumed_steps, 3,
+        "a rebuilt state should count only the steps since the rebuild, which is          what makes the bias correction restart"
+    );
+
+    let worst = continuous
+        .iter()
+        .zip(&resumed)
+        .map(|(c, r)| (c - r).abs())
+        .fold(0.0f32, f32::max);
+    let differing = continuous
+        .iter()
+        .zip(&resumed)
+        .filter(|(c, r)| c.to_bits() != r.to_bits())
+        .count();
+
+    println!("resume after 3 of 6 steps: {differing} of {n} parameters differ, worst {worst:e}");
+
+    assert!(
+        differing > 0,
+        "rebuilding the state changed nothing, so either Adam is not using its          moments or state save and restore has been added — in which case the          note on AdamState about resumed runs adapting from nothing is now wrong          and should go with this test"
+    );
+}
+
 /// Two Adam steps, with the parameters round-tripping between them.
 ///
 /// The single-step comparison beside this one is stateless: SGD reads the
