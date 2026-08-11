@@ -597,6 +597,14 @@ drift. Everything else is a measurement taken once, and the distinction matters
 more than it looks: a reader has no way to tell a self-checking figure from one
 that was true in August unless the document says which is which.
 
+**Bounded** is the third case and the one most easily mistaken for the first. A
+test asserts the quantity stays inside a range; the figure quoted in the prose is
+where it happened to land inside that range, on this adapter, on the day it ran.
+Moving it would not fail anything until it left the range. That is deliberate for
+hardware measurements — pinning `0.202` exactly would fail on an adapter that
+accumulates differently, with nothing wrong — and it is the reason those figures
+are not bound the way the counts are.
+
 | figure | status | how to re-derive |
 |---|---|---|
 | test count | **checked** — `the_documented_test_count_matches_the_tests_that_exist` | `cargo test -p aether-gpu --test features_doc` |
@@ -604,8 +612,11 @@ that was true in August unless the document says which is which.
 | f32 matmul error ~5e-7 | **bounded** — a test asserts it stays within 1e-9…1e-4 | `cargo test -p aether-gpu --features gpu f32_matmul` |
 | gradient agreement, 7,732 entries | **bounded** — tolerances asserted per fixture | `cargo test -p aether-gpu --features gpu --test gradcheck` |
 | Betti numbers unchanged under f32 | **checked** — asserted, not reported | `cargo test -p aether-gpu --features gpu --test f32_topology` |
+| per-entry error ≤ `κ·ε·√k`; the brief quotes 0.202 of that bound | **bounded** — the inequality is asserted per entry; 0.202 is where it landed | `cargo test -p aether-gpu --features gpu per_entry_error` |
+| κ from two matmuls agrees with f64; the brief quotes 4.5e-05 | **bounded** — asserted below 1e-3; 4.5e-05 is where it landed | `cargo test -p aether-gpu --features gpu the_condition_number_of_every_entry` |
+| tiled and untiled matmul agree | **checked** — asserted bitwise, zero entries differing | `cargo test -p aether-gpu --features gpu the_tiled_kernel` |
 | every timing, every ratio | **snapshot** | `cargo run -p aether-gpu --example gpu_bench --release` |
-| crossover n=128 (stable); magnitude tens of × (spread 96%) | **snapshot** | `cargo run -p aether-gpu --example tensor_crossover --release` |
+| crossover n=128 (stable); magnitude not reproducible, 10×–63× observed | **snapshot** | `cargo run -p aether-gpu --example tensor_crossover --release` |
 | crash rates (8/60, 0/180) | **snapshot** | `crates/aether-gpu/examples/teardown_repro.rs`, 30 runs a variant |
 
 The snapshots cannot be bound and it is not a gap in the tooling. A timing
