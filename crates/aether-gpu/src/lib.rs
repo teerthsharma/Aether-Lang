@@ -228,6 +228,14 @@ pub struct GpuContext {
 /// the run looks continuous. It is recorded here because the alternative is
 /// finding it in a training curve.
 ///
+/// The size of it is measured rather than asserted.
+/// `rebuilding_adam_state_mid_run_changes_the_parameters` runs six steps twice on
+/// identical parameters and gradients, rebuilding the state after the third in
+/// one of them: every parameter differs, the worst by 6.8e-02. At a learning rate
+/// of 0.02 an Adam step moves a parameter by about that much, so six steps move
+/// it by around 0.12 — the discontinuity is over half the run's total movement,
+/// from a change that produces no error and no warning.
+///
 /// Nothing in this workspace checkpoints, so nothing is broken by it today. The
 /// fix is an accessor returning the packed tensor and a constructor taking one
 /// back, which is a public API decision rather than an oversight, and is not made
