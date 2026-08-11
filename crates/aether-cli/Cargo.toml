@@ -35,3 +35,14 @@ rustyline = { workspace = true }
 [[bin]]
 name = "aether"
 path = "src/main.rs"
+
+# Denied for this package only, matching the other crates in this workspace.
+# Not through RUSTFLAGS, which would apply to every dependency and fail this
+# build for a warning in one of them.
+#
+# Added after surveying every configuration this crate has and finding none:
+# the denial follows the reading rather than replacing it. Where that order was
+# reversed elsewhere, `cargo fix` offered to delete two bindings whose only
+# reader was a std-gated `println!` and which were doing load-bearing work.
+[lints.rust]
+unused_imports = "deny"
