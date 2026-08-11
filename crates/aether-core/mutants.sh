@@ -135,6 +135,8 @@ printf '%-58s' "----------------------------------------------------------"
 for _ in "${suites[@]}"; do printf ' %-12s' "------------"; done
 printf '\n'
 
+catchers="$(mktemp)"
+trap 'restore; rm -f "$catchers"' EXIT
 escaped=0
 
 for entry in "${mutants[@]}"; do
@@ -188,6 +190,15 @@ for entry in "${mutants[@]}"; do
                 failed="${failed%% failed}"
                 printf ' %-12s' "$failed/$((passed + failed))"
             fi
+            # Which tests, not just how many. A fraction of 1/17 repeated across
+            # three defects reads as three independent single-test catches, and
+            # is equally consistent with one test carrying all three -- in which
+            # case that test is load-bearing for three defects at once and a
+            # rewrite of it silently drops all of them.
+            printf '%s' "$out" \
+                | grep -oE '^test [A-Za-z0-9_:]+ \.\.\. FAILED' \
+                | sed -E 's/^test (.*) \.\.\. FAILED/'"$name"'\t\1/' \
+                >> "$catchers"
             any_caught=1
         fi
     done
@@ -217,8 +228,19 @@ else
     exit 99
 fi
 
+# Which test caught what. The count above says how much of a suite notices a
+# defect; this says whether the tests that notice are the same ones each time.
+echo
+echo "tests that caught each mutant, by how many defects they carry"
+if [ -s "$catchers" ]; then
+    cut -f2 "$catchers" | sort | uniq -c | sort -rn | while read -r n test; do
+        printf "  %2d  %s\n" "$n" "$test"
+    done
+fi
+
 echo
 echo "mutants escaping: $escaped / ${#mutants[@]}"
 [ "$escaped" -eq 0 ]
+
 
 
