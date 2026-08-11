@@ -665,6 +665,26 @@ mod tests {
     /// separated clusters, so which three seed the search decides where the
     /// search ends. The well-separated fixture above converges to the same answer
     /// from anywhere, which is why it cannot see this.
+    ///
+    /// # What this cannot check, and one attempt that failed
+    ///
+    /// It does not pin which bits the weighting reads. Replacing `self.seed` with
+    /// a literal fails it; reverting the first centroid to the raw unadvanced
+    /// seed does not, because nine seeds still give nine distinct starts on nine
+    /// points.
+    ///
+    /// The obvious way to reach the weight is a fixture where every point is the
+    /// same distance from the centroids, so `min_dist` is constant and the argmax
+    /// depends on the weight sequence alone. Simulated over dataset sizes 8..39,
+    /// it does not separate: the low-bit and high-bit versions each produce two
+    /// distinct argmax values across all 32 sizes. A running maximum is decided by
+    /// whichever draw happens to be largest and stops changing once it appears, so
+    /// the period-8 structure is gone before it reaches the output — the loop
+    /// destroys exactly the signal the test would need.
+    ///
+    /// Recorded so the next attempt starts somewhere else. The evidence for the
+    /// shift being correct is the bit periods themselves, in the comment at the
+    /// draw.
     #[test]
     fn the_seed_changes_the_outcome_and_repeats_it() {
         let mut data = [[0.0f64; 2]; 9];
