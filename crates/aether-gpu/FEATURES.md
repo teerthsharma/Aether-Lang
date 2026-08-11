@@ -15,7 +15,7 @@ wrong answer is worth keeping — but it means the current state has to be
 reconstructed from a sequence of corrections. This section is the state.
 
 **The backend works and nothing uses it.** 20 WGSL kernels, resident tensors,
-batched submission, 96 tests, 0 of 24 mutants escaping. No line of
+batched submission, 97 tests, 0 of 24 mutants escaping. No line of
 `aether-core` or `aether-lang` calls it.
 
 `scheduled_attention_resident` returns a `GpuTensor` so attention output can feed
@@ -1171,6 +1171,37 @@ Localisation was measured, not assumed. Applying site 13 changes the
 no other. Each defect stays inside its own kernel, so the probe is reporting the
 kernel at fault rather than a downstream consequence.
 
+##### The line between rounding and defect, written down
+
+Judging site 57's 273 epsilons against f32 epsilon alone was the weakest step in
+the chain: epsilon says what the format can represent, not what a caller needs.
+The requirement was never missing, only scattered — every suite asserts one as a
+literal, each with a reason beside it.
+
+| what | requirement | asserted in | why that number |
+|---|---:|---|---|
+| matmul, elementwise | `1e-5 · √k` relative | `gpu_parity.rs:33` | f32 accumulation over `k` terms grows as `√k`, so a single constant would be loose at k=4 and wrong at k=512 |
+| attention forward | `2e-4` | `attention_parity.rs:46` | `exp` is its own derivative, so score error passes into weights undamped; still far tighter than the O(1) moves the tests exist to catch |
+| attention backward gradients | `2e-4` (`TOL`) | `attention_parity.rs:926` | same constant as the forward pass, applied to the worst gradient disagreement |
+| resident output chained into another kernel | `1e-5` | `attention_parity.rs:553` | a chained product, tighter than `TOL` because it involves no exponential |
+| training drift, per step | `1e-4` | `attention_parity.rs:1020` | checked at every step, not only the last, so a divergence that appears at step three and damps by step ten cannot pass |
+| distance matrix vs f64 | `1e-6` absolute, `1e-5` relative | `f32_topology.rs:392` | |
+| Betti numbers under f32 | **exact** | `f32_topology.rs` | the only assertion here with no tolerance at all |
+
+Against that budget the three measured differences are not marginal:
+
+| site | measured | governing requirement | headroom |
+|---|---:|---:|---:|
+| 25 | 2.276e-07 | 1e-5·√k | ~44× inside |
+| 43 | 8.333e-07 | 2e-4 | 240× inside |
+| 57 | 3.255e-05 | 2e-4 forward, 1e-4 per-step drift | 3–6× inside |
+
+Site 57 is the tightest and still sits several times inside the requirement its
+own suite asserts, so the verdict rests on a stated tolerance with a documented
+rationale rather than on f32 epsilon. It is also the one to re-examine first if a
+caller ever needs attention tighter than 2e-4, because 3–6× is headroom that a
+change to the accumulation order could consume.
+
 Limits: only comparison operators were swept, so arithmetic and index expressions
 are untouched, and zero holes in this class says nothing about those. The two
 comment sites were found by reading the survivor list rather than by anticipating
@@ -1178,9 +1209,10 @@ them, so other classes that are equivalent for unnoticed reasons may remain. Eve
 verdict is against these fixtures — an equivalent verdict means "changed nothing
 measurable on this input", not "cannot change anything", and the sparse-schedule
 fixture was added precisely because the first one could not have told the
-difference for site 43. The tolerance that separates rounding from a defect is
-read off f32 epsilon rather than from a stated requirement, so a kernel whose
-callers need better than 273 epsilons would not agree with the verdict on site 57.
+difference for site 43. The budget above is a transcription of what the suites
+already enforce, not an independent derivation: if a tolerance was chosen too
+loosely in the first place, this table inherits that and makes it look
+authoritative.
 
 ### The harness deleted uncommitted work
 
@@ -1714,3 +1746,4 @@ Ordered by value, highest first.
 6. **f16 storage** with f32 accumulation.
 7. Raise `PersistenceConfig` caps past 1024 so the distance kernel earns its
    dispatch, then route Vietoris–Rips through it.
+
