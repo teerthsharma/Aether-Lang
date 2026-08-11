@@ -2426,9 +2426,14 @@ Three details worth naming:
 
 The evidence policy in one rule: **a number without a reproduction command does not go in a table.** This section is that rule discharged — every quantitative claim above, mapped to the command that produces it.
 
+A 🔒 marks the part of a claim a test fails on when it drifts, so the command is a way to
+see the number rather than the only thing keeping it true. Everything else is a
+snapshot: correct when it was run, and nothing notices if it stops being.
+The guards live in `crates/aether-gpu/tests/features_doc.rs`.
+
 | Claim | Where | Command |
 |---|---|---|
-| 215 passed, 76 ignored | [Status](#honest-status-dashboard) | `cargo test --workspace --exclude aether-kernel` |
+| 215 passed, 🔒 76 ignored | [Status](#honest-status-dashboard) | `cargo test --workspace --exclude aether-kernel` |
 | 11 persistence invariants | [Theory](#theoretical-foundation) | `cargo test -p aether-core --test persistence_invariants` |
 | 17 diagram-metric tests | [Test suite](#diagram_distancers--17-tests-381-lines) | `cargo test -p aether-core --test diagram_distance` |
 | 29 attention contracts | [Test suite](#attention_contractsrs--29-tests-1124-lines) | `cargo test -p aether-core --test attention_contracts -- --nocapture` |
@@ -2443,12 +2448,13 @@ The evidence policy in one rule: **a number without a reproduction command does 
 | `no_std` on Cortex-M3 | [Status](#honest-status-dashboard) | `cargo build -p aether-core --no-default-features --features no_std -Z build-std=core,alloc --target thumbv7m-none-eabi` |
 | Formatting clean | [Status](#honest-status-dashboard) | `cargo fmt --all -- --check` |
 | Clippy clean | [Status](#honest-status-dashboard) | `cargo clippy --workspace --exclude aether-kernel --all-targets -- -D warnings -D clippy::correctness -D clippy::suspicious -A clippy::style -A clippy::complexity -A clippy::perf` |
-| 34,456 Rust lines | [Status](#honest-status-dashboard) | `(Get-ChildItem crates -Recurse -Filter *.rs \| Get-Content).Count` |
+| 🔒 34,456 Rust lines | [Status](#honest-status-dashboard) | `(Get-ChildItem crates -Recurse -Filter *.rs \| Get-Content).Count` |
 | `nalgebra` has zero call sites | [What We Got Wrong §6](#6-nalgebra-a-second-phantom-dependency) | `grep -rn nalgebra crates/ --include=*.rs` |
-| 60 GPU tests, RTX 4060 / Vulkan | [Status](#honest-status-dashboard) | `cargo test -p aether-gpu --release` |
-| 0 of 10 GPU mutants escape | [FEATURES.md](crates/aether-gpu/FEATURES.md) | `./crates/aether-gpu/mutants.sh` |
+| 102 GPU tests, 76 hardware-gated, RTX 4060 / Vulkan | [Status](#honest-status-dashboard) | `cargo test -p aether-gpu --features gpu --release` |
+| 🔒 20 WGSL kernels | [FEATURES.md](crates/aether-gpu/FEATURES.md) | `grep -c '^@compute' crates/aether-gpu/src/shaders.wgsl` |
+| 0 of 24 GPU mutants escape, 0 of 26 in core | [FEATURES.md](crates/aether-gpu/FEATURES.md) | `./crates/aether-gpu/mutants.sh`, `./crates/aether-core/mutants.sh` |
 | matmul crossover n=128 (magnitude not reproducible; 10×–63× observed) | [FEATURES.md](crates/aether-gpu/FEATURES.md) | `cargo run -p aether-gpu --example tensor_crossover --release`, and `-- --samples` for the raw timings |
-| 11,637 Lean lines, 48 theorems, 0 `sorry` | [Lean](#the-lean-formalization) | `(Get-ChildItem Aether -Recurse -Filter *.lean \| Get-Content).Count`, then `Select-String "^\s*(theorem\|lemma)\s"` and `Select-String "\bsorry\b"` |
+| 🔒 11,637 Lean lines, 48 theorems, 0 `sorry` | [Lean](#the-lean-formalization) | `(Get-ChildItem Aether -Recurse -Filter *.lean \| Get-Content).Count`, then `Select-String "^\s*(theorem\|lemma)\s"` and `Select-String "\bsorry\b"` |
 
 ### Numbers that are *not* reproducible from this repository
 
