@@ -87,6 +87,15 @@ mutants=(
 "attention_dk: accumulates the key instead of the query|s/acc\[d\] = acc\[d\] \+ ds \* a\[row \* head_dim \+ d\];/acc[d] = acc[d] + ds * a[k_base + col * head_dim + d];/"
 "attention_dv: cotangent accumulated unweighted|s/acc\[d\] = acc\[d\] \+ p \* a\[d_base \+ row \* head_dim \+ d\];/acc[d] = acc[d] + a[d_base + row * head_dim + d];/"
 "attention_row_stats: delta left unnormalised|s/c\[s_base \+ row \* 3u \+ 2u\] = weighted \/ denom;/c[s_base + row * 3u + 2u] = weighted;/"
+# Kernels the audit found with no mutant of their own. adam_moments and
+# add_broadcast_row appear in no test by name at all and are reached only
+# through adam_update_resident and add_bias_resident; whether that indirect
+# path notices a defect in them is a measurement rather than an assumption,
+# and these are the measurement.
+"adam_moments: second moment decays with the first beta|s/c\[n \+ idx\] = ADAM_B2 \* a\[n \+ idx\]/c[n + idx] = ADAM_B1 * a[n + idx]/"
+"adam_moments: second moment accumulates the gradient unsquared|s/\(1\.0 - ADAM_B2\) \* g \* g/(1.0 - ADAM_B2) * g/"
+"add_broadcast_row: broadcasts down the wrong axis|s/let col = idx % dims\.n;/let col = idx \/ dims.n;/"
+"sigmoid_bce_grad: batch averaging dropped|s/c\[idx\] = \(p - b\[idx\]\) \/ f32\(dims\.m\);/c[idx] = (p - b[idx]);/"
 "attention_dk: membership test always succeeds|s/if \(u32\(b\[idx_base \+ e\]\) == k_block\) \{/if (true) {/"
 )
 
