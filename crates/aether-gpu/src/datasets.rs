@@ -53,6 +53,41 @@ impl Lcg {
             .wrapping_add(1442695040888963407);
         (self.0 >> 33) as f32 / (1u64 << 31) as f32
     }
+
+    /// Next sample in `[-0.5, 0.5)`, at f64 precision.
+    ///
+    /// The name carries the centring because the range is the surprising part.
+    /// A `next_f64` sitting beside `next_f32` reads as the same distribution at
+    /// wider precision, and this is not that: it is shifted, and a caller that
+    /// assumed otherwise would build a dataset centred somewhere it did not
+    /// intend and find out from the model rather than from the generator.
+    ///
+    /// The division is done in f64 rather than widening the f32 result, so this
+    /// is not `next_f32() as f64 - 0.5` and does not agree with it bit for bit.
+    pub fn next_f64_centred(&mut self) -> f64 {
+        self.0 = self
+            .0
+            .wrapping_mul(6364136223846793005)
+            .wrapping_add(1442695040888963407);
+        ((self.0 >> 33) as f64 / (1u64 << 31) as f64) - 0.5
+    }
+
+    /// Next index below `bound`.
+    ///
+    /// Reduces by remainder, which is biased whenever `bound` does not divide
+    /// `2^31`: the low `2^31 mod bound` indices come up slightly more often. At
+    /// the bounds the callers use — sequence lengths and block counts in the
+    /// tens — the excess is under one part in ten million and irrelevant beside
+    /// the sampling noise of the tasks it builds. It is recorded because a
+    /// generator whose bias is undocumented is one somebody will later reach for
+    /// in a context where it matters.
+    pub fn next_usize(&mut self, bound: usize) -> usize {
+        self.0 = self
+            .0
+            .wrapping_mul(6364136223846793005)
+            .wrapping_add(1442695040888963407);
+        (self.0 >> 33) as usize % bound
+    }
 }
 
 fn spiral_point(class: usize, classes: usize, t: f32, rng: &mut Lcg) -> (f32, f32) {
