@@ -1180,7 +1180,7 @@ literal, each with a reason beside it.
 
 | what | requirement | asserted in | why that number |
 |---|---:|---|---|
-| matmul, elementwise | `1e-5 · √k` relative | `gpu_parity.rs:33` | f32 accumulation over `k` terms grows as `√k`, so a single constant would be loose at k=4 and wrong at k=512 |
+| matmul, elementwise | `8 · ε · √k` | `gpu_parity.rs:33` | f32 accumulation over `k` terms grows as `√k`; the constant is twenty times the worst observed ratio, derived below |
 | attention forward | `2e-4` | `attention_parity.rs:46` | `exp` is its own derivative, so score error passes into weights undamped; still far tighter than the O(1) moves the tests exist to catch |
 | attention backward gradients | `2e-4` (`TOL`) | `attention_parity.rs:926` | same constant as the forward pass, applied to the worst gradient disagreement |
 | resident output chained into another kernel | `1e-5` | `attention_parity.rs:553` | a chained product, tighter than `TOL` because it involves no exponential |
@@ -1190,9 +1190,40 @@ literal, each with a reason beside it.
 
 Against that budget the three measured differences are not marginal:
 
+##### One of the six was not doing anything
+
+Transcribing the budget invited the obvious question of whether each number is
+justified, and one is not. Measured against what the suite observes:
+
+| shape | worst absolute difference | in units of `ε·√k` |
+|---|---:|---:|
+| 8×16×8 | 1.192e-07 | 0.25 |
+| 32×32×32 | 2.384e-07 | 0.35 |
+| 17×5×23 | 2.980e-08 | 0.11 |
+
+The error stays under `0.35·ε·√k` while `1e-5·√k` permitted `84·ε·√k` — about
+240× between what was allowed and what happens. This repository has already
+caught itself at 145× once, on a gradient tolerance, and the failure is the same:
+a bound that loose does not constrain the kernel.
+
+Tightened to `8·ε·√k`, roughly twenty times the worst observed ratio, and stated
+in epsilons because that is the unit the error is in. All 43 tests still pass.
+
+The tightening has teeth, demonstrated rather than asserted. Injecting a 1e-5
+relative error into `matmul` and running the suite under both bounds:
+
+| | tests failing |
+|---|---|
+| caught by **both** | `a_rectangular_product_is_not_transposed`, `f32_matmul_error_grows_like_the_square_root_of_the_reduction_depth`, `tensor_matmul_matches_the_cpu_path`, `the_tensor_bridge_reads_through_strides_not_the_flat_buffer` |
+| caught **only** by `8·ε·√k` | `gpu_matmul_matches_the_cpu_reference`, `shapes_around_the_workgroup_boundary_are_handled`, `a_resident_chain_equals_the_same_chain_with_readbacks` |
+
+The three in the second row are precisely the tests that call `tolerance()`. Under
+the old bound they passed a defect four of their neighbours caught, which is the
+sharpest way to put it: they were present, green, and contributing nothing.
+
 | site | measured | governing requirement | headroom |
 |---|---:|---:|---:|
-| 25 | 2.276e-07 | 1e-5·√k | ~44× inside |
+| 25 | 2.276e-07 | 8·ε·√k | ~5× inside at k=5 |
 | 43 | 8.333e-07 | 2e-4 | 240× inside |
 | 57 | 3.255e-05 | 2e-4 forward, 1e-4 per-step drift | 3–6× inside |
 

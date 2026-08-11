@@ -30,8 +30,38 @@ use aether_gpu::{cpu_matmul, cpu_pairwise_sqdist, tensor_matmul, GpuContext};
 /// f32 accumulation over k terms diverges from a separately-ordered f32
 /// accumulation. The bound scales with k, so the tolerance does too rather
 /// than being a single constant that is loose at k=4 and wrong at k=512.
+///
+/// # Where the constant comes from
+///
+/// It used to be `1e-5`, and the shape of the bound was derived while its
+/// magnitude was not. Measured against what this suite actually observes:
+///
+/// | shape | worst absolute difference | in units of `ε·√k` |
+/// |---|---:|---:|
+/// | 8×16×8 | 1.192e-07 | 0.25 |
+/// | 32×32×32 | 2.384e-07 | 0.35 |
+/// | 17×5×23 | 2.980e-08 | 0.11 |
+///
+/// So the error stays under `0.35·ε·√k` while `1e-5·√k` permits `84·ε·√k` — a
+/// factor of about 240 between what is allowed and what happens. A tolerance
+/// that loose does not constrain the kernel: `matmul` could lose two decimal
+/// digits of every result and still pass, and the defects it is nominally
+/// guarding against move outputs by far more than that anyway, so the slack
+/// bought nothing.
+///
+/// `8.0` is chosen as roughly twenty times the worst observed ratio. It keeps
+/// the bound expressed in epsilons, which is the unit the error is actually in,
+/// and leaves room for a different adapter or a different accumulation order
+/// without leaving room for a wrong answer.
+///
+/// This is a bound on rounding, not a specification. If a caller ever needs
+/// matmul tighter than eight epsilons, the number to change is here and the
+/// measurement above is what to repeat.
 fn tolerance(k: usize) -> f32 {
-    1e-5 * (k as f32).sqrt().max(1.0)
+    const F32_EPSILON: f32 = 1.192_092_9e-7;
+    const EPSILONS_ALLOWED: f32 = 8.0;
+
+    EPSILONS_ALLOWED * F32_EPSILON * (k as f32).sqrt().max(1.0)
 }
 
 /// The GPU context, or a failure.
