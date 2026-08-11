@@ -1211,6 +1211,82 @@ fn the_fallback_routes_by_capability_and_not_by_error() {
     );
 }
 
+/// The backward fallback must route the same way the forward one does.
+///
+/// Having a fallback on one half of a differentiable operation and not the other
+/// is not a smaller version of having both: a caller whose forward pass survives
+/// a ceiling and whose backward pass does not has to implement the fallback
+/// anyway, and now has two routing policies that must agree.
+///
+/// So the assertion is agreement, not merely that each works. Both are asked for
+/// the same launch at the same sizes and must reach the same verdict.
+#[test]
+#[cfg_attr(not(feature = "gpu"), ignore)]
+fn the_backward_fallback_routes_like_the_forward_one() {
+    let ctx = require_context();
+    let block_size = 8;
+
+    for (seq, head_dim, expected) in [
+        (32usize, 16usize, AttentionPath::Gpu),
+        (16, 130, AttentionPath::Cpu),
+    ] {
+        let fixture = Fixture::new(seq, head_dim, 107 + head_dim as u64);
+        let d_out = deterministic_fill(seq * head_dim, 109);
+        let schedule = dense_causal_block_schedule(seq / block_size);
+
+        let (_, forward_path) = ctx
+            .scheduled_attention_or_cpu(
+                &fixture.q, &fixture.k, &fixture.v, seq, head_dim, &schedule, block_size,
+            )
+            .expect("forward");
+
+        let (grads, backward_path) = ctx
+            .scheduled_attention_backward_or_cpu(
+                &fixture.q, &fixture.k, &fixture.v, seq, head_dim, &schedule, block_size, &d_out,
+            )
+            .expect("backward");
+
+        assert_eq!(
+            forward_path, expected,
+            "head_dim {head_dim}: forward took the wrong route"
+        );
+        assert_eq!(
+            backward_path, forward_path,
+            "head_dim {head_dim}: the two halves of one operation disagreed about              where to run it"
+        );
+
+        // Values, not only routing. A fallback returning zeros would satisfy
+        // every assertion above.
+        let reference = scheduled_attention_backward(
+            &fixture.q, &fixture.k, &fixture.v, seq, head_dim, &schedule, block_size, &d_out,
+        )
+        .expect("reference");
+
+        // The CPU route is f64 throughout and must agree exactly; the GPU route
+        // is f32 widened and cannot.
+        let tol = if backward_path == AttentionPath::Cpu {
+            1e-12
+        } else {
+            TOL
+        };
+        for (name, got, want) in [
+            ("dq", &grads.dq, &reference.dq),
+            ("dk", &grads.dk, &reference.dk),
+            ("dv", &grads.dv, &reference.dv),
+        ] {
+            let worst = got
+                .iter()
+                .zip(want)
+                .map(|(a, b)| (a - b).abs())
+                .fold(0.0f64, f64::max);
+            assert!(
+                worst <= tol,
+                "head_dim {head_dim}, {name}: worst error {worst:.3e} above {tol:.0e}"
+            );
+        }
+    }
+}
+
 /// The host's ceilings must equal the shader's.
 ///
 /// They are declared twice because WGSL cannot import a Rust constant. If they

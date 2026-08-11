@@ -27,7 +27,7 @@ pub mod datasets;
 use std::borrow::Cow;
 use std::cell::RefCell;
 
-use aether_core::scheduled::BlockSchedule;
+use aether_core::scheduled::{AttentionGradients, BlockSchedule};
 use bytemuck::{Pod, Zeroable};
 use wgpu::util::DeviceExt;
 
@@ -118,7 +118,8 @@ impl core::fmt::Display for GpuError {
 impl std::error::Error for GpuError {}
 
 /// Which implementation produced a result from
-/// [`GpuContext::scheduled_attention_or_cpu`].
+/// [`GpuContext::scheduled_attention_or_cpu`] or
+/// [`GpuContext::scheduled_attention_backward_or_cpu`].
 ///
 /// Returned rather than inferred because the two differ in precision — f32
 /// widened to f64 on the GPU, f64 throughout on the CPU — so which one ran is
@@ -1043,6 +1044,67 @@ impl GpuContext {
                 )
                 .map_err(|e| GpuError::ShapeMismatch(format!("{e:?}")))?;
                 Ok((out, AttentionPath::Cpu))
+            }
+            Err(other) => Err(other),
+        }
+    }
+
+    /// Reverse mode on the GPU where possible, on the CPU where not.
+    ///
+    /// The counterpart to [`GpuContext::scheduled_attention_or_cpu`], and it
+    /// exists because that one did. A caller routing its forward pass through a
+    /// helper that handles the ceilings, then meeting a bare `Unsupported` from
+    /// the backward at the same size, has to implement the fallback anyway —
+    /// having one of the pair was an asymmetry rather than a decision.
+    ///
+    /// Returns host-side f64 gradients rather than the resident tensors of
+    /// [`GpuContext::scheduled_attention_backward_resident`], because the CPU
+    /// route cannot produce device buffers and a helper whose return type
+    /// depended on which path it took would push the branch straight back to the
+    /// caller.
+    ///
+    /// The same precision caveat applies and for the same reason: the GPU route
+    /// is f32 widened on the way out, the CPU route f64 throughout, and
+    /// [`AttentionPath`] says which ran.
+    #[allow(clippy::too_many_arguments)]
+    pub fn scheduled_attention_backward_or_cpu(
+        &self,
+        q: &[f64],
+        k: &[f64],
+        v: &[f64],
+        seq: usize,
+        head_dim: usize,
+        schedule: &BlockSchedule,
+        block_size: usize,
+        d_out: &[f64],
+    ) -> Result<(AttentionGradients, AttentionPath), GpuError> {
+        let narrow = |xs: &[f64]| xs.iter().map(|&x| x as f32).collect::<Vec<f32>>();
+        let widen = |xs: Vec<f32>| xs.into_iter().map(|x| x as f64).collect::<Vec<f64>>();
+
+        match self.scheduled_attention_backward_resident(
+            &narrow(q),
+            &narrow(k),
+            &narrow(v),
+            seq,
+            head_dim,
+            schedule,
+            block_size,
+            &narrow(d_out),
+        ) {
+            Ok((dq, dk, dv)) => Ok((
+                AttentionGradients {
+                    dq: widen(self.read(&dq)?),
+                    dk: widen(self.read(&dk)?),
+                    dv: widen(self.read(&dv)?),
+                },
+                AttentionPath::Gpu,
+            )),
+            Err(GpuError::Unsupported(_)) => {
+                let grads = aether_core::scheduled::scheduled_attention_backward(
+                    q, k, v, seq, head_dim, schedule, block_size, d_out,
+                )
+                .map_err(|e| GpuError::ShapeMismatch(format!("{e:?}")))?;
+                Ok((grads, AttentionPath::Cpu))
             }
             Err(other) => Err(other),
         }

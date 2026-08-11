@@ -15,7 +15,7 @@ wrong answer is worth keeping — but it means the current state has to be
 reconstructed from a sequence of corrections. This section is the state.
 
 **The backend works and nothing uses it.** 18 WGSL kernels, resident tensors,
-batched submission, 90 tests, 0 of 20 mutants escaping. No line of
+batched submission, 91 tests, 0 of 20 mutants escaping. No line of
 `aether-core` or `aether-lang` calls it.
 
 `scheduled_attention_resident` returns a `GpuTensor` so attention output can feed
@@ -91,7 +91,7 @@ a `head_dim` past the kernel's private scratch is a limit of this backend on a
 launch `aether-core` computes perfectly well. That distinction was decorative
 until something acted on it.
 
-`scheduled_attention_or_cpu` acts on it. A supported launch runs on the GPU, one
+`scheduled_attention_or_cpu` and `scheduled_attention_backward_or_cpu` act on it. A supported launch runs on the GPU, one
 past a ceiling runs on `aether_core::scheduled::scheduled_attention`, and a
 malformed launch still fails — falling back on a caller's bug would turn it into
 a silently slower correct-looking answer.
@@ -107,11 +107,19 @@ The test covers all three routes rather than the interesting one, and checks the
 CPU route's *values* against the reference at 1e-12 — asserting only the path
 would pass on a fallback that returned zeros.
 
+Both halves of the operation route, and the test asserts they route the *same
+way* rather than that each works. A fallback on the forward and none on the
+backward is not a smaller version of having both: a caller whose forward survives
+a ceiling and whose backward does not must implement the fallback anyway, and then
+maintains two routing policies that have to agree. Asking both for the same launch
+and requiring the same verdict is what makes that a contract instead of a
+coincidence.
+
 This is also the first thing in the crate that answers the standing sentence at
 the top of this file. The backend still is not called from `aether-core`, and
 cannot be: `aether-core` is `no_std` and `wgpu` is not. But a caller who wants the
-GPU where it helps and correctness everywhere else now has one function to call
-instead of a policy to implement.
+GPU where it helps and correctness everywhere else now has one function per
+direction to call instead of a policy to implement.
 
 ### A crashed test binary is not a caught mutant
 
