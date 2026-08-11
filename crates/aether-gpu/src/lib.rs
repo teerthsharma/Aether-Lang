@@ -525,9 +525,29 @@ impl GpuContext {
 
     /// Squared Euclidean distance matrix of a resident `[n, d]` cloud.
     ///
-    /// This is the O(n^2 d) term underneath every Vietoris-Rips filtration in
-    /// `aether-core`, which is what makes it the operation where a GPU matters
-    /// to this project specifically.
+    /// This is the O(n²d) term underneath every Vietoris–Rips filtration in
+    /// `aether-core`, which is what made it look like the operation where a GPU
+    /// would matter to this project specifically.
+    ///
+    /// # It was measured, and it is not worth offloading at any size
+    ///
+    /// 90–100% of the call is transfer. The arithmetic is O(n²d) against O(n²)
+    /// bytes returned, so the work per byte is `d` — a constant — and no `n`
+    /// makes the compute outgrow the copy. `matmul` escapes this because its
+    /// O(n³) against O(n²) gives a ratio that grows with `n`, which is why that
+    /// one has a crossover at n=128 and this one has none.
+    ///
+    /// The filtration cannot absorb the difference either: the persistence
+    /// reduction that consumes the matrix is CPU-side, so the result has to come
+    /// back regardless of where it was computed.
+    ///
+    /// Kept because the kernel is correct, tested, and is the thing that
+    /// established the rule above by failing to pay. The doc comment previously
+    /// asserted the opposite — written before the measurement and left standing
+    /// after it, which is the failure this crate spends most of `FEATURES.md`
+    /// documenting elsewhere.
+    ///
+    /// Reproduce with `cargo run -p aether-gpu --example gpu_bench --release`.
     pub fn pairwise_sqdist_resident(&self, points: &GpuTensor) -> Result<GpuTensor, GpuError> {
         let n = points.rows;
         let d = points.cols;
