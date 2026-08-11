@@ -668,9 +668,17 @@ fn main() {
         // away; under fragility it does not.
         //
         // It goes away. Resuming at epoch 90 costs -0.0009 with ten epochs left
-        // and exactly nothing with thirty, sixty or a hundred and ten. The state
-        // discarded is identical in all four; only the time to re-converge
-        // differs, so the cost is the missing recovery and not the lateness.
+        // and exactly nothing with twenty-five or more. The state discarded is
+        // identical in every row; only the time to re-converge differs, so the
+        // cost is the missing recovery and not the lateness.
+        //
+        // Read the middle rows as counts, not as a curve. The held-out set is 900
+        // points and the mean is over five seeds, so one flipped label moves it by
+        // 1/900/5, about 0.00022. The deltas at 10, 13, 15 and 20 epochs are four,
+        // one, four and three flipped labels; they do not decrease monotonically
+        // because there is nothing between them to decrease through. What the
+        // sweep locates is a transition between twenty and twenty-five epochs of
+        // recovery, and the wobble below it is quantisation rather than structure.
         //
         // Which makes the practical reading narrow: discarding Adam's moments is
         // free whenever the run has room to settle again, and the case to avoid
@@ -681,7 +689,7 @@ fn main() {
             "  {:>8}  {:>12}  {:>14}",
             "total", "left after", "mean delta"
         );
-        for total in [100usize, 120, 150, 200] {
+        for total in [100usize, 103, 105, 110, 115, 120, 150] {
             let mut d = Vec::new();
             for seed in [0xBEEFu64, 0xC0FFEE, 0xD00D, 0xFEED, 0xBEAD] {
                 let whole = holdout_accuracy(
