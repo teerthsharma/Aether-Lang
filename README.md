@@ -1138,7 +1138,7 @@ impl Answer {
 | Module | Lines | Surface |
 |---|---:|---|
 | `gossip` | 203 | Distributed averaging, `MAX_DIM = 3` |
-| `dataloader` | 151 | `DataLoader`, `BatchIterator<'a>`, batching + shuffle |
+| `dataloader` | 283 | `DataLoader`, `BatchIterator<'a>`, batching + shuffle |
 | `linalg` | 254 | Scalar reductions and distance primitives underneath the rest |
 | `benchmark` | 255 | `EscalatingBenchmark<D>`, `BenchmarkConfig`, `TestFunction`, `generate_test_function` |
 
@@ -2118,7 +2118,7 @@ crates/aether-core/src/                                    lines
     ├── tensor.rs                                            254   N-d array
     ├── gossip.rs                                            203   distributed averaging
     ├── convolution.rs                                       160   Conv2D  ⚠ forward only
-    ├── dataloader.rs                                        151   batching, shuffle
+    ├── dataloader.rs                                        283   batching, shuffle
     └── mod.rs                                                51
 ```
 
@@ -2611,6 +2611,7 @@ The scheduled-attention module is a port of [`triton-lang/kernels#22`](https://g
   <em>Every number above was measured. Every claim names its control.<br>
   The section where I am wrong is a third of the document, and that is the feature.</em>
 </p>
+
 
 
 
