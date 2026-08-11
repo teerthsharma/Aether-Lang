@@ -107,6 +107,15 @@ mutants=(
 # it is here to measure whether they catch what they were built to catch rather
 # than to leave that observed in passing.
 "matmul: accumulator quantised, precision lost without changing the algorithm|s/sum = sum \+ a\[row \* dims\.k \+ i\] \* b\[i \* dims\.n \+ col\];/sum = round((sum + a[row * dims.k + i] * b[i * dims.n + col]) * 1048576.0) \/ 1048576.0;/"
+# The same defect in the tiled kernel, which is the one matmul_resident
+# dispatches and therefore the one resident training runs.
+#
+# Added after the untiled version showed that every f64 comparison in the suite
+# went through the untiled path. Quantising the tiled accumulator left gpu_parity
+# entirely green and was caught only by gradcheck, incidentally, because finite
+# differences amplify precision loss. Coverage by coincidence is what this keeps
+# honest.
+"matmul_tiled: accumulator quantised, precision lost in the resident path|s/sum = sum \+ tile_a\[lid\.x\]\[i\] \* tile_b\[i\]\[lid\.y\];/sum = round((sum + tile_a[lid.x][i] * tile_b[i][lid.y]) * 1048576.0) \/ 1048576.0;/"
 )
 
 # Every hardware test is `#[ignore]`d unless `--features gpu` is passed, so the
