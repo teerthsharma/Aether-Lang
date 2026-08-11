@@ -347,6 +347,53 @@ fn the_readme_line_counts_have_not_rotted() {
     }
 }
 
+/// The precision budget must quote tolerances the suites actually assert.
+///
+/// That table is the only place the crate says how much numerical error is
+/// acceptable, and it decides whether a measured difference is rounding or a
+/// defect — three mutation verdicts rest on it. It was assembled by reading
+/// literals out of three test files, which is exactly the process that produced
+/// every other stale number this file guards.
+///
+/// Each constant is checked to still exist in the file the table names. Line
+/// numbers are deliberately not checked: they move whenever anything above them
+/// is edited, so binding them would make this fail constantly for reasons that
+/// have nothing to do with the tolerances, and a test that cries wolf gets its
+/// numbers pasted over without reading.
+///
+/// This cannot verify a tolerance is *appropriate*, only that the document is
+/// quoting the code rather than a memory of it.
+#[test]
+fn the_precision_budget_quotes_tolerances_that_exist() {
+    let doc = features_md();
+
+    assert!(
+        doc.contains("The line between rounding and defect, written down"),
+        "the precision budget is gone from FEATURES.md"
+    );
+
+    // (documented tolerance, file that must contain it)
+    let claims = [
+        ("1e-5 * (k as f32).sqrt()", "gpu_parity.rs"),
+        ("const TOL: f64 = 2e-4;", "attention_parity.rs"),
+        ("worst <= 1e-4", "attention_parity.rs"),
+        ("worst_vs_cpu < 1e-6", "f32_topology.rs"),
+        ("worst_rel < 1e-5", "f32_topology.rs"),
+    ];
+
+    for (needle, file) in claims {
+        let src = fs::read_to_string(crate_root().join("tests").join(file))
+            .unwrap_or_else(|e| panic!("cannot read tests/{file}: {e}"));
+        assert!(
+            src.contains(needle),
+            "FEATURES.md's precision budget quotes `{needle}` from tests/{file}, \
+             which no longer contains it. Either the tolerance changed and the \
+             budget is now describing a requirement nothing enforces, or it was \
+             reworded and this guard needs following."
+        );
+    }
+}
+
 /// Every command the provenance table offers must name a binary or test target
 /// that exists.
 ///
