@@ -28,7 +28,7 @@
 
 use std::time::Instant;
 
-use aether_gpu::datasets::report_split;
+use aether_gpu::datasets::{self, report_split};
 use aether_gpu::{cpu_matmul, GpuContext};
 
 const FOLDS: usize = 5;
@@ -55,30 +55,59 @@ impl Lcg {
     }
 }
 
-/// Two interleaved spirals with Gaussian-ish jitter. Returns row-major
+/// Two interleaved spirals, drawn i.i.d. and shuffled. Returns row-major
 /// `[n, 2]` features and `[n]` labels in {0, 1}.
+///
+/// # Why this delegates instead of generating its own
+///
+/// This example generated its own spirals by sweeping the arc parameter,
+/// `t = i / POINTS_PER_CLASS`, and then shuffled the result so folds would not be
+/// one class each. Shuffling changes which points land in which fold and does not
+/// change what they are: consecutive arc positions differing only by jitter end
+/// up on opposite sides of the split, so every held-out point has a near-duplicate
+/// in the training set.
+///
+/// `datasets` states the problem directly — *a sweep is not a sample: two sweeps
+/// with the same spacing differ only by their noise, and any partition of one puts
+/// near-duplicates on both sides* — and `train_multiclass` and `train_resident`
+/// were both moved onto `spirals_iid` for exactly that reason.
+/// `train_resident`'s own comment names the figure it abandoned, **0.8220**, which
+/// is the number this example was still printing.
+///
+/// `spirals_iid` draws each arc position uniformly at random, so a partition of
+/// one draw is a genuine sample split and k-fold means what it says. The shuffle
+/// is kept because `spirals_iid` emits one class after the other and contiguous
+/// folds would otherwise be single-class.
+///
+/// # The accuracy rose, and almost none of that is this change
+///
+/// The reported figure went from 0.8220 to 0.9600, which invites the reading that
+/// the old split was hiding a worse model. It was not. Holding the generator fixed
+/// and varying only the sampling:
+///
+/// | sampling | split ratio | CV accuracy |
+/// |---|---:|---:|
+/// | `spirals_sweep`, the old scheme | 1.00× | 0.9540 |
+/// | `spirals_iid`, this change | 1.49× | 0.9600 |
+///
+/// 0.006 apart, inside the ±0.025 spread across folds. The jump is the generator:
+/// this example swept its own spirals through 2.5π with jitter 0.35 and 0.15,
+/// while `datasets::spiral_point` uses 2.2π with 0.30 and 0.12 — fewer turns and
+/// less noise, which is a materially easier problem. **0.9600 is not comparable
+/// to 0.8220**, and reading the difference as a correction would be wrong.
+///
+/// That the two sampling schemes agree is not a reason to keep the old one. It
+/// reproduces what `SplitDiagnostic::is_extrapolating` already documents from a
+/// different direction — interleaved cross-validation and an independent-draw
+/// holdout agree on this data — and the argument for i.i.d. sampling was never
+/// that it changes the number. It is that a partition of one deterministic sweep
+/// is not a sample, which is true whether or not the two happen to agree here.
 fn spirals(seed: u64) -> (Vec<f32>, Vec<f32>) {
-    let mut rng = Lcg(seed);
-    let n = POINTS_PER_CLASS * 2;
-    let mut x = Vec::with_capacity(n * 2);
-    let mut y = Vec::with_capacity(n);
+    let (x, classes) = datasets::spirals_iid(seed, 2, POINTS_PER_CLASS);
+    let y: Vec<f32> = classes.iter().map(|c| *c as f32).collect();
+    let n = y.len();
 
-    for class in 0..2 {
-        for i in 0..POINTS_PER_CLASS {
-            let t = i as f32 / POINTS_PER_CLASS as f32;
-            let radius = 0.2 + 3.8 * t;
-            let angle = 2.5 * core::f32::consts::PI * t + class as f32 * core::f32::consts::PI;
-
-            let jitter_r = (rng.next_f32() - 0.5) * 0.35;
-            let jitter_a = (rng.next_f32() - 0.5) * 0.15;
-
-            x.push((radius + jitter_r) * (angle + jitter_a).cos() / 4.0);
-            x.push((radius + jitter_r) * (angle + jitter_a).sin() / 4.0);
-            y.push(class as f32);
-        }
-    }
-
-    // Shuffle so folds are not one class each. Fisher-Yates with the same LCG.
+    let mut rng = Lcg(seed ^ 0x5EED);
     let mut order: Vec<usize> = (0..n).collect();
     for i in (1..n).rev() {
         let j = (rng.next_f32() * (i + 1) as f32) as usize % (i + 1);
