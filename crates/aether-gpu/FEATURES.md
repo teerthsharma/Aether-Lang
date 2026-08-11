@@ -15,7 +15,7 @@ wrong answer is worth keeping — but it means the current state has to be
 reconstructed from a sequence of corrections. This section is the state.
 
 **The backend works and nothing uses it.** 18 WGSL kernels, resident tensors,
-batched submission, 88 tests, 0 of 20 mutants escaping. No line of
+batched submission, 89 tests, 0 of 20 mutants escaping. No line of
 `aether-core` or `aether-lang` calls it.
 
 `scheduled_attention_resident` returns a `GpuTensor` so attention output can feed
@@ -129,6 +129,30 @@ of 20 escaping, which is the mechanism working on real data rather than on a
 description of it: that same crash, one change earlier, produced a spurious
 escape. **One crash in sixty cells is the current rate.** A number that climbs
 between runs is the workaround wearing out.
+
+Which cells crashed is recorded too, because the environmental explanation rests
+on the crash moving and a count alone cannot distinguish that from a fault
+settling on one kernel — which would mean the mutant causes it and the retry is
+hiding a catch. Four crashes observed so far:
+
+| mutant | suite |
+|---|---|
+| `matmul: reads A transposed` | `attention_parity` |
+| `scheduled_attention: softmax scale dropped` | `attention_parity` |
+| `scheduled_attention: causal mask never fires` | `gpu_parity` |
+| `adam_update: bias correction dropped` | `attention_parity` |
+
+Four different mutants, touching matmul, softmax scaling, the causal mask and
+Adam's bias correction — no shared code between them, and the last has nothing to
+do with attention at all while crashing in the attention suite. That is what the
+environmental reading predicts and a mutant-caused one does not.
+
+Three of the four land in `attention_parity`, which reads like concentration
+until the mechanism is considered: it is the largest suite and creates the most
+GPU contexts, and the fault is in context teardown. More teardowns, more chances.
+That explains the skew without weakening the reading — but it is the number to
+watch, because a fault that stopped scattering across *mutants* would be the
+signal this table exists to provide.
 
 ### Reverse mode, CPU reference and GPU port
 

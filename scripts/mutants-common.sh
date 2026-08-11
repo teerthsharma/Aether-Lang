@@ -51,6 +51,14 @@ mutant_run_suite() {
             # harness started reporting escapes that were not there. The count
             # is the only signal that the workaround is still only a workaround.
             MUTANT_RETRIES=$((${MUTANT_RETRIES:-0} + 1))
+            # Where, not only how many. The environmental explanation rests on
+            # the crash moving between mutants and suites; a count alone cannot
+            # tell that apart from a fault concentrating on one kernel, which
+            # would mean the mutant causes it and the retry is hiding a catch.
+            # Recording the cell is what makes that explanation falsifiable.
+            if [ -n "${MUTANT_RETRY_LOG:-}" ]; then
+                printf '%s\t%s\n' "$suite" "$mutant" >> "$MUTANT_RETRY_LOG"
+            fi
             continue
         fi
         break
@@ -151,6 +159,11 @@ mutant_report_catchers() {
         echo "$MUTANT_RETRIES cell(s) crashed and were retried."
         echo "This is the wgpu teardown intermittent, worked around and not fixed."
         echo "A number that climbs between runs is the workaround wearing out."
+        if [ -n "${MUTANT_RETRY_LOG:-}" ] && [ -s "${MUTANT_RETRY_LOG}" ]; then
+            echo "Cells affected — these should scatter across runs, and a fault"
+            echo "settling on one suite or one mutant is not the teardown bug:"
+            sed 's/^/    /' "$MUTANT_RETRY_LOG"
+        fi
     fi
 
     echo
