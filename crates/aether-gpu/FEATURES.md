@@ -1209,6 +1209,26 @@ a bound that loose does not constrain the kernel.
 Tightened to `8·ε·√k`, roughly twenty times the worst observed ratio, and stated
 in epsilons because that is the unit the error is in. All 43 tests still pass.
 
+Fitting a constant on three shapes with `k ≤ 32` and applying it to reductions
+sixteen times deeper is a guess about the shape of the growth, so the guess was
+checked. The ratio of observed error to `ε·√k`, swept over a 32× range:
+
+| k | 16 | 64 | 256 | 512 |
+|---|---:|---:|---:|---:|
+| ratio | 0.257 | 0.240 | 0.354 | 0.329 |
+
+Flat, not climbing, so the bound keeps its ~23× margin at the top of the range as
+well as the bottom. `k = 512` is now part of that test; the f64 reference is
+O(n³) and costs about two seconds, which is affordable once. `k = 1024` is not
+covered.
+
+One corroboration was already in the tree.
+`f32_matmul_error_grows_like_the_square_root_of_the_reduction_depth` had used
+`8.0 * 1.19e-7 * sqrt(n)` as its own bound since long before this, so two
+independent attempts to say how much error f32 matmul is allowed both landed on
+eight epsilons. Neither was derived from the other, which is the only reason the
+agreement is evidence of anything.
+
 The tightening has teeth, demonstrated rather than asserted. Injecting a 1e-5
 relative error into `matmul` and running the suite under both bounds:
 
