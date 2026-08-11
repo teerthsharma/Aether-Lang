@@ -44,6 +44,7 @@ use aether_core::scheduled::{
     random_block_schedule, schedule_budget, topology_block_schedule, BlockSchedule,
     TopologyScheduleConfig,
 };
+use aether_gpu::datasets;
 use aether_gpu::{GpuContext, GpuTensor};
 
 const SEQ: usize = 128;
@@ -64,26 +65,6 @@ const MATCH: f64 = 30.0;
 /// reporting noise with a table around it.
 const DENSE_FLOOR: f32 = 0.80;
 
-struct Lcg(u64);
-
-impl Lcg {
-    fn next_f64(&mut self) -> f64 {
-        self.0 = self
-            .0
-            .wrapping_mul(6364136223846793005)
-            .wrapping_add(1442695040888963407);
-        ((self.0 >> 33) as f64 / (1u64 << 31) as f64) - 0.5
-    }
-
-    fn next_usize(&mut self, bound: usize) -> usize {
-        self.0 = self
-            .0
-            .wrapping_mul(6364136223846793005)
-            .wrapping_add(1442695040888963407);
-        (self.0 >> 33) as usize % bound
-    }
-}
-
 struct Sample {
     q: Vec<f64>,
     k: Vec<f64>,
@@ -96,10 +77,16 @@ struct Sample {
 /// The final query is set to the key at `target`, plus a little noise so the
 /// match is strong rather than exact — an exact copy would make the retrieval
 /// degenerate in a way a real sequence never is.
-fn sample(rng: &mut Lcg) -> Sample {
-    let mut q: Vec<f64> = (0..SEQ * HEAD_DIM).map(|_| rng.next_f64()).collect();
-    let k: Vec<f64> = (0..SEQ * HEAD_DIM).map(|_| rng.next_f64()).collect();
-    let v: Vec<f64> = (0..SEQ * HEAD_DIM).map(|_| rng.next_f64()).collect();
+fn sample(rng: &mut datasets::Lcg) -> Sample {
+    let mut q: Vec<f64> = (0..SEQ * HEAD_DIM)
+        .map(|_| rng.next_f64_centred())
+        .collect();
+    let k: Vec<f64> = (0..SEQ * HEAD_DIM)
+        .map(|_| rng.next_f64_centred())
+        .collect();
+    let v: Vec<f64> = (0..SEQ * HEAD_DIM)
+        .map(|_| rng.next_f64_centred())
+        .collect();
 
     // Anywhere before the final block, so retrieval is never satisfied by the
     // local window alone. A target inside the last block would be found by every
@@ -118,7 +105,7 @@ fn sample(rng: &mut Lcg) -> Sample {
         //
         // That is a broken ceiling rather than a result, which is what the dense
         // control below exists to catch.
-        q[last * HEAD_DIM + d] = k[target * HEAD_DIM + d] * MATCH + rng.next_f64() * 0.2;
+        q[last * HEAD_DIM + d] = k[target * HEAD_DIM + d] * MATCH + rng.next_f64_centred() * 0.2;
     }
 
     let label = if v[target * HEAD_DIM] > 0.0 { 1.0 } else { 0.0 };
@@ -152,14 +139,14 @@ struct Mlp {
     b2: GpuTensor,
 }
 
-fn init(ctx: &GpuContext, rng: &mut Lcg) -> Mlp {
+fn init(ctx: &GpuContext, rng: &mut datasets::Lcg) -> Mlp {
     let scale1 = (2.0 / HEAD_DIM as f64).sqrt();
     let scale2 = (2.0 / HIDDEN as f64).sqrt();
     let w1: Vec<f32> = (0..HEAD_DIM * HIDDEN)
-        .map(|_| (rng.next_f64() * 2.0 * scale1) as f32)
+        .map(|_| (rng.next_f64_centred() * 2.0 * scale1) as f32)
         .collect();
     let w2: Vec<f32> = (0..HIDDEN)
-        .map(|_| (rng.next_f64() * 2.0 * scale2) as f32)
+        .map(|_| (rng.next_f64_centred() * 2.0 * scale2) as f32)
         .collect();
 
     Mlp {
@@ -183,7 +170,7 @@ fn train_fold(
     y_train: &[f32],
     x_test: &[f32],
     y_test: &[f32],
-    rng: &mut Lcg,
+    rng: &mut datasets::Lcg,
 ) -> Vec<bool> {
     let n = y_train.len();
     let mut mlp = init(ctx, rng);
@@ -386,7 +373,7 @@ const FAMILY_ALPHA: f64 = 0.05;
 /// pairwise on identical sequences. Aggregating to five fold accuracies first
 /// discards which samples each arm got right, which is the whole content of a
 /// paired test.
-fn cross_validate(ctx: &GpuContext, x: &[f32], y: &[f32], rng: &mut Lcg) -> Vec<bool> {
+fn cross_validate(ctx: &GpuContext, x: &[f32], y: &[f32], rng: &mut datasets::Lcg) -> Vec<bool> {
     let n = y.len();
     let fold = n / FOLDS;
     let mut verdicts = vec![false; n];
@@ -432,7 +419,7 @@ fn main() {
         topk_topology_blocks: 4,
     };
 
-    let mut rng = Lcg(0x5EED);
+    let mut rng = datasets::Lcg::new(0x5EED);
     let samples: Vec<Sample> = (0..SAMPLES).map(|_| sample(&mut rng)).collect();
 
     let info = ctx.adapter_info();
@@ -506,7 +493,7 @@ fn main() {
             y.push(s.label);
         }
 
-        let mut fold_rng = Lcg(0xC0FFEE);
+        let mut fold_rng = datasets::Lcg::new(0xC0FFEE);
         let verdicts = cross_validate(&ctx, &x, &y, &mut fold_rng);
         let correct = verdicts.iter().filter(|&&v| v).count();
         let mean = correct as f32 / verdicts.len() as f32;

@@ -41,6 +41,7 @@ use aether_core::scheduled::{
     schedule_budget, scheduled_attention_backward, topology_block_schedule, AttentionGradients,
     BlockSchedule, TopologyScheduleConfig,
 };
+use aether_gpu::datasets;
 use aether_gpu::GpuContext;
 
 const SEQ: usize = 64;
@@ -67,26 +68,6 @@ const LR: f64 = 20.0;
 /// head start and is what the control is there to confirm.
 const MATCH: f64 = 5.0;
 
-struct Lcg(u64);
-
-impl Lcg {
-    fn next_f64(&mut self) -> f64 {
-        self.0 = self
-            .0
-            .wrapping_mul(6364136223846793005)
-            .wrapping_add(1442695040888963407);
-        ((self.0 >> 33) as f64 / (1u64 << 31) as f64) - 0.5
-    }
-
-    fn next_usize(&mut self, bound: usize) -> usize {
-        self.0 = self
-            .0
-            .wrapping_mul(6364136223846793005)
-            .wrapping_add(1442695040888963407);
-        (self.0 >> 33) as usize % bound
-    }
-}
-
 struct Sample {
     /// Raw query features. `Wq` projects these into the queries attention sees.
     xq: Vec<f64>,
@@ -107,15 +88,21 @@ struct Sample {
 /// constant moved, which is the same defect this repository keeps finding in its
 /// own prose — a comment describing a measurement taken under different
 /// conditions.
-fn sample(rng: &mut Lcg, index: usize) -> Sample {
-    let mut xq: Vec<f64> = (0..SEQ * HEAD_DIM).map(|_| rng.next_f64()).collect();
-    let k: Vec<f64> = (0..SEQ * HEAD_DIM).map(|_| rng.next_f64()).collect();
-    let v: Vec<f64> = (0..SEQ * HEAD_DIM).map(|_| rng.next_f64()).collect();
+fn sample(rng: &mut datasets::Lcg, index: usize) -> Sample {
+    let mut xq: Vec<f64> = (0..SEQ * HEAD_DIM)
+        .map(|_| rng.next_f64_centred())
+        .collect();
+    let k: Vec<f64> = (0..SEQ * HEAD_DIM)
+        .map(|_| rng.next_f64_centred())
+        .collect();
+    let v: Vec<f64> = (0..SEQ * HEAD_DIM)
+        .map(|_| rng.next_f64_centred())
+        .collect();
 
     let target = rng.next_usize(SEQ - BLOCK);
     let last = SEQ - 1;
     for d in 0..HEAD_DIM {
-        xq[last * HEAD_DIM + d] = k[target * HEAD_DIM + d] * MATCH + rng.next_f64() * 0.2;
+        xq[last * HEAD_DIM + d] = k[target * HEAD_DIM + d] * MATCH + rng.next_f64_centred() * 0.2;
     }
 
     let label = if v[target * HEAD_DIM] > 0.0 { 1.0 } else { 0.0 };
@@ -257,7 +244,7 @@ fn main() {
         }
     };
 
-    let mut rng = Lcg(0xB0A7);
+    let mut rng = datasets::Lcg::new(0xB0A7);
     let samples: Vec<Sample> = (0..SAMPLES).map(|i| sample(&mut rng, i)).collect();
 
     let config = TopologyScheduleConfig {
@@ -360,8 +347,10 @@ fn main() {
         // from there is proof the loop works; failure to recover means the null
         // result below describes the optimiser rather than the schedule.
         let mut control_wq: Vec<f64> = {
-            let mut r = Lcg(0xC047 + variant.len() as u64);
-            (0..HEAD_DIM * HEAD_DIM).map(|_| r.next_f64()).collect()
+            let mut r = datasets::Lcg::new(0xC047 + variant.len() as u64);
+            (0..HEAD_DIM * HEAD_DIM)
+                .map(|_| r.next_f64_centred())
+                .collect()
         };
         let mut control_head = head.clone();
         let control_before = accuracy(&control_wq, &control_head, &ctx);
