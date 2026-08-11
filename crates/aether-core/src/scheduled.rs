@@ -30,6 +30,15 @@
 //! time. `block_salience_is_the_elder_rule_over_centroids` checks it against this
 //! crate's persistence engine rather than trusting two implementations of H0.
 
+// Enforced per module rather than per crate. `aether-core` has 215 undocumented
+// public items, and switching the whole crate on at once means writing 215 doc
+// comments in one pass — which produces sentences restating the signature,
+// exactly the kind that later contradicts a measurement nobody re-read them
+// against. This module is the repository's headline mechanism and is done; the
+// rest arrive a module at a time, each with the lint switched on behind them so
+// finished work cannot regress.
+#![warn(missing_docs)]
+
 extern crate alloc;
 
 use alloc::vec;
@@ -43,36 +52,58 @@ use libm::{exp, sqrt};
 /// schedule on a GPU is an out-of-bounds read rather than an error.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ScheduleError {
+    /// The block size was zero or not a power of two. Both break the index
+    /// arithmetic every kernel here does with shifts and masks.
     BlockSizeNotPowerOfTwo {
+        /// The offending size.
         block_size: usize,
     },
+    /// The sequence does not divide evenly into blocks, which would leave a
+    /// partial final block that the CSR schedule has no way to describe.
     SequenceNotDivisible {
+        /// Sequence length as given.
         seq: usize,
+        /// Block size as given.
         block_size: usize,
     },
+    /// A zero-length sequence, which has no query blocks to schedule.
     EmptyInput,
     /// A row scheduled a key block at or beyond the query block's future.
     NonCausalRow {
+        /// The query block whose row is malformed.
         q_block: usize,
+        /// The future key block it named.
         block: usize,
     },
     /// A row scheduled the same block twice, or listed blocks out of order.
     UnsortedRow {
+        /// The query block whose row is malformed.
         q_block: usize,
+        /// The block that broke the strict ordering.
         block: usize,
     },
     /// A row scheduled nothing, which would make softmax divide by zero.
     EmptyRow {
+        /// The query block with no key blocks.
         q_block: usize,
     },
+    /// A row named a key block that does not exist in this schedule.
     BlockIndexOutOfRange {
+        /// The query block whose row is malformed.
         q_block: usize,
+        /// The out-of-range block index.
         block: usize,
     },
+    /// The CSR offsets array is not one longer than the query block count, so
+    /// the row boundaries it encodes cannot be read.
     OffsetsLengthMismatch {
+        /// Length the block count implies.
         expected: usize,
+        /// Length the offsets array actually has.
         actual: usize,
     },
+    /// An operand's length disagreed with `seq * head_dim`, or a schedule
+    /// covered a different number of query blocks than the launch.
     ShapeMismatch,
 }
 
@@ -83,7 +114,12 @@ pub enum ScheduleError {
 /// non-empty — enforced at construction so the kernel needs no per-row guards.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct BlockSchedule {
+    /// Row boundaries, `num_query_blocks + 1` entries. Row `i` owns
+    /// `indices[offsets[i]..offsets[i + 1]]`.
     pub offsets: Vec<usize>,
+    /// Key block indices, grouped by query block and strictly sorted within
+    /// each. The GPU port converts these to f32, which is lossless because a
+    /// block index is far below 2^24.
     pub indices: Vec<usize>,
 }
 
