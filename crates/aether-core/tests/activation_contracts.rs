@@ -272,3 +272,81 @@ fn the_softmax_layer_gradient_matches_finite_differences() {
         );
     }
 }
+
+/// One optimiser step is homogeneous of degree one in the learning rate.
+///
+/// Written to defend the gradcheck above, which recovers the analytic gradient
+/// as `(before - after) / lr` and therefore looked like it depended on the
+/// optimiser applying the gradient unmodified. Two things came out of writing
+/// it, and both correct that reasoning.
+///
+/// First, this test does **not** detect momentum, and momentum is not a threat.
+/// It was verified by setting `momentum: 0.9` here, expecting a failure, and
+/// getting a pass — because on a first step from a fresh optimiser there is no
+/// accumulated velocity, so `v = g` and the update is identical to plain
+/// descent. Momentum diverges from step two onwards, and every recovery in this
+/// file takes exactly one step from a freshly built network.
+///
+/// Second, the gradcheck was never as exposed as its own limits claimed. An
+/// optimiser that distorted the gradient would make the recovered value disagree
+/// with the finite difference, and the comparison would fail — the agreement is
+/// itself the validation. The failure mode that worried me cannot be silent.
+///
+/// What this leaves is a narrower and still real property: the update scales
+/// exactly with the learning rate. That rules out a clip applied after scaling,
+/// which is not homogeneous. It does not rule out weight decay or an adaptive
+/// denominator, both of which are homogeneous in `lr` and would be caught by the
+/// gradcheck instead.
+#[test]
+fn one_optimiser_step_scales_with_the_learning_rate() {
+    use aether_core::ml::linalg::LossConfig;
+    use aether_core::ml::neural::{OptimizerConfig, MLP};
+
+    let x = Tensor::new(&[0.7, -0.2, 0.4], &[3, 1]);
+    let y = Tensor::new(&[0.0, 1.0, 0.0], &[3, 1]);
+
+    let implied_gradient = |lr: f64| -> Vec<f64> {
+        let mut mlp = MLP::new(
+            OptimizerConfig::SGD {
+                learning_rate: lr,
+                momentum: 0.0,
+            },
+            LossConfig::BinaryCrossEntropy,
+        );
+        mlp.add_layer(3, 4, Activation::Tanh, Some(7));
+        mlp.add_layer(4, 3, Activation::Softmax, Some(11));
+
+        let before: Vec<f64> = mlp.layers[1].weights.data.borrow().clone();
+        mlp.train_step(&x, &y);
+        let after: Vec<f64> = mlp.layers[1].weights.data.borrow().clone();
+        before
+            .iter()
+            .zip(&after)
+            .map(|(b, a)| (b - a) / lr)
+            .collect()
+    };
+
+    let slow = implied_gradient(1e-4);
+    let fast = implied_gradient(1e-2);
+
+    let mut worst = 0.0f64;
+    for (a, b) in slow.iter().zip(&fast) {
+        worst = worst.max((a - b).abs());
+    }
+
+    assert!(
+        worst <= 1e-9,
+        "the implied gradient changed with the learning rate by {worst:.3e}, so \
+         one step is not minus lr times the gradient. Every finite-difference \
+         check in this file recovers the gradient that way and is measuring \
+         something else."
+    );
+
+    // The control. Two identical zero vectors agree perfectly and would satisfy
+    // the assertion above without the optimiser having done anything.
+    let magnitude = slow.iter().fold(0.0f64, |m, g| m.max(g.abs()));
+    assert!(
+        magnitude > 1e-6,
+        "the implied gradient is {magnitude:.3e}, indistinguishable from zero"
+    );
+}
