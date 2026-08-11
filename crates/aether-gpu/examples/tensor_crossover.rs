@@ -164,32 +164,73 @@ fn dump_samples(ctx: &GpuContext, n: usize, reps: usize) {
     println!("    Tensor  {cmin:.3} – {cmax:.3} ms   {cspread:.1}%");
     println!("    bridge  {gmin:.3} – {gmax:.3} ms   {gspread:.1}%");
 
-    // The samples are not scattered around a mean, they ramp and then flatten:
-    // the CPU boosts at process start and settles to a sustained clock under
-    // load. Averaging across that mixes two different machine states. The last
-    // third is the settled one, and it is the only part that describes steady
-    // operation rather than the transient into it.
+    // This used to say the samples ramp and then flatten, and to report the last
+    // third as the settled state. Both halves of that were wrong, and measuring
+    // it said so. Means of the three thirds, one run: CPU 195.8, 216.0, 237.5 ms.
+    // It does not flatten -- it is still climbing at the end -- and it climbs
+    // rather than falls, so the last third is the slowest window, not the
+    // settled one. Three runs back to back reproduced the direction every time.
+    //
+    // The drift is CPU-only. Across seven runs the CPU third-to-third drift was
+    // positive every time, +1.5% to +21%. The bridge, once the machine is given
+    // idle time, drifts +11.6, -7.4, +2.4, -5.0% over four runs -- the sign
+    // varies, so within a run the bridge has no trend and that spread is noise.
+    //
+    // What the bridge does have is a second effect, visible only across runs and
+    // invisible to any single one. Last-third means over three consecutive runs
+    // with no gap: 6.16, 13.48, 20.97 ms. Ninety seconds of idle between the same
+    // three: 5.74, 5.91, 7.51 ms. It degrades under back-to-back load and recovers
+    // when left alone, so the earlier observation of a 4.9-25.7 ms spread was not
+    // a noisy run, it was a run that came third. The first version of this code
+    // told the reader to run it several times, which is how that state is reached.
+    //
+    // Both windows are printed rather than one. The first is a burst on a cold
+    // machine, the last a sustained load on a warm one, and which a caller wants
+    // depends on their workload. The drift between them is printed too, because
+    // it is the part a single number hides.
     let tail = reps / 3;
     let (tcmin, tcmax, tcspread) = stats(&cpu[reps - tail..]);
     let (tgmin, tgmax, tgspread) = stats(&gpu[reps - tail..]);
 
+    let (hcmin, hcmax, hcspread) = stats(&cpu[..tail]);
+    let (hgmin, hgmax, hgspread) = stats(&gpu[..tail]);
+
     println!();
-    println!("  last {tail} samples only");
+    println!("  first {tail} samples -- burst, cold");
+    println!("    Tensor  {hcmin:.3} – {hcmax:.3} ms   {hcspread:.1}%");
+    println!("    bridge  {hgmin:.3} – {hgmax:.3} ms   {hgspread:.1}%");
+    println!();
+    println!("  last {tail} samples -- sustained, hot");
     println!("    Tensor  {tcmin:.3} – {tcmax:.3} ms   {tcspread:.1}%");
     println!("    bridge  {tgmin:.3} – {tgmax:.3} ms   {tgspread:.1}%");
 
-    let mut plateau: Vec<f64> = cpu[reps - tail..]
-        .iter()
-        .zip(&gpu[reps - tail..])
-        .map(|(c, g)| c / g)
-        .collect();
-    plateau.sort_by(f64::total_cmp);
+    let median = |lo: usize, hi: usize| -> f64 {
+        let mut r: Vec<f64> = cpu[lo..hi]
+            .iter()
+            .zip(&gpu[lo..hi])
+            .map(|(c, g)| c / g)
+            .collect();
+        r.sort_by(f64::total_cmp);
+        r[r.len() / 2]
+    };
+    let head_ratio = median(0, tail);
+    let tail_ratio = median(reps - tail, reps);
+    let mean = |v: &[f64]| v.iter().sum::<f64>() / v.len() as f64;
+    let cpu_drift = 100.0 * (mean(&cpu[reps - tail..]) / mean(&cpu[..tail]) - 1.0);
+    let gpu_drift = 100.0 * (mean(&gpu[reps - tail..]) / mean(&gpu[..tail]) - 1.0);
+
     println!();
-    println!("  plateau ratio  {:.2}x", plateau[plateau.len() / 2]);
+    println!("  ratio   cold {head_ratio:.2}x   hot {tail_ratio:.2}x");
+    println!("  drift   Tensor {cpu_drift:+.1}%   bridge {gpu_drift:+.1}%");
     println!();
-    println!("  Run this several times. If the plateau ratio agrees across runs");
-    println!("  while the full-sample ratio does not, the variance was the ramp");
-    println!("  and discarding it is the fix. If both disagree, it is not.");
+    println!("  Tensor drift ran positive in 7 of 7 runs, so the CPU is slower");
+    println!("  late in a run and neither window is a plateau. Bridge drift");
+    println!("  changed sign across runs, so treat it as noise, not a trend.");
+    println!();
+    println!("  Leave 90 s idle before rerunning. Three back-to-back runs took");
+    println!("  the bridge from 6.16 to 20.97 ms in this window; the same three");
+    println!("  spaced out stayed near 6. Rerunning immediately measures that,");
+    println!("  not the kernel.");
 }
 
 fn main() {
