@@ -52,6 +52,17 @@ fn actual_test_count() -> usize {
     total
 }
 
+/// Count the compute entry points in the shader.
+///
+/// Added because the documented figure was wrong. It read 18 against an actual
+/// 20, having been updated by adding four to a remembered fourteen when the
+/// number at the time was sixteen — arithmetic on a count instead of a count.
+/// Unlike the test and mutant totals beside it, nothing had ever checked it.
+fn actual_kernel_count() -> usize {
+    let src = fs::read_to_string(crate_root().join("src/shaders.wgsl")).expect("shaders.wgsl");
+    src.lines().filter(|l| l.starts_with("@compute")).count()
+}
+
 /// Count the mutants declared in the harness.
 fn actual_mutant_count() -> usize {
     let src = fs::read_to_string(crate_root().join("mutants.sh")).expect("mutants.sh is missing");
@@ -88,6 +99,33 @@ fn the_documented_test_count_matches_the_tests_that_exist() {
         "FEATURES.md claims {claimed} tests; {actual} exist. Update the summary, \
          or the document is wrong in exactly the way this repository spends its \
          README warning about."
+    );
+}
+
+/// The documented kernel count must match the shader.
+#[test]
+fn the_documented_kernel_count_matches_the_shader() {
+    let doc = features_md();
+    let actual = actual_kernel_count();
+
+    let claimed = doc
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .windows(2)
+        .find_map(|w| {
+            if w[1] == "WGSL" {
+                w[0].parse::<usize>().ok()
+            } else {
+                None
+            }
+        })
+        .expect("FEATURES.md states no kernel count");
+
+    assert_eq!(
+        claimed, actual,
+        "FEATURES.md claims {claimed} WGSL kernels; {actual} @compute entry \
+         points exist. This one drifted by being incremented rather than \
+         counted, which is why it is now counted."
     );
 }
 
