@@ -3,6 +3,15 @@
 //! Run:
 //!   cargo run -p aether-gpu --example train_optimizers --release
 //!
+//! It takes about 73 seconds on an RTX 4060 -- two runs, 72.5 s and 74.2 s. The
+//! learning-rate sweeps, the fold comparison and the three Adam-resume sweeps
+//! each train several networks, and the resume sweeps train two per row. The
+//! commit that added the last of them put "about a hundred and fifty seconds" in
+//! its message, which was a guess written beside a measurement that said
+//! otherwise. Recorded here because a reader deciding whether to run this wants
+//! the number, and because the wrong one is in the history and cannot be edited
+//! out of it.
+//!
 //! # Why the learning-rate sweep
 //!
 //! Adam and SGD have different natural step sizes -- Adam normalises by the
