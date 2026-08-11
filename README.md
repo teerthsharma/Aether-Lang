@@ -122,7 +122,7 @@ The pitch is one sentence: *some loops should terminate when the shape of the da
 - That the language is production-ready. It is a research language. It has a seal emoji as a keyword.
 - GPU acceleration of the language or the topology engine. There is a real GPU backend — `aether-gpu`, 102 tests, measured on an RTX 4060 — and **nothing in `aether-core` or `aether-lang` calls it**. The cost and precision of both candidate integrations are measured; the integrations are not made. An earlier version of this line said there was no GPU at all, which was true of the `wgpu` dependency it described and is no longer true of the tree.
 
-Grab a coffee. There are 34,456 lines of Rust in `crates/` across 78 files and 11,637 lines of Lean in `Aether/` below — raw line counts including tests, comments and blanks, each reproduced by the command in the claims table — and roughly a third of this document is about the ways I was wrong.
+Grab a coffee. There are 36,305 lines of Rust in `crates/` across 78 files and 11,637 lines of Lean in `Aether/` below — raw line counts including tests, comments and blanks, each reproduced by the command in the claims table — and roughly a third of this document is about the ways I was wrong.
 
 (Those two figures replaced 21,262 and 11,652, which appeared in this README until a rewrite re-counted them. Neither was reproducible. If a document is going to insist that every number carries a command, it has to survive that rule being pointed at itself. The command is in [Reproducing Every Number](#reproducing-every-number-in-this-document).)
 
@@ -252,7 +252,7 @@ A third status was needed once the GPU backend arrived. 🖥️ **Hardware-gated
   cargo build -p aether-kernel --target x86_64-unknown-none        ok
   cargo build -p aether-core  --target thumbv7m-none-eabi          ok
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-  Rust lines (crates/)                                        34,456
+  Rust lines (crates/)                                        36,305
   Lean lines (Aether/)              11,637   theorems 48   sorry 0
   Test suites gated in CI                                          7
   Claims withdrawn during audit                                    6
@@ -2448,7 +2448,7 @@ The guards live in `crates/aether-gpu/tests/features_doc.rs`.
 | `no_std` on Cortex-M3 | [Status](#honest-status-dashboard) | `cargo build -p aether-core --no-default-features --features no_std -Z build-std=core,alloc --target thumbv7m-none-eabi` |
 | Formatting clean | [Status](#honest-status-dashboard) | `cargo fmt --all -- --check` |
 | Clippy clean | [Status](#honest-status-dashboard) | `cargo clippy --workspace --exclude aether-kernel --all-targets -- -D warnings -D clippy::correctness -D clippy::suspicious -A clippy::style -A clippy::complexity -A clippy::perf` |
-| 🔒 34,456 Rust lines | [Status](#honest-status-dashboard) | `(Get-ChildItem crates -Recurse -Filter *.rs \| Get-Content).Count` |
+| 🔒 36,305 Rust lines | [Status](#honest-status-dashboard) | `(Get-ChildItem crates -Recurse -Filter *.rs \| Get-Content).Count` |
 | `nalgebra` has zero call sites | [What We Got Wrong §6](#6-nalgebra-a-second-phantom-dependency) | `grep -rn nalgebra crates/ --include=*.rs` |
 | 102 GPU tests, 76 hardware-gated, RTX 4060 / Vulkan | [Status](#honest-status-dashboard) | `cargo test -p aether-gpu --features gpu --release` |
 | 🔒 20 WGSL kernels | [FEATURES.md](crates/aether-gpu/FEATURES.md) | `grep -c '^@compute' crates/aether-gpu/src/shaders.wgsl` |
