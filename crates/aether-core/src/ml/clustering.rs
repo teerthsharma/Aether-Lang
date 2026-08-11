@@ -154,8 +154,15 @@ impl<const D: usize> KMeans<D> {
         // Simple pseudo-random based on seed
         let mut rng = self.seed;
 
-        // First centroid: random point
-        let first_idx = (rng as usize) % n;
+        // First centroid: random point.
+        //
+        // Advanced once before use, and read from the high bits. Taking the raw
+        // seed made the first centroid `seed % n`, so seeds differing by a
+        // multiple of n picked the same starting point; taking `seed >> 33`
+        // without advancing would be worse, since it is 0 for any seed below
+        // 2^33 and every small seed would start at the same point.
+        rng = rng.wrapping_mul(6364136223846793005).wrapping_add(1);
+        let first_idx = ((rng >> 33) as usize) % n;
         centroids[0] = data[first_idx];
 
         for c in 1..k {
@@ -174,7 +181,12 @@ impl<const D: usize> KMeans<D> {
 
                 // Probability proportional to D^2
                 rng = rng.wrapping_mul(6364136223846793005).wrapping_add(1);
-                let weighted_dist = min_dist * ((rng % 1000) as f64 / 1000.0 + 0.5);
+                // High bits. A power-of-two-modulus LCG has period 2^(k+1) in
+                // bit k, and 1000 = 8 * 125, so `rng % 1000` inherits a period-8
+                // cycle: the draws run 3 0 1 6 7 4 5 2 mod 8 and then repeat
+                // exactly. The weight is meant to randomise the D^2 selection,
+                // and a third of its bits were following a fixed pattern.
+                let weighted_dist = min_dist * (((rng >> 33) % 1000) as f64 / 1000.0 + 0.5);
 
                 if weighted_dist > max_dist {
                     max_dist = weighted_dist;
