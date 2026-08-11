@@ -182,9 +182,33 @@ for entry in "${mutants[@]}"; do
             # `N passed; M failed` is absent when the mutant does not compile,
             # which is a real distinction: a build failure is caught by the type
             # system rather than by any assertion.
+            #
+            # It is also absent when cargo did not run at all, and those two must
+            # not be conflated. Treating every unparseable output as a build
+            # failure means a broken invocation marks every mutant caught and the
+            # run reports "0 escaping" having measured nothing — the harness
+            # announcing perfect coverage precisely because it did no work. A
+            # compile failure says so in its output; nothing at all does not.
             counts="$(printf '%s' "$out" | grep -oE '[0-9]+ passed; [0-9]+ failed' | head -1)"
             if [ -z "$counts" ]; then
-                printf ' %-12s' "build"
+                # Specifically a rustc diagnostic or a build failure, not any line
+                # beginning with "error". A mistyped flag makes cargo print
+                # `error: unexpected argument`, which is a fault in this script
+                # and not a mutant the type system rejected — matching it would
+                # reinstate the conflation this branch exists to remove, with the
+                # bad invocation counted as coverage.
+                if printf '%s' "$out" | grep -qE 'error\[E[0-9]+\]|error: could not compile'; then
+                    printf ' %-12s' "build"
+                else
+                    printf '\n'
+                    echo "cargo produced neither a test result nor a compile error for" >&2
+                    echo "  mutant: $name" >&2
+                    echo "  suite:  $suite" >&2
+                    echo "Counting this as caught would mark every mutant caught for the" >&2
+                    echo "same reason and report a clean sweep of nothing." >&2
+                    printf '%s\n' "$out" >&2
+                    exit 97
+                fi
             else
                 passed="${counts%% passed;*}"
                 failed="${counts##*; }"
