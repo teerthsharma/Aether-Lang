@@ -279,6 +279,34 @@ fn find(parent: &mut [usize], x: usize) -> usize {
 
 /// Build a causal CSR schedule from sink blocks, a local window, and the
 /// highest-salience key blocks.
+///
+/// # The salience ranking is measurably worse than choosing at random
+///
+/// At an identical per-row budget this schedule recovers *less* attention mass
+/// than selecting blocks uniformly at random, and the deficit widens the more
+/// budget the topology is given — reaching a placement of −109% at
+/// `topk_topology_blocks = 32`, where it recovers 0.7446 against random's 0.8643.
+/// The same holds on i.i.d. keys, which controls for a fixture that merely
+/// rewards locality. Training a model through the kernel does not close the gap.
+///
+/// The mechanism is not mysterious. [`block_salience`] scores a block by its H0
+/// death time, which measures how *isolated* it is, and attention mass
+/// concentrates where a key resembles the query. Ranking by isolation and ranking
+/// by attention mass are anti-correlated by construction, which is why
+/// [`inverted_topology_block_schedule`] — the same selection with the ranking
+/// reversed — beats random by a margin that grows with budget.
+///
+/// Reproduce with `cargo run -p aether-gpu --example selector_ablation --release`;
+/// the tables are in `crates/aether-gpu/FEATURES.md`.
+///
+/// # Why this function still ranks the way it does
+///
+/// Flipping the ranking changes what the method *is*, and that belongs to whoever
+/// is making the claim rather than to the ablation that found it. The measurement
+/// is reported here instead of acted on, because a caller choosing between the
+/// two should see the evidence at the point of choosing — the finding was
+/// previously recorded only in `FEATURES.md` and the README, which is everywhere
+/// except where the decision is made.
 pub fn topology_block_schedule(
     keys: &[f64],
     seq: usize,
