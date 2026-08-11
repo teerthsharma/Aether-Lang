@@ -289,4 +289,46 @@ mod tests {
             "shuffle=true returned the samples in input order"
         );
     }
+
+    /// The shuffle must draw from the generator's high bits.
+    ///
+    /// `iter` seeds a literal, so there is one permutation per dataset size and
+    /// no distribution to sample — which is why this varies `n` instead. The
+    /// number of draws is `n - 1`, so consecutive sizes differ by one step of the
+    /// generator, and a defect in *which bits* the modulo sees shows up as
+    /// structure across `n`.
+    ///
+    /// Reading `rng as usize` takes the low bits, and a power-of-two-modulus LCG
+    /// has period 2^(k+1) in bit k — bit 0 alternates. The last swap of a
+    /// Fisher-Yates has bound 2, so under that defect it is decided by an
+    /// alternating bit, and the count of fixed points alternates with it: for
+    /// n = 5..21 it reads 0 1 0 3 0 1 0 2 0 1 0 2 0 2 0, a zero at every other
+    /// size. Drawing from `rng >> 33` produces no such pattern.
+    ///
+    /// The statistic is the number of adjacent sizes that *both* leave a point
+    /// fixed. Alternating zeros make that nearly impossible; over n = 2..25 the
+    /// low-bit version scores 3 and the high-bit version 15. The threshold is 8,
+    /// far from both — this separates two regimes rather than pinning a
+    /// permutation, so it survives a change of seed while still failing if the
+    /// shift is dropped.
+    #[test]
+    fn the_shuffle_draws_from_the_high_bits() {
+        let fixed_points = |n: usize| -> usize {
+            let (x, y) = labelled(n);
+            let loader = DataLoader::new(x, y, n, true);
+            drain(&loader)
+                .iter()
+                .enumerate()
+                .filter(|(slot, (feature, _))| *feature as usize == *slot)
+                .count()
+        };
+
+        let counts: Vec<usize> = (2..26).map(fixed_points).collect();
+        let adjacent = counts.windows(2).filter(|w| w[0] > 0 && w[1] > 0).count();
+
+        assert!(
+            adjacent >= 8,
+            "only {adjacent} adjacent dataset sizes both leave a point fixed,              against 15 when the shuffle reads `rng >> 33` and 3 when it reads              `rng as usize`. The low bits of this generator alternate, so a              modulo that sees them makes the last swap follow a pattern rather              than a draw. Counts were: {counts:?}"
+        );
+    }
 }
