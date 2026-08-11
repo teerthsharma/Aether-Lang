@@ -13,7 +13,7 @@
 //! These tests need no GPU: they read files.
 
 use std::fs;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 fn crate_root() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
@@ -50,6 +50,85 @@ fn actual_test_count() -> usize {
     }
 
     total
+}
+
+/// Total lines under `dir` in files with the given extension, skipping build
+/// output.
+///
+/// `target` and `.lake` are skipped so the figure does not depend on whether the
+/// tree has been built. Neither currently contains a source file of either
+/// extension — `crates/` holds no nested `target` at all — so this changes no
+/// count today and stops one changing under someone later.
+fn count_lines(dir: &Path, ext: &str) -> usize {
+    let mut total = 0;
+
+    let entries = match fs::read_dir(dir) {
+        Ok(e) => e,
+        Err(e) => panic!("cannot read {}: {e}", dir.display()),
+    };
+
+    for entry in entries {
+        let path = entry.expect("readable entry").path();
+        let name = path.file_name().and_then(|n| n.to_str()).unwrap_or("");
+
+        if path.is_dir() {
+            if name == "target" || name == ".lake" {
+                continue;
+            }
+            total += count_lines(&path, ext);
+        } else if path.extension().and_then(|e| e.to_str()) == Some(ext) {
+            total += fs::read_to_string(&path)
+                .unwrap_or_else(|e| panic!("cannot read {}: {e}", path.display()))
+                .lines()
+                .count();
+        }
+    }
+
+    total
+}
+
+/// Every count the README states in the form `N Rust lines` or `N lines of Rust`,
+/// as the parsed numbers.
+///
+/// Both phrasings are in use and binding only one leaves the other free to rot,
+/// which is the failure this guards: the figure was corrected in one place and
+/// left stale in two others.
+///
+/// The trailing `lines` is required rather than matching on the subject alone.
+/// Without it the sentence "Windows 11, Rust nightly" parses as a claim of eleven
+/// Rust lines, because the comma strip that makes `30,352` a number also makes
+/// `11,` one. A guard that reads version strings as measurements fails for
+/// reasons that have nothing to do with what it guards.
+fn readme_counts(doc: &str, subject: &str) -> Vec<usize> {
+    let parse = |s: &str| s.replace(',', "").parse::<usize>().ok();
+    let mut found = Vec::new();
+
+    // Tokenised per line, not across the whole document. The status dashboard
+    // puts its numbers in a right-aligned column:
+    //
+    //     Rust lines (crates/)    34,456
+    //     Lean lines (Aether/)    11,637
+    //
+    // so a document-wide token stream reads "34,456 Lean lines" across the line
+    // break and binds the Rust figure to the Lean label. Every phrase this looks
+    // for is written on one line, so refusing to match across one costs nothing
+    // and removes a whole class of coincidence.
+    for line in doc.lines() {
+        let words: Vec<&str> = line.split_whitespace().collect();
+
+        for w in words.windows(3) {
+            if w[1] == subject && w[2].starts_with("lines") {
+                found.extend(parse(w[0]));
+            }
+        }
+        for w in words.windows(4) {
+            if w[1] == "lines" && w[2] == "of" && w[3] == subject {
+                found.extend(parse(w[0]));
+            }
+        }
+    }
+
+    found
 }
 
 /// Count the compute entry points in the shader.
@@ -212,6 +291,60 @@ fn every_kernel_count_in_the_readme_matches_the_shader() {
          nothing — the phrase it binds has been reworded and the guard needs \
          following"
     );
+}
+
+/// The README's line-count claims must stay within 5% of the tree they describe.
+///
+/// These are the only numbers on the front page with a documented reproduction
+/// command and nothing checking them, and they rotted the furthest: the Rust
+/// figure read 24,180 against an actual 30,352, off by 6,172 lines — 20% — while
+/// the Lean figure beside it was still exact. Both were audited by hand, which is
+/// how they got that far apart in the first place.
+///
+/// **Bound to a tolerance rather than to equality, deliberately.** Every other
+/// guard in this file asserts a count exactly, and that is right for kernels,
+/// mutants and tests, which change a handful of times a year. A line count
+/// changes on every commit that adds a line. An exact assertion on one would fail
+/// on almost every change, and a test that fails constantly is fixed by pasting a
+/// new number in without looking or by deleting the test — both of which leave
+/// the document less trustworthy than no guard at all.
+///
+/// 5% of the current figure is about 1,500 lines: wide enough that ordinary work
+/// does not trip it, and narrow enough that the drift that prompted it would have
+/// been caught roughly four times over. The tolerance is a limit on how stale the
+/// claim may get, not a claim that the number is approximate — the exact figure
+/// is still stated and still reproduced by the command in the claims table.
+#[test]
+fn the_readme_line_counts_have_not_rotted() {
+    let repo = crate_root().join("../../");
+    let doc = fs::read_to_string(repo.join("README.md")).expect("README.md");
+
+    for (subject, dir, ext) in [
+        ("Rust", repo.join("crates"), "rs"),
+        ("Lean", repo.join("Aether"), "lean"),
+    ] {
+        let actual = count_lines(&dir, ext);
+        let claims = readme_counts(&doc, subject);
+
+        assert!(
+            !claims.is_empty(),
+            "README.md states no {subject} line count, so this test now passes by \
+             checking nothing — the phrases it binds have been reworded and the \
+             guard needs following"
+        );
+
+        let tolerance = actual / 20;
+        for claimed in claims {
+            let drift = claimed.abs_diff(actual);
+            assert!(
+                drift <= tolerance,
+                "README.md claims {claimed} {subject} lines; {actual} exist, a \
+                 drift of {drift} against a {tolerance}-line tolerance. Re-run the \
+                 command in the claims table and update every occurrence, not the \
+                 first one found."
+            );
+        }
+    }
 }
 
 /// Every command the provenance table offers must name a binary or test target

@@ -13,8 +13,8 @@
   <a href=".github/workflows/ci.yml"><img src="https://img.shields.io/github/actions/workflow/status/teerthsharma/Aether-Lang/ci.yml?branch=master&label=CI&style=flat-square" alt="CI"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-00aaff?style=flat-square" alt="License: MIT"></a>
   <a href="rust-toolchain.toml"><img src="https://img.shields.io/badge/rust-nightly-orange?style=flat-square&logo=rust" alt="Rust nightly"></a>
-  <a href="#results"><img src="https://img.shields.io/badge/tests-223%20passing-brightgreen?style=flat-square" alt="223 tests"></a>
-  <a href="#mutation-testing-or-how-i-learned-to-stop-trusting-green-checkmarks"><img src="https://img.shields.io/badge/mutants-8%20injected-purple?style=flat-square" alt="8 mutants"></a>
+  <a href="#results"><img src="https://img.shields.io/badge/tests-214%20passing%2C%2072%20ignored-brightgreen?style=flat-square" alt="214 passing, 72 ignored"></a>
+  <a href="#mutation-testing-or-how-i-learned-to-stop-trusting-green-checkmarks"><img src="https://img.shields.io/badge/mutants-50%20injected-purple?style=flat-square" alt="50 mutants"></a>
   <a href="#what-we-got-wrong"><img src="https://img.shields.io/badge/claims%20killed-6-red?style=flat-square" alt="6 claims killed"></a>
   <a href="docs/reference/status.md"><img src="https://img.shields.io/badge/claim%20ledger-live-blue?style=flat-square" alt="Claim ledger"></a>
 </p>
@@ -120,9 +120,9 @@ The pitch is one sentence: *some loops should terminate when the shape of the da
 
 - Brevity. You saw the table of contents.
 - That the language is production-ready. It is a research language. It has a seal emoji as a keyword.
-- GPU acceleration of the language or the topology engine. There is a real GPU backend — `aether-gpu`, 92 tests, measured on an RTX 4060 — and **nothing in `aether-core` or `aether-lang` calls it**. The cost and precision of both candidate integrations are measured; the integrations are not made. An earlier version of this line said there was no GPU at all, which was true of the `wgpu` dependency it described and is no longer true of the tree.
+- GPU acceleration of the language or the topology engine. There is a real GPU backend — `aether-gpu`, 96 tests, measured on an RTX 4060 — and **nothing in `aether-core` or `aether-lang` calls it**. The cost and precision of both candidate integrations are measured; the integrations are not made. An earlier version of this line said there was no GPU at all, which was true of the `wgpu` dependency it described and is no longer true of the tree.
 
-Grab a coffee. There are 24,180 lines of Rust and 10,474 lines of Lean below, and roughly a third of this document is about the ways I was wrong.
+Grab a coffee. There are 34,456 lines of Rust in `crates/` across 78 files and 11,637 lines of Lean in `Aether/` below — raw line counts including tests, comments and blanks, each reproduced by the command in the claims table — and roughly a third of this document is about the ways I was wrong.
 
 (Those two figures replaced 21,262 and 11,652, which appeared in this README until a rewrite re-counted them. Neither was reproducible. If a document is going to insist that every number carries a command, it has to survive that rule being pointed at itself. The command is in [Reproducing Every Number](#reproducing-every-number-in-this-document).)
 
@@ -216,7 +216,7 @@ All fixed; receipts in [PR #177](https://github.com/teerthsharma/Aether-Lang/pul
 
 The rule: a row is **Active** only if a command in [`.github/workflows/ci.yml`](.github/workflows/ci.yml) produces its evidence. Test count in a file is not evidence if the file never runs.
 
-A third status was needed once the GPU backend arrived. 🖥️ **Hardware-gated** means the tests need an adapter no CI runner has. They were briefly worse than useless: a test that returns early on a missing adapter *passes*, so `cargo test --workspace` reported roughly forty GPU tests green while executing none of them — the exact green checkmark this document spends a section warning about, built by its own author. They are now `#[ignore]`d behind an off-by-default `gpu` feature, so the same run prints `0 passed; 38 ignored`. CI still compiles them with `cargo build -p aether-gpu --tests --features gpu`, so a broken one is caught rather than hidden behind the ignore. Asking for the hardware tests and finding no adapter now fails rather than skipping, so the feature flag is the only switch and cannot be half-honoured. The honest reading of a hardware-gated row is "verified on one developer machine", which is weaker than every other Active row here.
+A third status was needed once the GPU backend arrived. 🖥️ **Hardware-gated** means the tests need an adapter no CI runner has. They were briefly worse than useless: a test that returns early on a missing adapter *passes*, so `cargo test --workspace` reported roughly forty GPU tests green while executing none of them — the exact green checkmark this document spends a section warning about, built by its own author. They are now `#[ignore]`d behind an off-by-default `gpu` feature, so the same run prints `23 ignored` across the hardware suites. CI still compiles them with `cargo build -p aether-gpu --tests --features gpu`, so a broken one is caught rather than hidden behind the ignore. Asking for the hardware tests and finding no adapter now fails rather than skipping, so the feature flag is the only switch and cannot be half-honoured. The honest reading of a hardware-gated row is "verified on one developer machine", which is weaker than every other Active row here.
 
 | Subsystem | Status | Evidence |
 |---|---|---|
@@ -236,8 +236,8 @@ A third status was needed once the GPU backend arrived. 🖥️ **Hardware-gated
 | Sparse scheduler | ⛔ **Ungated** | 4 tests exist and **never execute** — `no_std` bin, no test harness |
 | Kernel *boots* | ⛔ Ungated | compiles ≠ boots; needs QEMU logs |
 | External TDA parity | ⛔ Ungated | no ripser/GUDHI fixture comparison |
-| Lean 4 formalization | ⛔ Ungated | 10,474 lines, 48 theorems, **no `lake build` in CI** |
-| GPU compute backend (`aether-gpu`) | 🖥️ **Hardware-gated** | **92 tests**, RTX 4060 / Vulkan. `cargo test -p aether-gpu --features gpu --release`. In CI they report as **ignored**, not passed |
+| Lean 4 formalization | ⛔ Ungated | 11,637 lines, 48 theorems, **no `lake build` in CI** |
+| GPU compute backend (`aether-gpu`) | 🖥️ **Hardware-gated** | **96 tests**, RTX 4060 / Vulkan. `cargo test -p aether-gpu --features gpu --release`. In CI they report as **ignored**, not passed |
 | GPU used by `aether-core` | ⛔ **Ungated** | nothing routes through it; cost and precision measured, integration not made |
 | Attention backward pass | ❌ Does not exist | forward only; no gradcheck possible |
 | Wall-clock speedup claims | ❌ Withdrawn | see [What We Got Wrong](#what-we-got-wrong) |
@@ -252,8 +252,8 @@ A third status was needed once the GPU backend arrived. 🖥️ **Hardware-gated
   cargo build -p aether-kernel --target x86_64-unknown-none        ok
   cargo build -p aether-core  --target thumbv7m-none-eabi          ok
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-  Rust lines (crates/)                                        24,180
-  Lean lines (Aether/)              10,474   theorems 48   sorry 0
+  Rust lines (crates/)                                        34,456
+  Lean lines (Aether/)              11,637   theorems 48   sorry 0
   Test suites gated in CI                                          7
   Claims withdrawn during audit                                    6
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -1512,11 +1512,11 @@ Ranked by value, highest first — this ranking is the honest one, not the conve
 
 **3. QEMU boot logs.** Move the kernel from "compiles" to "boots" with evidence.
 
-**4. Gate the Lean tree.** 10,474 lines, 48 theorems, zero `sorry`, and no `lake build` in CI. Either gate it or cut it; the current state is neither.
+**4. Gate the Lean tree.** 11,637 lines, 48 theorems, zero `sorry`, and no `lake build` in CI. Either gate it or cut it; the current state is neither.
 
 **5. Delete `aegis-core` and `aegis-cli`.** Mechanical, uncontroversial, and removes the most embarrassing thing in the tree.
 
-**6. Wire `Tensor::matmul` to `aether-gpu`, or decide not to.** The cost is measured (crossover n=128, 38x at n=512 with conversion) and the precision is measured (5e-7 relative, fine for training, not for 1e-9 assertions). What remains is the semantic decision about whether `ml::Tensor` may drop to f32.
+**6. Wire `Tensor::matmul` to `aether-gpu`, or decide not to.** The cost is measured (crossover n=128 with conversion counted; the magnitude above it is not reproducible on this machine and is not quoted) and the precision is measured (5e-7 relative, fine for training, not for 1e-9 assertions). What remains is the semantic decision about whether `ml::Tensor` may drop to f32.
 
 **7. A gradcheck for `ml/autograd.rs`.** An autograd with no finite-difference verification is an unverified claim.
 
@@ -1965,7 +1965,7 @@ With the dense fallback, the unstructured placement printed **+7.614**. Meaningl
 
 **Keeping a guard that provably never fires.** `boundary_indices` checks `idx < simplex_idx` even though `every_face_is_present_and_precedes_its_coface` proves it always holds. Free, and a malformed complex degrades instead of lying.
 
-**10,474 lines of Lean.** `Aether/` contains a Lean 4 formalization with 48 theorems and zero `sorry`. It is also **not built by CI**, and 8,281 of those lines (`Lexer`, `Parser`, `Pipeline`, `Static`, `VM`) hold **exactly one theorem between them** — a second implementation of the language in Lean, not proofs about the first. Either gate it or cut it. It is in the ledger as ungated, which is the honest interim state.
+**11,637 lines of Lean.** `Aether/` contains a Lean 4 formalization with 48 theorems and zero `sorry`. It is also **not built by CI**, and 8,281 of those lines (`Lexer`, `Parser`, `Pipeline`, `Static`, `VM`) hold **exactly one theorem between them** — a second implementation of the language in Lean, not proofs about the first. Either gate it or cut it. It is in the ledger as ungated, which is the honest interim state.
 
 ---
 
@@ -1990,7 +1990,7 @@ So the same persistence code that runs in the CLI runs in `aether-kernel` on bar
 It **compiles** for `x86_64-unknown-none`. Booting is not tested. Different claims.
 
 **Is there GPU acceleration?**
-There is a GPU **backend** — `aether-gpu`, 20 WGSL kernels, resident tensors, 92 tests, an RTX 4060 over Vulkan. There is no GPU **acceleration of this project**, because nothing in `aether-core` or `aether-lang` calls it. Both integrations are measured and neither is made: `Tensor::matmul` pays above n=128 and reaches 38× at n=512 with conversion counted; `pairwise_sqdist` never pays, because the persistence reduction is CPU-side and sequential so the matrix has to come back. Wiring the first one in means deciding whether `ml::Tensor` may drop to f32, which is a semantic change no benchmark authorises.
+There is a GPU **backend** — `aether-gpu`, 20 WGSL kernels, resident tensors, 96 tests, an RTX 4060 over Vulkan. There is no GPU **acceleration of this project**, because nothing in `aether-core` or `aether-lang` calls it. Both integrations are measured and neither is made: `Tensor::matmul` pays above n=128, and *how much* it pays is not measurable on this machine — the same ratio has been observed anywhere from 10× to 63× at n=512, and printing the individual timings showed why: across six runs the CPU term moved 1.6× while the GPU term moved 5.2×, so the ratio inherits a swing that no amount of repetition or interleaving removes. An earlier version of this line quoted 38× as though it were a property of the code. The crossover is the durable claim, because a threshold tolerates noise that a magnitude does not. `pairwise_sqdist` never pays, because the persistence reduction is CPU-side and sequential so the matrix has to come back. Wiring the first one in means deciding whether `ml::Tensor` may drop to f32, which is a semantic change no benchmark authorises.
 
 This answer used to read "No", and the `wgpu`/`pollster`/`bytemuck` entries it referred to — in `aether-lang`'s default feature set with zero call sites — have since been deleted. The current backend is a separate crate on a current wgpu.
 
@@ -2031,7 +2031,7 @@ Because a gate that fails on first contact gets switched off within a week, and 
 Because `h0_matches_an_independent_union_find` compares the engine's H₀ **against** a union-find implementation. Making the engine use union-find turns the test tautological. H₀ at n=4,000 takes 335 s and that is the price of keeping a real cross-check. Speed is not worth deleting the check that says the answer is right.
 
 **Is the Lean formalization proving things about the Rust?**
-No, and this is the sharpest thing to be clear about. `Aether/` is 10,474 lines with 48 theorems and zero `sorry`. But 47 of those 48 live in `Core.lean` alone, and the **8,281 lines** of `Lexer`, `Parser`, `Pipeline`, `Static` and `VM` hold **exactly one theorem between them**. That is a second implementation of the language written in Lean, not proofs about the first. There is also no `lake build` in CI, so none of it is verified to still compile. Either gate it or cut it.
+No, and this is the sharpest thing to be clear about. `Aether/` is 11,637 lines with 48 theorems and zero `sorry`. But 47 of those 48 live in `Core.lean` alone, and the **8,281 lines** of `Lexer`, `Parser`, `Pipeline`, `Static` and `VM` hold **exactly one theorem between them**. That is a second implementation of the language written in Lean, not proofs about the first. There is also no `lake build` in CI, so none of it is verified to still compile. Either gate it or cut it.
 
 **How fast is this compared to ripser?**
 Unmeasured, and [deliberately absent from the prior-art table](#prior-art). The honest inference from the measured ceiling — H₁ at n=300 in 131 s — is that it is **substantially slower**, since ripser routinely handles clouds orders of magnitude larger. That is an inference, not a benchmark, and it is phrased as one.
@@ -2171,7 +2171,7 @@ Depending on why you are here, different files are the point.
 
 ## The Lean Formalization
 
-`Aether/`, 10,474 lines of Lean 4. **Not built by CI**, which is the first and most important thing to say about it.
+`Aether/`, 11,637 lines of Lean 4. **Not built by CI**, which is the first and most important thing to say about it.
 
 ### What is actually there
 
@@ -2183,7 +2183,7 @@ Depending on why you are here, different files are the point.
 | `Parser.lean` | 1,569 | 0 | 0 | A parser in Lean |
 | `Pipeline.lean` | 1,442 | 0 | 0 | A pipeline in Lean |
 | `Lexer.lean` | 853 | 0 | 0 | A lexer in Lean |
-| **Total** | **10,474** | **48** | **0** | |
+| **Total** | **11,637** | **48** | **0** | |
 
 The shape of that table is the honest summary: **47 of 48 theorems live in one file.** The other 8,281 lines hold exactly one theorem between them. They are a **second implementation** of the language — lexer, parser, static checker, VM — written in Lean, not proofs about the Rust one.
 
@@ -2430,12 +2430,12 @@ The evidence policy in one rule: **a number without a reproduction command does 
 | `no_std` on Cortex-M3 | [Status](#honest-status-dashboard) | `cargo build -p aether-core --no-default-features --features no_std -Z build-std=core,alloc --target thumbv7m-none-eabi` |
 | Formatting clean | [Status](#honest-status-dashboard) | `cargo fmt --all -- --check` |
 | Clippy clean | [Status](#honest-status-dashboard) | `cargo clippy --workspace --exclude aether-kernel --all-targets -- -D warnings -D clippy::correctness -D clippy::suspicious -A clippy::style -A clippy::complexity -A clippy::perf` |
-| 24,180 Rust lines | [Status](#honest-status-dashboard) | `Get-ChildItem crates -Recurse -Filter *.rs \| Get-Content \| Measure-Object -Line` |
+| 34,456 Rust lines | [Status](#honest-status-dashboard) | `(Get-ChildItem crates -Recurse -Filter *.rs \| Get-Content).Count` |
 | `nalgebra` has zero call sites | [What We Got Wrong §6](#6-nalgebra-a-second-phantom-dependency) | `grep -rn nalgebra crates/ --include=*.rs` |
 | 60 GPU tests, RTX 4060 / Vulkan | [Status](#honest-status-dashboard) | `cargo test -p aether-gpu --release` |
 | 0 of 10 GPU mutants escape | [FEATURES.md](crates/aether-gpu/FEATURES.md) | `./crates/aether-gpu/mutants.sh` |
-| matmul crossover n=128, 38× at n=512 | [FEATURES.md](crates/aether-gpu/FEATURES.md) | `cargo run -p aether-gpu --example tensor_crossover --release` |
-| 10,474 Lean lines, 48 theorems, 0 `sorry` | [Lean](#the-lean-formalization) | `Get-ChildItem Aether -Recurse -Filter *.lean \| Get-Content \| Measure-Object -Line`, then `Select-String "^\s*(theorem\|lemma)\s"` and `Select-String "\bsorry\b"` |
+| matmul crossover n=128 (magnitude not reproducible; 10×–63× observed) | [FEATURES.md](crates/aether-gpu/FEATURES.md) | `cargo run -p aether-gpu --example tensor_crossover --release`, and `-- --samples` for the raw timings |
+| 11,637 Lean lines, 48 theorems, 0 `sorry` | [Lean](#the-lean-formalization) | `(Get-ChildItem Aether -Recurse -Filter *.lean \| Get-Content).Count`, then `Select-String "^\s*(theorem\|lemma)\s"` and `Select-String "\bsorry\b"` |
 
 ### Numbers that are *not* reproducible from this repository
 
@@ -2483,9 +2483,12 @@ calls it, and none can: `aether-core` is `no_std` and `wgpu` is not. Within
 `aether-gpu`, `scheduled_attention_or_cpu` and its backward counterpart route
 between the two implementations by capability. Both
 candidate integrations have been measured and neither has been made:
-`Tensor::matmul` crosses over at n=128 and reaches 38× at n=512 with f64↔f32
-conversion counted, and `pairwise_sqdist` never pays because the persistence
-reduction is CPU-side, so the matrix must come back. See
+`Tensor::matmul` crosses over at n=128 with f64↔f32 conversion counted, and by
+how much above it is not measurable here — the same ratio has been recorded from
+10× to 63×, because the GPU term swings 5.2× between runs while the CPU term
+moves 1.6×. The crossover survives that noise and the magnitude does not, so
+only the crossover is quoted. `pairwise_sqdist` never pays because the
+persistence reduction is CPU-side, so the matrix must come back. See
 [`crates/aether-gpu/FEATURES.md`](crates/aether-gpu/FEATURES.md).
 
 **Two phantom dependencies.** `nalgebra` is a non-optional dependency of `aether-core` with zero call sites, and `wgpu`/`pollster`/`bytemuck` ship in `aether-lang`'s default features with one comment between them. Both are queued for removal; both are [written up](#6-nalgebra-a-second-phantom-dependency) rather than quietly deleted before publication.
@@ -2522,7 +2525,7 @@ reduction is CPU-side, so the matrix must come back. See
 
 **Four kernel scheduler tests never execute.** They exist in `scheduler.rs`, but `aether-kernel` is a `no_std` binary with no test harness.
 
-**The Lean tree is ungated.** 10,474 lines, 48 theorems, 0 `sorry`, and 8,281 lines holding one theorem between them. No `lake build` in CI.
+**The Lean tree is ungated.** 11,637 lines, 48 theorems, 0 `sorry`, and 8,281 lines holding one theorem between them. No `lake build` in CI.
 
 **Duplicate crates.** `aegis-core` and `aegis-cli` are near-copies of their `aether` counterparts, left over from a rename done by copying.
 
