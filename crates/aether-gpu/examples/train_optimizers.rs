@@ -594,6 +594,66 @@ fn main() {
             deltas.push(resumed - whole);
         }
 
+        // When the resume happens, not just that it does.
+        //
+        // This was added expecting early resumes to be the expensive ones: the
+        // moments discarded then still carry information the parameters do not,
+        // while a late resume perturbs a search that has mostly finished. The
+        // measurement says the opposite, and the ordering is monotone rather than
+        // noisy -- nothing at epochs 2 through 25, -0.0004 at 50, -0.0009 at 90.
+        //
+        // What the hypothesis left out is recovery. A resume at epoch 2 restarts
+        // bias correction with 98 epochs left to re-converge, and the run arrives
+        // where it would have anyway. At epoch 90 there are ten, and the large
+        // effective steps that t = 1 produces move a converged solution with no
+        // time to settle again. The cost is not what the moments knew; it is how
+        // long the run has to recover from losing them.
+        println!();
+        println!("  the same comparison against when the state is discarded");
+        println!(
+            "  {:>10}  {:>14}  {:>14}",
+            "resume at", "mean delta", "worst delta"
+        );
+        for at in [2usize, 5, 10, 25, 50, 90] {
+            let mut d = Vec::new();
+            for seed in [0xBEEFu64, 0xC0FFEE, 0xD00D, 0xFEED, 0xBEAD] {
+                let whole = holdout_accuracy(
+                    &ctx,
+                    &tr_x,
+                    &tr_hot,
+                    n_tr,
+                    &te_x,
+                    &te_y,
+                    Opt::Adam,
+                    best_lr,
+                    seed,
+                    None,
+                );
+                let resumed = holdout_accuracy(
+                    &ctx,
+                    &tr_x,
+                    &tr_hot,
+                    n_tr,
+                    &te_x,
+                    &te_y,
+                    Opt::Adam,
+                    best_lr,
+                    seed,
+                    Some(at),
+                );
+                d.push(resumed - whole);
+            }
+            let mean = d.iter().sum::<f32>() / d.len() as f32;
+            let worst = d
+                .iter()
+                .cloned()
+                .fold(0.0f32, |a, v| if v < a { v } else { a });
+            println!(
+                "  {:>8}    {mean:>+14.4}  {worst:>+14.4}",
+                format!("epoch {at}")
+            );
+        }
+
         let mean = deltas.iter().sum::<f32>() / deltas.len() as f32;
         let worst = deltas.iter().cloned().fold(0.0f32, |a, d| a.max(d.abs()));
         println!("  mean delta {mean:+.4}, largest single move {worst:.4}");
