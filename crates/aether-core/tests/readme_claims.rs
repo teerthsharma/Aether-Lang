@@ -25,6 +25,7 @@
 //! written to catch was 41 and the largest 133, so the band catches what it was
 //! built for with a wide margin and tolerates ordinary editing.
 
+use std::collections::BTreeMap;
 use std::fs;
 use std::path::PathBuf;
 
@@ -119,6 +120,7 @@ fn the_readme_suite_counts_match_the_suites() {
     let tests_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests");
 
     let mut checked = 0;
+    let mut seen: Vec<String> = Vec::new();
 
     for (name, claimed_tests, claimed_lines) in claims(&doc) {
         let path = tests_dir.join(&name);
@@ -151,17 +153,47 @@ fn the_readme_suite_counts_match_the_suites() {
         );
 
         checked += 1;
+        seen.push(name.clone());
     }
 
-    // Ten, not five: each of the five suites is stated twice, once in a section
-    // heading and once in the file tree. Five would pass with one of the two
-    // forms no longer matching, which is exactly the gap this guard was extended
-    // to close — and it would pass while reading as though it covered both.
+    // Every documented suite must be found twice, and the requirement is derived
+    // rather than stated.
+    //
+    // This was a hardcoded floor of ten — five suites, two forms each — which is
+    // right only while there are five. A sixth documented file would raise what
+    // should be checked without raising what is required, and the guard would
+    // pass with the new file's tree row unread. Deriving the count per file
+    // scales with the document instead of with a number someone remembered to
+    // update.
+    //
+    // Counting files rather than claims is also why this cannot demand two per
+    // *test file*: this crate has ten test files and the README describes five of
+    // them, so a requirement keyed on the directory would fail on the five it
+    // deliberately does not document.
+    let mut per_file: BTreeMap<String, usize> = BTreeMap::new();
+    for name in &seen {
+        *per_file.entry(name.clone()).or_default() += 1;
+    }
+
     assert!(
-        checked >= 10,
-        "only {checked} suite claims were checked against this crate. The README \
-         states each of its five test files twice, as a heading and as a file-tree \
-         row, so fewer than ten means one of the two forms has been reworded and \
-         is no longer being read at all"
+        !per_file.is_empty(),
+        "no suite claims matched this crate at all, so this guard passes by \
+         checking nothing"
+    );
+
+    for (name, count) in &per_file {
+        assert!(
+            *count >= 2,
+            "README.md states tests/{name} {count} time(s). Each documented suite \
+             appears as a section heading and as a file-tree row, so one \
+             occurrence means the other has been reworded and is no longer read — \
+             which leaves a number that looks defended and is not."
+        );
+    }
+
+    assert_eq!(
+        checked,
+        seen.len(),
+        "internal: every matched claim should have been recorded"
     );
 }
