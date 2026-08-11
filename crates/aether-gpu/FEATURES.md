@@ -118,6 +118,18 @@ first crash discards a cell the retry would have measured. Only crashes retry: a
 test that *fails* is evidence, and re-running it to see whether it fails again is
 sampling until the answer is convenient.
 
+The retries are counted and reported, because this fault is worked around and not
+fixed. A silent retry hides how often it fires, so a rising rate — a driver
+update, a change that makes teardown more likely — would stay invisible until
+cells began failing twice and the harness started reporting escapes that were not
+there.
+
+The first run under it reported `1 cell(s) crashed and were retried` alongside 0
+of 20 escaping, which is the mechanism working on real data rather than on a
+description of it: that same crash, one change earlier, produced a spurious
+escape. **One crash in sixty cells is the current rate.** A number that climbs
+between runs is the workaround wearing out.
+
 ### Reverse mode, CPU reference and GPU port
 
 `recall_training` freezes attention and trains only a head, and records that as
