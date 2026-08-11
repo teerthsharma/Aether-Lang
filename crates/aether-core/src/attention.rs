@@ -22,6 +22,8 @@
 //! kernel with a wrong backward trains to a plausible worse optimum, which loss
 //! curves alone will not reveal.
 
+#![warn(missing_docs)]
+
 extern crate alloc;
 
 use alloc::vec;
@@ -39,20 +41,33 @@ pub enum Selector {
     ///
     /// The locality-only baseline. If a topological selector cannot beat this, it
     /// is rediscovering adjacency, not topology.
-    Local { window: usize },
+    Local {
+        /// Keys visible to each query, counting itself.
+        window: usize,
+    },
 
     /// `budget` keys drawn uniformly without replacement from the legal set.
     ///
     /// The sparsity baseline. Any gain a selector shows over this is the gain
     /// attributable to the selection rule rather than to sparsity itself.
-    Random { budget: usize, seed: u64 },
+    Random {
+        /// Keys drawn per query row.
+        budget: usize,
+        /// Fixes the draw. A baseline that changed between runs could not be
+        /// compared against anything.
+        seed: u64,
+    },
 
     /// The `budget` keys with the genuinely largest attention weights, computed
     /// densely.
     ///
     /// Unimplementable in production — it needs the scores it is meant to avoid
     /// computing — but decisive as a diagnostic upper bound.
-    OracleTopK { budget: usize },
+    OracleTopK {
+        /// Keys kept per row, chosen by the true attention weights. Reading
+        /// those is what makes this a diagnostic ceiling and not a method.
+        budget: usize,
+    },
 
     /// The `budget` keys nearest the query in the shared embedding space, keeping
     /// only those within `radius_scale` times the row's median query-key
@@ -68,7 +83,13 @@ pub enum Selector {
     /// query-key distance of 2.4, the selector picked 1.0 keys per row while its
     /// same-budget baselines picked 5.5, and lost the ablation on budget rather
     /// than on mechanism. Use `f64::INFINITY` for pure budget-nearest.
-    Topological { budget: usize, radius_scale: f64 },
+    Topological {
+        /// Keys kept per row.
+        budget: usize,
+        /// Multiplies the persistence-derived radius that bounds the candidate
+        /// set. `f64::INFINITY` disables the bound, leaving budget-nearest.
+        radius_scale: f64,
+    },
 
     /// Route through a topological clustering of key *directions*, then rank the
     /// resulting candidate set by the exact dot product.
@@ -87,7 +108,14 @@ pub enum Selector {
     /// Cost: `clusters` centroid dot products to route, plus one per candidate to
     /// rank — not `seq`. That is what makes it a sparse method rather than a
     /// re-described dense one.
-    TopologicalRouted { budget: usize, clusters: usize },
+    TopologicalRouted {
+        /// Keys kept per row after ranking the routed candidates.
+        budget: usize,
+        /// Direction clusters to route through. The cost of the method scales
+        /// with this rather than with the sequence, which is what makes it
+        /// sparse rather than dense in disguise.
+        clusters: usize,
+    },
 
     /// Route when [`routing_plan`] says routing will pay, and fall back to a
     /// sliding window of the same budget when it will not.
@@ -102,7 +130,13 @@ pub enum Selector {
     /// A condition nobody checks at runtime is an assumption. This variant checks
     /// it, which is what makes routing safe to enable by default: the fallback
     /// guarantees the selector never inspects more scores than dense would.
-    Adaptive { budget: usize, clusters: usize },
+    Adaptive {
+        /// Keys kept per row.
+        budget: usize,
+        /// Direction clusters used when [`routing_plan`] judges routing worth
+        /// it. When it does not, the dense fallback runs and this is unused.
+        clusters: usize,
+    },
 }
 
 /// What routing will cost on a given key tensor, decided before any query runs.
