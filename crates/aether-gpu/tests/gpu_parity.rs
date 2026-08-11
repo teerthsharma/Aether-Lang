@@ -598,18 +598,80 @@ fn the_tensor_bridge_rejects_shapes_it_cannot_multiply() {
 
 /// f64 reference matmul, independent of `Tensor` so the comparison does not
 /// depend on the implementation being replaced.
-fn f64_matmul(a: &[f64], b: &[f64], n: usize) -> Vec<f64> {
-    let mut c = vec![0.0; n * n];
-    for i in 0..n {
+fn f64_matmul(a: &[f64], b: &[f64], m: usize, k: usize, n: usize) -> Vec<f64> {
+    let mut c = vec![0.0; m * n];
+    for i in 0..m {
         for j in 0..n {
             let mut s = 0.0;
-            for k in 0..n {
-                s += a[i * n + k] * b[k * n + j];
+            for l in 0..k {
+                s += a[i * k + l] * b[l * n + j];
             }
             c[i * n + j] = s;
         }
     }
     c
+}
+
+/// Absolute accuracy at rectangular shapes, against an f64 reference.
+///
+/// Every other matmul parity assertion compares the kernel to `cpu_matmul`,
+/// which is **also f32**. That bounds the disagreement between two orderings of
+/// the same products and cannot see precision the kernel never had: an error both
+/// implementations make identically is invisible to a comparison between them.
+/// Two of the three cancellation fixtures tried against `tolerance` measured
+/// exactly zero for that reason.
+///
+/// The two tests that do use an f64 reference are both square and both `m = k =
+/// n`, so `m`, `k` and `n` have never been distinguished in an accuracy
+/// measurement. They play different roles — `k` is the reduction depth and the
+/// only one the error should grow with, while `m` and `n` only count how many
+/// independent reductions happen — and a defect that confused them would show up
+/// here and nowhere else in the f64 comparisons.
+///
+/// The shapes vary each dimension independently, including `k` far larger and far
+/// smaller than the others, and one where `k` is the smallest so a `√k` bound is
+/// at its tightest.
+#[test]
+#[cfg_attr(not(feature = "gpu"), ignore = "needs a GPU adapter: --features gpu")]
+fn rectangular_matmul_accuracy_against_f64_tracks_the_reduction_depth() {
+    let ctx = require_context();
+
+    for (m, k, n) in [
+        (37usize, 23usize, 19usize),
+        (8, 128, 5),
+        (64, 3, 64),
+        (5, 256, 7),
+    ] {
+        let a32 = fill(m * k, 401 + k as u64);
+        let b32 = fill(k * n, 402 + k as u64);
+        let a64: Vec<f64> = a32.iter().map(|v| f64::from(*v)).collect();
+        let b64: Vec<f64> = b32.iter().map(|v| f64::from(*v)).collect();
+
+        let gpu = ctx.matmul(&a32, &b32, m, k, n).expect("matmul");
+        let exact = f64_matmul(&a64, &b64, m, k, n);
+
+        // Relative to the largest exact entry, matching every other accuracy
+        // measurement here: a near-zero entry has unbounded relative error and
+        // reports the conditioning of one dot product rather than the kernel.
+        let scale = exact.iter().fold(0.0f64, |acc, v| acc.max(v.abs()));
+        let worst = gpu
+            .iter()
+            .zip(&exact)
+            .map(|(g, e)| (f64::from(*g) - e).abs())
+            .fold(0.0f64, f64::max)
+            / scale;
+
+        let bound = 8.0 * 1.19e-7 * (k as f64).sqrt();
+        println!("{m}x{k}x{n}: relative error {worst:.3e} against bound {bound:.3e}");
+
+        assert!(
+            worst < bound,
+            "{m}x{k}x{n}: relative error {worst:e} exceeds {bound:e}. The bound \
+             depends only on k={k}, so a failure here at fixed k while the square \
+             shapes pass means m or n is entering the error, which f32 \
+             accumulation over k terms does not explain"
+        );
+    }
 }
 
 /// How far an f32 matmul drifts from f64, and how that grows with the reduction
@@ -644,7 +706,7 @@ fn f32_matmul_error_grows_like_the_square_root_of_the_reduction_depth() {
         let b64: Vec<f64> = b32.iter().map(|v| *v as f64).collect();
 
         let gpu = ctx.matmul(&a32, &b32, n, n, n).expect("matmul");
-        let exact = f64_matmul(&a64, &b64, n);
+        let exact = f64_matmul(&a64, &b64, n, n, n);
 
         // Relative to the magnitude of the result, not element by element: a
         // near-zero entry has unbounded relative error and says nothing.
@@ -708,7 +770,7 @@ fn f32_matmul_precision_is_stated_as_a_number_not_an_adjective() {
     let b64: Vec<f64> = b32.iter().map(|v| *v as f64).collect();
 
     let gpu = ctx.matmul(&a32, &b32, n, n, n).expect("matmul");
-    let exact = f64_matmul(&a64, &b64, n);
+    let exact = f64_matmul(&a64, &b64, n, n, n);
 
     let scale = exact.iter().fold(0.0f64, |m, v| m.max(v.abs()));
     let worst = gpu
