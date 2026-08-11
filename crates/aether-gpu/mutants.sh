@@ -97,6 +97,16 @@ mutants=(
 "add_broadcast_row: broadcasts down the wrong axis|s/let col = idx % dims\.n;/let col = idx \/ dims.n;/"
 "sigmoid_bce_grad: batch averaging dropped|s/c\[idx\] = \(p - b\[idx\]\) \/ f32\(dims\.m\);/c[idx] = (p - b[idx]);/"
 "attention_dk: membership test always succeeds|s/if \(u32\(b\[idx_base \+ e\]\) == k_block\) \{/if (true) {/"
+# A defect that loses precision without changing the algorithm.
+#
+# Every other mutant here breaks the arithmetic: an index is swapped, a term is
+# dropped, a sign is flipped, and the result is wrong by O(1). This one computes
+# the right sum and keeps fewer bits of it, quantising the accumulator to about
+# 2^-20 each step. That is the failure a wrong tolerance hides, and it is the
+# only class the four accuracy tests added alongside it were written for -- so
+# it is here to measure whether they catch what they were built to catch rather
+# than to leave that observed in passing.
+"matmul: accumulator quantised, precision lost without changing the algorithm|s/sum = sum \+ a\[row \* dims\.k \+ i\] \* b\[i \* dims\.n \+ col\];/sum = round((sum + a[row * dims.k + i] * b[i * dims.n + col]) * 1048576.0) \/ 1048576.0;/"
 )
 
 # Every hardware test is `#[ignore]`d unless `--features gpu` is passed, so the
