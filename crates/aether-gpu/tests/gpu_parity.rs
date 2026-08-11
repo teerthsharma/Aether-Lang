@@ -54,6 +54,15 @@ use aether_gpu::{cpu_matmul, cpu_pairwise_sqdist, tensor_matmul, GpuContext};
 /// and leaves room for a different adapter or a different accumulation order
 /// without leaving room for a wrong answer.
 ///
+/// Two things support the number beyond those three shapes.
+/// `f32_matmul_error_grows_like_the_square_root_of_the_reduction_depth` measures
+/// the same ratio at k = 16, 64, 256 and 512 and finds 0.257, 0.240, 0.354 and
+/// 0.329 — flat across a 32× range rather than climbing, which is what makes it
+/// safe to apply a constant fitted at k ≤ 32 to a reduction sixteen times
+/// deeper. And that test independently arrived at `8.0 * 1.19e-7 * sqrt(n)` as
+/// its own bound long before this function did; the agreement is worth noting
+/// precisely because neither was derived from the other.
+///
 /// This is a bound on rounding, not a specification. If a caller ever needs
 /// matmul tighter than eight epsilons, the number to change is here and the
 /// measurement above is what to repeat.
@@ -579,7 +588,17 @@ fn f32_matmul_error_grows_like_the_square_root_of_the_reduction_depth() {
 
     let mut previous: Option<(usize, f64)> = None;
 
-    for n in [16usize, 64, 256] {
+    // 512 was added when `tolerance()` was tightened to `8·ε·√k` on the evidence
+    // of three shapes, none larger than k=32. A constant derived from small
+    // reductions and applied to large ones is a guess about the shape of the
+    // growth, and this is where that guess is checked: the ratio of observed
+    // error to `ε·√k` runs 0.257, 0.240, 0.354, 0.329 across a 32× range of k,
+    // so it is flat rather than climbing and the bound keeps its margin at the
+    // top of the range as well as the bottom.
+    //
+    // The f64 reference is O(n³) and n=512 costs about two seconds, which is
+    // affordable once. n=1024 is not, and is not covered.
+    for n in [16usize, 64, 256, 512] {
         let a32 = fill(n * n, 301);
         let b32 = fill(n * n, 302);
         let a64: Vec<f64> = a32.iter().map(|v| *v as f64).collect();
