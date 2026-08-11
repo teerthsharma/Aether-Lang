@@ -167,7 +167,7 @@ That last row is the important one and it is deliberately in the table. External
 
 ## Abstract
 
-Aether-Lang is a research programming language in which persistent homology is a first-class primitive rather than a library call. The core insight is that many iterative numerical procedures have a *structural* fixed point that arrives before, and is more stable than, their scalar one: the Betti numbers of the residual point cloud stop changing while the loss is still fluctuating. Aether-Lang exposes that as control flow — a `seal until convergence(ε)` loop terminates on a topological invariant. The implementation is a bounded exact 𝔽₂ persistence engine over Vietoris–Rips and lazy-witness complexes, supporting H₀ through H₂, written in `no_std` Rust with `libm` as its only mathematical dependency, so the same code runs under a CLI on Windows and inside a bare-metal x86_64 kernel with no operating system beneath it. On top of the engine sit the standard diagram metrics (exact bottleneck via threshold-graph matching, exact p-Wasserstein via Hungarian assignment) and vectorizations (landscapes, images, persistent entropy). The engine is validated by 11 property tests encoding the Cohen-Steiner–Edelsbrunner–Harer stability theorem and six other invariants, mutation-tested against 3 defects injected into the filtration and reduction, part of 26 across the crate of which none escape, and checked against a closed-form ground truth it reproduces to 1e-12. Indexing the simplex-face lookup reduced the scale test suite from 29.07 s to 1.10 s, a 26× improvement on identical assertions. A port of the topology-derived sparse attention kernel merged as `triton-lang/kernels#22` reproduces its CSR block schedules exactly and achieves 58.8% block reduction at test scale — and a same-budget ablation against random and oracle selection finds that the schedule's *cost* reduction is real while its *selection* is not: the topological ranking recovers less attention mass than choosing blocks at random, the deficit widens as more budget is given to it, and inverting the ranking beats random by a margin that grows instead.
+Aether-Lang is a research programming language in which persistent homology is a first-class primitive rather than a library call. The core insight is that many iterative numerical procedures have a *structural* fixed point that arrives before, and is more stable than, their scalar one: the Betti numbers of the residual point cloud stop changing while the loss is still fluctuating. Aether-Lang exposes that as control flow — a `seal until convergence(ε)` loop terminates on a topological invariant. The implementation is a bounded exact 𝔽₂ persistence engine over Vietoris–Rips and lazy-witness complexes, supporting H₀ through H₂, written in `no_std` Rust with `libm` as its only mathematical dependency, so the same code runs under a CLI on Windows and inside a bare-metal x86_64 kernel with no operating system beneath it. On top of the engine sit the standard diagram metrics (exact bottleneck via threshold-graph matching, exact p-Wasserstein via Hungarian assignment) and vectorizations (landscapes, images, persistent entropy). The engine is validated by 12 property tests encoding the Cohen-Steiner–Edelsbrunner–Harer stability theorem and six other invariants, mutation-tested against 3 defects injected into the filtration and reduction, part of 26 across the crate of which none escape, and checked against a closed-form ground truth it reproduces to 1e-12. Indexing the simplex-face lookup reduced the scale test suite from 29.07 s to 1.10 s, a 26× improvement on identical assertions. A port of the topology-derived sparse attention kernel merged as `triton-lang/kernels#22` reproduces its CSR block schedules exactly and achieves 58.8% block reduction at test scale — and a same-budget ablation against random and oracle selection finds that the schedule's *cost* reduction is real while its *selection* is not: the topological ranking recovers less attention mass than choosing blocks at random, the deficit widens as more budget is given to it, and inverting the ranking beats random by a margin that grows instead.
 
 ---
 
@@ -1530,7 +1530,7 @@ The house rule for any contribution that adds a number to this README: **it must
 
 163 tests. Listing the ones that carry the correctness argument, because a count is not evidence and a reader deserves to see what is actually asserted.
 
-### `persistence_invariants.rs` — 11 tests, 607 lines
+### `persistence_invariants.rs` — 12 tests, 740 lines
 
 The suite that makes the engine believable. Every entry is a **property over generated inputs**, not one hand-picked cloud with one expected number.
 
@@ -1552,7 +1552,7 @@ Two of these deserve emphasis. `gaussian_noise_produces_no_long_h1_bar` is worth
 
 Not listed above but present in the file: `boundary_of_boundary_is_zero_over_z2` and `every_face_is_present_and_precedes_its_coface`, asserted across five complexes. ∂∂ = 0 fails **silently** — every rank downstream becomes meaningless with no crash — which is the entire argument for testing an identity that is true by construction.
 
-### `diagram_distance.rs` — 17 tests, 381 lines
+### `diagram_distance.rs` — 17 tests, 422 lines
 
 | Group | Tests |
 |---|---|
@@ -1565,7 +1565,7 @@ Not listed above but present in the file: `boundary_of_boundary_is_zero_over_z2`
 
 `wasserstein_sums_where_bottleneck_takes_a_maximum` and `landscape_takes_the_kth_largest_tent_where_bars_cross` both exist because a mutant survived. See [Mutation Testing](#mutation-testing-or-how-i-learned-to-stop-trusting-green-checkmarks) — the original level-ordering test used *nested* bars, whose tent values already arrive sorted, so an implementation skipping the sort passed. Crossing bars kill that mutant. `sigma_controls_the_kernel_width` exists because **no test referenced σ at all**, so every image property held for any fixed kernel width whatsoever.
 
-### `attention_contracts.rs` — 29 tests, 1,124 lines
+### `attention_contracts.rs` — 29 tests, 1,255 lines
 
 The largest file in the repository, and the shape of it tells the story: nine tests establish contracts every selector must satisfy, and the remaining twenty are the record of a claim being repaired three times.
 
@@ -1603,7 +1603,7 @@ The all-masked row is the sharp edge: softmax over an empty set is 0/0. Returnin
 
 That last one is the guard against a common failure: a new selector added to an enum, tested only on the new behaviour, and never re-run against the contracts the old ones satisfy.
 
-### `scheduled_attention.rs` — 16 tests, 576 lines
+### `scheduled_attention.rs` — 16 tests, 643 lines
 
 | Group | Tests |
 |---|---|
@@ -1618,7 +1618,7 @@ That last one is the guard against a common failure: a new selector added to an 
 
 `scheduling_a_block_actually_changes_what_the_row_sees` is the anti-tautology test: without it, a kernel that ignored the schedule entirely and computed dense attention would pass every numeric-parity check in the file.
 
-### `persistence_scale.rs` — 7 tests, 206 lines, `--release`
+### `persistence_scale.rs` — 7 tests, 231 lines, `--release`
 
 `h0_handles_five_hundred_points` · `h1_handles_one_hundred_points` · `circle_h1_dies_at_the_exact_regular_polygon_chord` · `circle_h1_death_converges_to_sqrt3_from_above` · `dense_sampling_does_not_manufacture_extra_loops` · `simplex_cap_still_fails_fast_rather_than_exhausting_memory` · `point_cap_is_still_enforced_when_configured`
 
@@ -2124,11 +2124,11 @@ crates/aether-core/src/                                    lines
 
 ```
 crates/aether-core/tests/                                  lines
-├── attention_contracts.rs                                 1,124   29 tests
-├── persistence_invariants.rs                                607   11 tests
-├── scheduled_attention.rs                                   576   16 tests
-├── diagram_distance.rs                                      381   17 tests
-└── persistence_scale.rs                                     206    7 tests  (--release)
+├── attention_contracts.rs                                 1,255   29 tests
+├── persistence_invariants.rs                                740   12 tests
+├── scheduled_attention.rs                                   643   16 tests
+├── diagram_distance.rs                                      422   17 tests
+└── persistence_scale.rs                                     231    7 tests  (--release)
                                                           ─────
                                                             2,894
 ```
@@ -2168,9 +2168,9 @@ crates/aether-kernel/src/
 
 Depending on why you are here, different files are the point.
 
-**Evaluating whether the mathematics is right.** Start at [`persistence_invariants.rs`](crates/aether-core/tests/persistence_invariants.rs) — 11 property tests, and the two that matter most are `bottleneck_distance_respects_the_stability_bound` (the CSEH theorem) and `gaussian_noise_produces_no_long_h1_bar` (the negative control). Then `persistence.rs` itself. Then note what is **absent**: no comparison against ripser or GUDHI exists, so every assurance here is internal.
+**Evaluating whether the mathematics is right.** Start at [`persistence_invariants.rs`](crates/aether-core/tests/persistence_invariants.rs) — 12 property tests, and the two that matter most are `bottleneck_distance_respects_the_stability_bound` (the CSEH theorem) and `gaussian_noise_produces_no_long_h1_bar` (the negative control). Then `persistence.rs` itself. Then note what is **absent**: no comparison against ripser or GUDHI exists, so every assurance here is internal.
 
-**Evaluating whether the engineering is sound.** [`attention_contracts.rs`](crates/aether-core/tests/attention_contracts.rs), 1,124 lines, is the most informative file in the repository — not because the code is best there, but because the *shape* of the file records a claim being repaired three times, with the cost model that finally falsified it added at the end.
+**Evaluating whether the engineering is sound.** [`attention_contracts.rs`](crates/aether-core/tests/attention_contracts.rs), 1,255 lines, is the most informative file in the repository — not because the code is best there, but because the *shape* of the file records a claim being repaired three times, with the cost model that finally falsified it added at the end.
 
 **Deciding whether to use it.** Read [Limitations](#limitations) first, then [Prior Art](#prior-art). If you need production TDA, the answer is ripser and this document says so in four places.
 
@@ -2434,7 +2434,7 @@ The guards live in `crates/aether-gpu/tests/features_doc.rs`.
 | Claim | Where | Command |
 |---|---|---|
 | 215 passed, 🔒 76 ignored | [Status](#honest-status-dashboard) | `cargo test --workspace --exclude aether-kernel` |
-| 11 persistence invariants | [Theory](#theoretical-foundation) | `cargo test -p aether-core --test persistence_invariants` |
+| 12 persistence invariants | [Theory](#theoretical-foundation) | `cargo test -p aether-core --test persistence_invariants` |
 | 17 diagram-metric tests | [Test suite](#diagram_distancers--17-tests-381-lines) | `cargo test -p aether-core --test diagram_distance` |
 | 29 attention contracts | [Test suite](#attention_contractsrs--29-tests-1124-lines) | `cargo test -p aether-core --test attention_contracts -- --nocapture` |
 | 16 scheduled-attention tests | [Test suite](#scheduled_attentionrs--16-tests-576-lines) | `cargo test -p aether-core --test scheduled_attention -- --nocapture` |
