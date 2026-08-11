@@ -1050,6 +1050,34 @@ The useful conclusion is about the suite rather than the tests: **precision loss
 is caught only by f64 comparison**, three of them exist, and two predate this
 work.
 
+##### How small a loss the suite still notices
+
+Both mutants above use one quantisation level, which shows 2⁻²⁰ is caught and
+locates no boundary. Sweeping the level over the tiled kernel finds where each
+part of the suite stops noticing:
+
+| quantisation | `gpu_parity` failures | includes the tiled test | `gradcheck` |
+|---|---:|---|---:|
+| 2⁻¹⁴ | 4 | yes | 6 |
+| 2⁻²⁰ | **1** | yes | 4 |
+| 2⁻²⁴ | **1** | yes | 3 |
+
+At 2⁻¹⁴ several tests notice, because a loss that coarse moves results past
+tolerances built for f32 accumulation. From 2⁻²⁰ down, exactly one does —
+`the_tiled_kernel_is_as_accurate_as_the_untiled_one_against_f64`, and it is the
+bitwise half of that test doing the work rather than its f64 bound.
+
+**It has no boundary inside f32.** 2⁻²⁴ is the resolution of the format for values
+near one, so a quantisation finer than that cannot change a result at all, and the
+assertion catches everything above it. That is the property of comparing two
+implementations that agree exactly: the detection floor is one unit in the last
+place, and no tolerance-based test can reach it, because a tolerance that tight
+would fail on the rounding it exists to permit.
+
+`gradcheck` degrades gracefully instead — 6, 4, 3 — which is what incidental
+detection looks like. It notices less as the defect shrinks, and nothing says at
+which point it would notice nothing.
+
 One cell crashed and was retried, which is the wgpu teardown intermittent this
 crate works around and has not fixed. Nineteen of the twenty-four are caught by exactly one suite,
 so dropping any single suite would let nineteen defects through — which is why
