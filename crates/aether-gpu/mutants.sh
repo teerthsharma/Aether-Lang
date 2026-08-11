@@ -26,6 +26,9 @@
 
 set -uo pipefail
 
+# shellcheck source=../../scripts/mutants-common.sh
+. "$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)/scripts/mutants-common.sh"
+
 repo="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 shader="$repo/crates/aether-gpu/src/shaders.wgsl"
 cd "$repo" || exit 1
@@ -55,7 +58,9 @@ if ! git diff --quiet -- "$shader" || ! git diff --cached --quiet -- "$shader"; 
     exit 101
 fi
 
-trap restore EXIT
+MUTANT_CATCHERS="$(mktemp)"
+MUTANT_FAILURES=0
+trap 'restore; rm -f "$MUTANT_CATCHERS"' EXIT
 
 # name | perl expression applied to the whole file
 mutants=(
@@ -164,28 +169,7 @@ for entry in "${mutants[@]}"; do
     any_caught=0
     printf '%-46s' "$name"
     for suite in "${suites[@]}"; do
-        out="$(cargo test -p aether-gpu $features --test "$suite" 2>&1)"
-        if printf '%s' "$out" | grep -q "test result: ok"; then
-            printf ' %-10s' "survives"
-        else
-            counts="$(printf '%s' "$out" | grep -oE '[0-9]+ passed; [0-9]+ failed' | head -1)"
-            if [ -n "$counts" ]; then
-                passed="${counts%% passed;*}"
-                failed="${counts##*; }"
-                failed="${failed%% failed}"
-                printf ' %-10s' "$failed/$((passed + failed))"
-            elif printf '%s' "$out" | grep -qE 'error\[E[0-9]+\]|error: could not compile'; then
-                printf ' %-10s' "build"
-            else
-                printf '\n'
-                echo "cargo produced neither a test result nor a compile error for" >&2
-                echo "  mutant: $name" >&2
-                echo "  suite:  $suite" >&2
-                echo "Counting this as caught would mark every mutant caught for the" >&2
-                echo "same reason and report a clean sweep of nothing." >&2
-                printf '%s\n' "$out" >&2
-                exit 97
-            fi
+        if ! mutant_run_suite aether-gpu "$suite" "$name" 10 "$features"; then
             any_caught=1
         fi
     done
@@ -220,6 +204,8 @@ else
     printf '%s\n' "$clean" >&2
     exit 99
 fi
+
+mutant_report_catchers "$MUTANT_FAILURES"
 
 echo
 echo "mutants escaping every suite: $escaped / ${#mutants[@]}"

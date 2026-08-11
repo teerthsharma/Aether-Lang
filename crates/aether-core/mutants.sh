@@ -23,6 +23,9 @@
 
 set -uo pipefail
 
+# shellcheck source=../../scripts/mutants-common.sh
+. "$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)/scripts/mutants-common.sh"
+
 repo="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 sources="$repo/crates/aether-core/src"
 cd "$repo" || exit 1
@@ -135,10 +138,10 @@ printf '%-58s' "----------------------------------------------------------"
 for _ in "${suites[@]}"; do printf ' %-12s' "------------"; done
 printf '\n'
 
-catchers="$(mktemp)"
-trap 'restore; rm -f "$catchers"' EXIT
+MUTANT_CATCHERS="$(mktemp)"
+trap 'restore; rm -f "$MUTANT_CATCHERS"' EXIT
 escaped=0
-expected_names=0
+MUTANT_FAILURES=0
 
 for entry in "${mutants[@]}"; do
     name="${entry%%|*}"
@@ -175,56 +178,7 @@ for entry in "${mutants[@]}"; do
     any_caught=0
     printf '%-58s' "$name"
     for suite in "${suites[@]}"; do
-        out="$(cargo test -p aether-core --test "$suite" 2>&1)"
-        if printf '%s' "$out" | grep -q "test result: ok"; then
-            printf ' %-12s' "survives"
-        else
-            # `N passed; M failed` is absent when the mutant does not compile,
-            # which is a real distinction: a build failure is caught by the type
-            # system rather than by any assertion.
-            #
-            # It is also absent when cargo did not run at all, and those two must
-            # not be conflated. Treating every unparseable output as a build
-            # failure means a broken invocation marks every mutant caught and the
-            # run reports "0 escaping" having measured nothing — the harness
-            # announcing perfect coverage precisely because it did no work. A
-            # compile failure says so in its output; nothing at all does not.
-            counts="$(printf '%s' "$out" | grep -oE '[0-9]+ passed; [0-9]+ failed' | head -1)"
-            if [ -z "$counts" ]; then
-                # Specifically a rustc diagnostic or a build failure, not any line
-                # beginning with "error". A mistyped flag makes cargo print
-                # `error: unexpected argument`, which is a fault in this script
-                # and not a mutant the type system rejected — matching it would
-                # reinstate the conflation this branch exists to remove, with the
-                # bad invocation counted as coverage.
-                if printf '%s' "$out" | grep -qE 'error\[E[0-9]+\]|error: could not compile'; then
-                    printf ' %-12s' "build"
-                else
-                    printf '\n'
-                    echo "cargo produced neither a test result nor a compile error for" >&2
-                    echo "  mutant: $name" >&2
-                    echo "  suite:  $suite" >&2
-                    echo "Counting this as caught would mark every mutant caught for the" >&2
-                    echo "same reason and report a clean sweep of nothing." >&2
-                    printf '%s\n' "$out" >&2
-                    exit 97
-                fi
-            else
-                passed="${counts%% passed;*}"
-                failed="${counts##*; }"
-                failed="${failed%% failed}"
-                printf ' %-12s' "$failed/$((passed + failed))"
-                expected_names=$((expected_names + failed))
-            fi
-            # Which tests, not just how many. A fraction of 1/17 repeated across
-            # three defects reads as three independent single-test catches, and
-            # is equally consistent with one test carrying all three -- in which
-            # case that test is load-bearing for three defects at once and a
-            # rewrite of it silently drops all of them.
-            printf '%s' "$out" \
-                | grep -oE '^test [A-Za-z0-9_:]+ \.\.\. FAILED' \
-                | sed -E 's/^test (.*) \.\.\. FAILED/'"$name"'\t\1/' \
-                >> "$catchers"
+        if ! mutant_run_suite aether-core "$suite" "$name" 12; then
             any_caught=1
         fi
     done
@@ -256,32 +210,7 @@ fi
 
 # Which test caught what. The count above says how much of a suite notices a
 # defect; this says whether the tests that notice are the same ones each time.
-# The two summaries come from the same cargo output by different means: the
-# fractions from its "N passed; M failed" line, the names from its per-test
-# FAILED lines. Requiring them to agree makes each a check on the other.
-#
-# Without this the name parser could stop matching — a cargo output change, a
-# renamed flag, an edit here — and the run would print an empty summary beneath a
-# table of entirely correct counts. That is a silent degradation of exactly the
-# kind this harness exists to find in the code it mutates, and it has no business
-# living in the harness itself.
-found_names="$(wc -l < "$catchers" | tr -d ' ')"
-if [ "$found_names" -ne "$expected_names" ]; then
-    echo >&2
-    echo "the failing-test parser recorded $found_names names for $expected_names failures." >&2
-    echo "Both are parsed from the same cargo output, so disagreement means one" >&2
-    echo "of them has stopped matching. The table above is still correct, which" >&2
-    echo "is what would have made this quiet." >&2
-    exit 98
-fi
-
-echo
-echo "tests that caught each mutant, by how many defects they carry"
-if [ -s "$catchers" ]; then
-    cut -f2 "$catchers" | sort | uniq -c | sort -rn | while read -r n test; do
-        printf "  %2d  %s\n" "$n" "$test"
-    done
-fi
+mutant_report_catchers "$MUTANT_FAILURES"
 
 echo
 echo "mutants escaping: $escaped / ${#mutants[@]}"
