@@ -1475,3 +1475,75 @@ fn the_fused_gradient_is_the_derivative_of_cross_entropy() {
         "the gradient is {magnitude:.3e}, indistinguishable from zero"
     );
 }
+
+/// The softmax kernel must compute softmax, not merely something shaped like it.
+///
+/// The three tests above pin properties: the rows sum to one and are positive,
+/// the result is invariant to a constant shift, and large logits do not produce
+/// NaN. Every one of those is satisfied by a family of functions, not by softmax
+/// alone — `exp(2x) / sum(exp(2x))` is a probability distribution, is
+/// shift-invariant, and is finite.
+///
+/// That is not hypothetical. Injecting exactly that defect to demonstrate the
+/// cross-entropy gradient check left all three passing, which makes this the same
+/// gap one level down: the forward kernel is described by its properties and
+/// compared against nothing.
+///
+/// So this compares it against softmax computed host-side in f64. The reference
+/// subtracts the row maximum for the same reason the kernel does, which is a
+/// shared technique rather than a shared implementation — the arithmetic that
+/// could be wrong is not shared.
+///
+/// Confirmed against that defect:
+///
+/// ```text
+/// softmax_rows_are_probability_distributions      ok
+/// softmax_is_invariant_to_a_constant_shift        ok
+/// large_logits_do_not_produce_nan_in_softmax      ok
+/// softmax_matches_a_host_reference            FAILED
+/// ```
+#[test]
+#[cfg_attr(not(feature = "gpu"), ignore = "needs a GPU adapter: --features gpu")]
+fn softmax_matches_a_host_reference() {
+    let ctx = require_context();
+
+    let (rows, classes) = (6, 4);
+    let logits: Vec<f64> = fill(rows * classes, 71).iter().map(|&v| v as f64).collect();
+
+    let uploaded = ctx
+        .upload(
+            &logits.iter().map(|&v| v as f32).collect::<Vec<f32>>(),
+            rows,
+            classes,
+        )
+        .expect("upload");
+    let kernel = ctx
+        .read(&ctx.softmax_resident(&uploaded).expect("softmax"))
+        .expect("read");
+
+    let mut worst = 0.0f64;
+    let mut worst_at = 0usize;
+    for r in 0..rows {
+        let row = &logits[r * classes..(r + 1) * classes];
+        let max = row.iter().cloned().fold(f64::NEG_INFINITY, f64::max);
+        let denom: f64 = row.iter().map(|v| (v - max).exp()).sum();
+
+        for c in 0..classes {
+            let want = (row[c] - max).exp() / denom;
+            let i = r * classes + c;
+            let error = (kernel[i] as f64 - want).abs();
+            if error > worst {
+                worst = error;
+                worst_at = i;
+            }
+        }
+    }
+
+    assert!(
+        worst <= 2e-7,
+        "index {worst_at}: kernel {} against an f64 host reference, worst \
+         disagreement {worst:.3e}. The kernel produces a distribution that is \
+         not softmax.",
+        kernel[worst_at]
+    );
+}
