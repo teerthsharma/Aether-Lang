@@ -214,6 +214,24 @@ pub struct GpuContext {
 /// Packed rather than held as two tensors because the bind group carries three
 /// storage buffers, and Adam touches parameters, gradients and both moments.
 /// First moment occupies `[0, n)`, second `[n, 2n)`.
+///
+/// # This state cannot leave the process
+///
+/// `moments` is private and nothing reads it out, so a caller can run Adam and
+/// cannot save what Adam learned. Training that stops and resumes rebuilds the
+/// state with [`GpuContext::adam_state`], which zeroes both moments and resets
+/// the step counter — so the resumed run spends its first steps with bias
+/// correction dividing by `1 - beta^t` at `t = 1` again, adapting from nothing
+/// while the parameters carry on from where they were.
+///
+/// That is a silent difference rather than an error: the loss keeps falling and
+/// the run looks continuous. It is recorded here because the alternative is
+/// finding it in a training curve.
+///
+/// Nothing in this workspace checkpoints, so nothing is broken by it today. The
+/// fix is an accessor returning the packed tensor and a constructor taking one
+/// back, which is a public API decision rather than an oversight, and is not made
+/// here.
 pub struct AdamState {
     moments: GpuTensor,
     step: u32,
