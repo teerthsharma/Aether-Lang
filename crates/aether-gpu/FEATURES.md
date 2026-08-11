@@ -205,9 +205,35 @@ q, k, v and dOut out of it, and fill a reserved tail in place. The gradient
 kernels then bind that same buffer as `a` and find everything already there. No
 second layout, no concatenation kernel, and the `ponytail:` marker is gone.
 
-**623 s to 493 s, with all sixteen figures unchanged.** The remaining gap to the
-CPU's 216 s is the per-call operand upload and four dispatches, which is what the
-shape of this API costs rather than an oversight.
+**623 s to 493 s, with all sixteen figures unchanged.**
+
+The remaining gap to the CPU's 216 s was attributed to "the per-call operand
+upload and four dispatches". That sentence was written without measuring, and
+`attention_cost` measures it. The two candidates predict different numbers — a
+backward that is dispatch-bound costs about 4× a forward, one that is
+transfer-bound about 1.3× — so one run separates them:
+
+| seq | forward | backward | ratio | upload | upload share |
+|---:|---:|---:|---:|---:|---:|
+| 64 | 0.894 ms | 1.620 ms | 1.81× | 0.002 ms | 0.1% |
+| 128 | 1.098 ms | 2.535 ms | 2.31× | 0.003 ms | 0.1% |
+| 256 | 1.416 ms | 3.587 ms | 2.53× | 0.006 ms | 0.2% |
+| 512 | 2.098 ms | 6.287 ms | 3.00× | 0.018 ms | 0.3% |
+
+**Half of that attribution was wrong, and it was the half named first.** The
+upload is 0.1–0.3% of the call. Allocating and filling a buffer the size of the
+backward's packed operands is free at these sizes, so buffer reuse — the obvious
+next optimisation, and one with real aliasing hazards against the pending
+encoder — would have bought 0.3% at the top end.
+
+The dispatch count is the cost, and the ratio says so by climbing toward it: 1.81×
+at seq 64 where fixed per-call overhead dilutes everything, 3.00× at 512 where
+kernel work dominates. It stays under 4 because the four backward kernels are not
+each as expensive as the forward.
+
+What this leaves is that the four dispatches are what the API shape costs, which
+is what the original sentence claimed — arrived at by measurement rather than by
+naming two plausible causes and trusting the reasoning.
 
 The mutation harness caught its own staleness on this change. Moving the write to
 `c[s_base + row * 3u + 2u]` left one mutant's pattern matching nothing, and the
