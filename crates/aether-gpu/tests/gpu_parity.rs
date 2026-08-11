@@ -612,6 +612,125 @@ fn f64_matmul(a: &[f64], b: &[f64], m: usize, k: usize, n: usize) -> Vec<f64> {
     c
 }
 
+/// Which entries are the inaccurate ones, and how a caller identifies them.
+///
+/// The measurement beside this one shows a single entry can be a thousand times
+/// less accurate than the matrix figure, and stops there: it says the guarantee
+/// is weaker without saying which entries it is weaker for, which is the question
+/// somebody reading one result actually has.
+///
+/// Numerical analysis answers it. For a dot product the relevant quantity is the
+/// condition number
+///
+/// ```text
+/// κ = Σ|aₗ·bₗ| / |Σ aₗ·bₗ|
+/// ```
+///
+/// the ratio of the summed magnitudes to the magnitude of the sum. It is 1 when
+/// nothing cancels and grows without bound as the terms cancel, and the standard
+/// bound on the relative error of the computed sum is `κ · ε · √k`.
+///
+/// That bound is asserted here per entry rather than quoted, because a bound the
+/// kernel does not actually satisfy is worse than no bound. Measured over all
+/// 1024 entries of an ill-conditioned 32×64×32 product:
+///
+/// | κ | entries | worst relative error |
+/// |---|---:|---:|
+/// | 1 – 10 | 751 | 7.460e-07 |
+/// | 10 – 100 | 249 | 3.300e-06 |
+/// | 100 – 1 000 | 20 | 1.430e-05 |
+/// | 1 000 – 10 000 | 4 | 4.544e-05 |
+///
+/// A decade of κ costs a decade of accuracy, no entry exceeds `κ·ε·√k`, and the
+/// worst entry reaches 0.20 of its own predicted bound. The four entries above
+/// κ=1000 are exactly the ones producing the 4.544e-5 that the neighbouring test
+/// pins as the worst case.
+///
+/// So the guidance needs no API: **an entry's accuracy is set by how much its dot
+/// product cancels**, and a caller who needs to know computes κ from the operands
+/// it already has. What makes this worth a test rather than a comment is that the
+/// bound is the kernel's to keep — a change to the accumulation order that broke
+/// it would otherwise surface as a vague loss of precision somewhere downstream.
+#[test]
+#[cfg_attr(not(feature = "gpu"), ignore = "needs a GPU adapter: --features gpu")]
+fn per_entry_error_stays_inside_the_condition_number_bound() {
+    let ctx = require_context();
+
+    let (m, k, n) = (32usize, 64usize, 32usize);
+    let mut state = 7u64;
+    let mut next = || {
+        state = state
+            .wrapping_mul(6364136223846793005)
+            .wrapping_add(1442695040888963407);
+        f64::from((state >> 33) as u32) / f64::from(1u32 << 31)
+    };
+    let mut spread = |count: usize| -> Vec<f32> {
+        (0..count)
+            .map(|_| {
+                let exponent = (next() - 0.5) * 2.0;
+                let sign = if next() < 0.5 { -1.0 } else { 1.0 };
+                (sign * 10f64.powf(exponent)) as f32
+            })
+            .collect()
+    };
+
+    let a32 = spread(m * k);
+    let b32 = spread(k * n);
+    let a: Vec<f64> = a32.iter().map(|v| f64::from(*v)).collect();
+    let b: Vec<f64> = b32.iter().map(|v| f64::from(*v)).collect();
+
+    let gpu = ctx.matmul(&a32, &b32, m, k, n).expect("matmul");
+
+    let mut worst_fraction = 0.0f64;
+    let mut ill_conditioned = 0usize;
+
+    for i in 0..m {
+        for j in 0..n {
+            let mut sum = 0.0f64;
+            let mut magnitudes = 0.0f64;
+            for l in 0..k {
+                let term = a[i * k + l] * b[l * n + j];
+                sum += term;
+                magnitudes += term.abs();
+            }
+
+            if sum.abs() < 1e-300 {
+                continue;
+            }
+
+            let kappa = magnitudes / sum.abs();
+            if kappa > 100.0 {
+                ill_conditioned += 1;
+            }
+
+            let relative = (f64::from(gpu[i * n + j]) - sum).abs() / sum.abs();
+            let predicted = kappa * 1.19e-7 * (k as f64).sqrt();
+
+            assert!(
+                relative <= predicted,
+                "entry ({i},{j}) has condition number {kappa:.3e} and relative \
+                 error {relative:.3e}, above the {predicted:.3e} that \
+                 kappa*eps*sqrt(k) allows. The error is larger than cancellation \
+                 in this dot product explains, so it is the accumulation and not \
+                 the fixture"
+            );
+
+            worst_fraction = worst_fraction.max(relative / predicted);
+        }
+    }
+
+    println!("worst entry reached {worst_fraction:.3} of its condition-number bound");
+
+    // Without ill-conditioned entries every κ is near 1, the bound collapses to
+    // the ordinary one, and the test passes while checking nothing about
+    // cancellation. This is the fixture asserting it still does its job.
+    assert!(
+        ill_conditioned >= 10,
+        "only {ill_conditioned} entries have kappa above 100, so this fixture is \
+         no longer ill-conditioned and the bound it checks is not being exercised"
+    );
+}
+
 /// What the accuracy figures do *not* promise about a single entry.
 ///
 /// Every accuracy measurement in this file divides by the largest exact entry in

@@ -15,7 +15,7 @@ wrong answer is worth keeping — but it means the current state has to be
 reconstructed from a sequence of corrections. This section is the state.
 
 **The backend works and nothing uses it.** 20 WGSL kernels, resident tensors,
-batched submission, 99 tests, 0 of 24 mutants escaping. No line of
+batched submission, 100 tests, 0 of 24 mutants escaping. No line of
 `aether-core` or `aether-lang` calls it.
 
 `scheduled_attention_resident` returns a `GpuTensor` so attention output can feed
@@ -1332,6 +1332,43 @@ entry figure is at least twenty times worse — the second assertion existing so
 that a fixture which stops cancelling fails loudly instead of passing while
 demonstrating nothing.
 
+##### Which entries, and the tightest assertion in the suite
+
+Saying a single entry can be a thousand times worse leaves the question a reader
+actually has: *which* ones. For a dot product the answer is the condition number
+
+```text
+κ = Σ|aₗ·bₗ| / |Σ aₗ·bₗ|
+```
+
+— the summed magnitudes over the magnitude of the sum, which is 1 when nothing
+cancels and grows without bound as the terms do. The classical bound on the
+relative error is `κ · ε · √k`. Over all 1024 entries of an ill-conditioned
+32×64×32 product:
+
+| κ | entries | worst relative error |
+|---|---:|---:|
+| 1 – 10 | 751 | 7.460e-07 |
+| 10 – 100 | 249 | 3.300e-06 |
+| 100 – 1 000 | 20 | 1.430e-05 |
+| 1 000 – 10 000 | 4 | 4.544e-05 |
+
+A decade of κ costs a decade of accuracy, **no entry exceeds its bound**, and the
+worst reaches 0.202 of it. The four entries above κ=1000 are precisely the ones
+producing the 4.544e-5 the previous test pins as the worst case, so the two
+measurements are the same fact told from opposite ends.
+
+**An entry's accuracy is set by how much its dot product cancels**, and a caller
+who needs to know computes κ from operands it already holds. No API is required
+and none was added.
+
+`per_entry_error_stays_inside_the_condition_number_bound` asserts it rather than
+quoting it, and the assertion turns out to be the most sensitive in the suite. A
+well-conditioned entry has κ near 1, so its bound is a few epsilons rather than
+the matrix-wide allowance: injecting a **2e-6** relative error into `matmul` fails
+it at entry (0,11), where κ=1.852 permits 1.763e-6. Every other test in this file
+needs 1e-5 before it notices.
+
 The tightening has teeth, demonstrated rather than asserted. Injecting a 1e-5
 relative error into `matmul` and running the suite under both bounds:
 
@@ -1900,6 +1937,7 @@ Ordered by value, highest first.
 6. **f16 storage** with f32 accumulation.
 7. Raise `PersistenceConfig` caps past 1024 so the distance kernel earns its
    dispatch, then route Vietoris–Rips through it.
+
 
 
 
