@@ -724,6 +724,62 @@ fn main() {
             println!("  {total:>8}  {:>12}  {mean:>+14.4}", total - 90);
         }
 
+        // Is twenty-five epochs a constant, or a fraction of the budget?
+        //
+        // The row above finds the cost gone with twenty-five epochs left, on a
+        // hundred-epoch budget with the resume at ninety. Two readings fit: the
+        // model needs about twenty-five epochs to re-converge whatever the
+        // budget, or it needs about a quarter of one. Doubling the budget and
+        // resuming at the same fraction separates them -- an absolute boundary
+        // stays near twenty-five, a proportional one moves to about fifty.
+        //
+        // It stays. On two hundred epochs the cost is gone by twenty, the same
+        // order as on one hundred, and nothing appears at fifty that was not
+        // there at thirty. The -0.0004 at twenty-five is two flipped labels,
+        // the same quantum as the sweep above and not a return of the effect.
+        //
+        // So the recovery Adam needs after losing its moments is a number of
+        // epochs, not a share of the run. A checkpoint interval wants about
+        // twenty-five epochs of headroom before the end whether the run is a
+        // hundred epochs or a thousand.
+        println!();
+        println!("  the same boundary on a 200-epoch budget, resuming at 180");
+        println!("  {:>12}  {:>14}", "left after", "mean delta");
+        for total in [190usize, 200, 205, 210, 230] {
+            let mut d = Vec::new();
+            for seed in [0xBEEFu64, 0xC0FFEE, 0xD00D, 0xFEED, 0xBEAD] {
+                let whole = holdout_accuracy(
+                    &ctx,
+                    &tr_x,
+                    &tr_hot,
+                    n_tr,
+                    &te_x,
+                    &te_y,
+                    Opt::Adam,
+                    best_lr,
+                    seed,
+                    None,
+                    total,
+                );
+                let resumed = holdout_accuracy(
+                    &ctx,
+                    &tr_x,
+                    &tr_hot,
+                    n_tr,
+                    &te_x,
+                    &te_y,
+                    Opt::Adam,
+                    best_lr,
+                    seed,
+                    Some(180),
+                    total,
+                );
+                d.push(resumed - whole);
+            }
+            let mean = d.iter().sum::<f32>() / d.len() as f32;
+            println!("  {:>12}  {mean:>+14.4}", total - 180);
+        }
+
         let mean = deltas.iter().sum::<f32>() / deltas.len() as f32;
         let worst = deltas.iter().cloned().fold(0.0f32, |a, d| a.max(d.abs()));
         println!("  mean delta {mean:+.4}, largest single move {worst:.4}");
