@@ -679,14 +679,65 @@ than leaving it to be averaged down by a median over a block.
 
 An earlier revision of this section concluded from the same negative result that
 the variance must live at a shorter timescale than a measurement pair. That was
-an inference from pairing failing rather than an observation, and the raw samples
-do not support it: within a single run the timings ramp and then flatten, and the
-settled portion is far tighter than the run-to-run spread.
+an inference from pairing failing rather than an observation. It is wrong, but so
+was its replacement: the sentence that stood here said the timings ramp and then
+flatten within a run, and measuring the thirds of a run says otherwise. Means per
+third, one run: CPU 195.8, 216.0, 237.5 ms. It rises rather than falls and is
+still rising at the end, so nothing flattens and the tail is the slowest window.
+Across seven runs the CPU third-to-third drift was positive every time, +1.5% to
++21%.
 
-What produces the GPU-side swing is not identified. It is not per-sample scatter
-and not monotone drift within a process; it changed between runs, stayed changed
-across four consecutive runs, and then reverted. Naming a cause on that evidence
-would repeat the error this section is correcting.
+#### The GPU-side swing, identified
+
+This section used to close by saying the cause was not identified, and recorded
+the shape of the evidence: it changed between runs, stayed changed across four
+consecutive runs, then reverted. That shape is the answer. The degradation is a
+function of how recently the binary last ran, and it does not exist inside a
+single run at all.
+
+Last-third bridge means, three consecutive runs with no gap, against the same
+three with ninety seconds of idle between them:
+
+| run | back-to-back | 90 s idle |
+|---|---:|---:|
+| 1 | 6.16 ms | 5.74 ms |
+| 2 | 13.48 ms | 5.91 ms |
+| 3 | 20.97 ms | 7.51 ms |
+
+A factor of 3.4 by the third run, removed entirely by the cooldown. The 4.9 –
+25.7 ms sample above was recorded as a noisy run; it was a run that came third.
+Within a run, once the machine is given idle time, the bridge drift is +11.6,
+-7.4, +2.4, -5.0% over four runs — the sign varies, so there is no within-run
+trend on the GPU side and that spread is scatter. The drift is CPU-side; the
+degradation is GPU-side and lives between runs.
+
+The previous version of `tensor_crossover` closed by instructing the reader to
+run it several times, which is the procedure that produces the degraded state.
+It now asks for ninety seconds of idle and prints the numbers above as the
+reason.
+
+#### The opposite effect, at a shorter timescale
+
+`gpu_bench` carried the same class of problem with the sign reversed. It times
+CPU, round-trip naive, round-trip tiled and resident in that fixed order at every
+size, so resident — the variant the residency claim rests on — was always
+measured last. Measuring the resident kernel twice in one round, first and last,
+with identical operands and rep counts, isolates position from variant. At
+1024×1024 the second measurement was faster every time: -14.4, -7.8, -7.3, -9.1%.
+
+So within a run the device ramps *up*, and the sweep was reading round-trip naive
+on a cold device and resident on a warm one, inflating the gap between them from
+both ends. At 512×512 the effect was already inside the noise, sign varying.
+
+Two hundred milliseconds of the real kernel before any timed rep collapses it:
+-1.7, -3.9, +2.2, +1.8% over the same four rounds, mean -0.4% against -9.7%
+before. The first-position absolute at 1024 fell from about 10.4 ms to about 9.3,
+which is the same fact stated the other way — the first measurement is now warm.
+
+These two effects have opposite signs and different timescales. Within one run
+the device warms and gets faster; across repeated whole runs it degrades and gets
+slower. A warm-up fixes the first and does nothing for the second, which is why
+both a `warm_up` call and a cooldown instruction exist.
 
 The interleaved measurement is kept anyway. It is the right design, and the
 reason to hold it is that it is correct, not that it is faster; reverting to a
@@ -696,6 +747,9 @@ optimising the number rather than the measurement.
 The practical conclusion is unchanged and now has a mechanism behind it: this
 machine cannot produce a trustworthy magnitude, because the quantity that moves
 is the one being measured, and no aggregation inside the benchmark reaches it.
+Two of the three moving parts are now named and one is fixed, which narrows the
+claim without rescuing it — the run-to-run degradation is still there, and it is
+the larger of the two.
 
 What this means for the figures quoted here:
 

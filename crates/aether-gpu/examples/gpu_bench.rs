@@ -15,7 +15,7 @@
 
 use std::time::Instant;
 
-use aether_gpu::{cpu_matmul, cpu_pairwise_sqdist, GpuContext};
+use aether_gpu::{cpu_matmul, cpu_pairwise_sqdist, GpuContext, GpuTensor};
 
 fn fill(n: usize, seed: u64) -> Vec<f32> {
     let mut s = seed.wrapping_mul(6364136223846793005).wrapping_add(1);
@@ -43,6 +43,94 @@ fn median_ms(reps: usize, mut f: impl FnMut()) -> f64 {
     times[times.len() / 2]
 }
 
+/// Bring the device to a steady clock before anything is timed.
+///
+/// One dispatch was the previous warm-up, and one dispatch is not enough. The
+/// position probe below measures the resident kernel twice in a round, first and
+/// last, and at 1024x1024 the second measurement came out faster every time:
+/// -14.4, -7.8, -7.3, -9.1%. The variant, the operands and the rep count are
+/// identical between the two, so that gap is the device being warmer the second
+/// time and nothing else.
+///
+/// Left alone it biases the headline comparison in both directions at once. The
+/// sweep times round-trip naive early, on a cold device, and resident last, on a
+/// warm one, so the gap between them collects the warm-up at both ends. Two
+/// hundred milliseconds of the real kernel puts every variant in the same state
+/// before the first timed rep. At 512x512 the effect was already inside the noise
+/// -- sign varying across rounds -- so this matters at the large sizes and costs
+/// a fifth of a second at the small ones.
+///
+/// Note this is the opposite sign to the degradation `tensor_crossover` records
+/// across back-to-back runs of a binary. Within one run the device ramps up and
+/// gets faster; across repeated whole runs it gets slower. Both are real, they act
+/// on different timescales, and a warm-up fixes only the first.
+fn warm_up(ctx: &GpuContext, ga: &GpuTensor, gb: &GpuTensor) {
+    let t = Instant::now();
+    while t.elapsed().as_millis() < 200 {
+        let c = ctx.matmul_resident(ga, gb).expect("warm-up dispatch");
+        let _ = ctx.read(&c).expect("warm-up read");
+    }
+}
+
+/// Is the reported number a property of the variant, or of when it was measured?
+///
+/// The sweep above times cpu, round-trip naive, round-trip tiled and resident in
+/// that order at every size, so `resident` -- the variant the residency claim
+/// rests on -- is always measured last, after the other three have been hammering
+/// the device. `tensor_crossover` showed the bridge degrading by a factor of 3.4
+/// across back-to-back runs, which makes "measured last" a suspicious place for
+/// the headline number to live.
+///
+/// Reversing the whole order would swap which variant is disadvantaged without
+/// separating the two explanations. Measuring one variant twice does separate
+/// them: resident first, then the other three as load, then resident again. Same
+/// variant, same operands, same reps -- only the position differs, so any gap is
+/// position and nothing else.
+fn position_probe(ctx: &GpuContext, size: usize, rounds: usize) {
+    let a = fill(size * size, 1);
+    let b = fill(size * size, 2);
+    let ga = ctx.upload(&a, size, size).expect("upload");
+    let gb = ctx.upload(&b, size, size).expect("upload");
+
+    let resident = || {
+        median_ms(20, || {
+            let c = ctx.matmul_resident(&ga, &gb).expect("tiled");
+            let _ = ctx.read(&c).expect("read");
+        })
+    };
+
+    warm_up(ctx, &ga, &gb);
+
+    println!();
+    println!("  Position probe at {size}x{size}: resident measured twice per round");
+    println!(
+        "  {:>6}  {:>12}  {:>12}  {:>9}",
+        "round", "first ms", "last ms", "delta"
+    );
+
+    for r in 0..rounds {
+        let first = resident();
+
+        // The load the sweep applies between the two positions, same order.
+        let _ = median_ms(1, || {
+            let _ = cpu_matmul(&a, &b, size, size, size);
+        });
+        let _ = median_ms(20, || {
+            let _ = ctx.matmul(&a, &b, size, size, size).expect("rt naive");
+        });
+        let _ = median_ms(20, || {
+            let ua = ctx.upload(&a, size, size).expect("upload");
+            let ub = ctx.upload(&b, size, size).expect("upload");
+            let c = ctx.matmul_resident(&ua, &ub).expect("tiled");
+            let _ = ctx.read(&c).expect("read");
+        });
+
+        let last = resident();
+        let delta = 100.0 * (last / first - 1.0);
+        println!("  {r:>6}  {first:>12.3}  {last:>12.3}  {delta:>+8.1}%");
+    }
+}
+
 fn main() {
     let ctx = match GpuContext::new() {
         Ok(c) => c,
@@ -51,6 +139,13 @@ fn main() {
             std::process::exit(1);
         }
     };
+
+    if std::env::args().any(|a| a == "--position") {
+        for size in [512usize, 1024] {
+            position_probe(&ctx, size, 4);
+        }
+        return;
+    }
 
     let info = ctx.adapter_info();
     println!("═══════════════════════════════════════════════════════════════════════");
@@ -77,6 +172,10 @@ fn main() {
         let a = fill(size * size, 1);
         let b = fill(size * size, 2);
 
+        let wa = ctx.upload(&a, size, size).expect("upload");
+        let wb = ctx.upload(&b, size, size).expect("upload");
+        warm_up(&ctx, &wa, &wb);
+
         // CPU gets fewer reps at 1024: 1024^3 is ~1.07e9 multiply-adds and the
         // naive loop takes seconds. Timing it 20 times would dominate the run.
         let cpu_reps = if size >= 512 { 1 } else { 3 };
@@ -84,7 +183,6 @@ fn main() {
             let _ = cpu_matmul(&a, &b, size, size, size);
         });
 
-        let _ = ctx.matmul(&a, &b, size, size, size).expect("warmup");
         let rt_naive = median_ms(20, || {
             let _ = ctx.matmul(&a, &b, size, size, size).expect("rt naive");
         });
