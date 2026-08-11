@@ -285,6 +285,7 @@ fn holdout_accuracy(
     lr: f32,
     seed: u64,
     rebuild_adam_at: Option<usize>,
+    epochs: usize,
 ) -> f32 {
     let gx = ctx.upload(train_x, n_tr, 2).expect("x");
     let gy = ctx.upload(train_hot, n_tr, CLASSES).expect("y");
@@ -292,7 +293,7 @@ fn holdout_accuracy(
 
     let mut rng = datasets::Lcg::new(seed);
     let mut p = Params::new(ctx, &mut rng, opt);
-    for epoch in 0..EPOCHS {
+    for epoch in 0..epochs {
         // A resume: the parameters survive, the optimiser's memory of them does
         // not. Placed before the step so the epoch it names is the first one
         // running on rebuilt state.
@@ -535,7 +536,7 @@ fn main() {
         let mut top: (f32, f32) = (f32::NAN, f32::NAN);
         for &lr in rates.iter() {
             let acc = holdout_accuracy(
-                &ctx, &tr_x, &tr_hot, n_tr, &te_x, &te_y, opt, lr, 0xBEEF, None,
+                &ctx, &tr_x, &tr_hot, n_tr, &te_x, &te_y, opt, lr, 0xBEEF, None, EPOCHS,
             );
             println!("  {:>10?}  {lr:>10.4}  {acc:>12.4}", opt);
             if top.1.is_nan() || acc > top.1 {
@@ -574,6 +575,7 @@ fn main() {
                 best_lr,
                 seed,
                 None,
+                EPOCHS,
             );
             let resumed = holdout_accuracy(
                 &ctx,
@@ -586,6 +588,7 @@ fn main() {
                 best_lr,
                 seed,
                 Some(EPOCHS / 2),
+                EPOCHS,
             );
             println!(
                 "  {seed:>8x}  {whole:>12.4}  {resumed:>12.4}  {:>+10.4}",
@@ -628,6 +631,7 @@ fn main() {
                     best_lr,
                     seed,
                     None,
+                    EPOCHS,
                 );
                 let resumed = holdout_accuracy(
                     &ctx,
@@ -640,6 +644,7 @@ fn main() {
                     best_lr,
                     seed,
                     Some(at),
+                    EPOCHS,
                 );
                 d.push(resumed - whole);
             }
@@ -652,6 +657,63 @@ fn main() {
                 "  {:>8}    {mean:>+14.4}  {worst:>+14.4}",
                 format!("epoch {at}")
             );
+        }
+
+        // Which explanation the ordering supports.
+        //
+        // Late resumes cost more, and two stories fit: a late state is more
+        // fragile, or a late resume simply leaves too few epochs to recover from
+        // losing it. They differ in a testable way -- hold the resume epoch fixed
+        // and give the run more training afterwards. Under recovery the cost goes
+        // away; under fragility it does not.
+        //
+        // It goes away. Resuming at epoch 90 costs -0.0009 with ten epochs left
+        // and exactly nothing with thirty, sixty or a hundred and ten. The state
+        // discarded is identical in all four; only the time to re-converge
+        // differs, so the cost is the missing recovery and not the lateness.
+        //
+        // Which makes the practical reading narrow: discarding Adam's moments is
+        // free whenever the run has room to settle again, and the case to avoid
+        // is a resume near the end of a fixed budget.
+        println!();
+        println!("  resuming at epoch 90 with more training left afterwards");
+        println!(
+            "  {:>8}  {:>12}  {:>14}",
+            "total", "left after", "mean delta"
+        );
+        for total in [100usize, 120, 150, 200] {
+            let mut d = Vec::new();
+            for seed in [0xBEEFu64, 0xC0FFEE, 0xD00D, 0xFEED, 0xBEAD] {
+                let whole = holdout_accuracy(
+                    &ctx,
+                    &tr_x,
+                    &tr_hot,
+                    n_tr,
+                    &te_x,
+                    &te_y,
+                    Opt::Adam,
+                    best_lr,
+                    seed,
+                    None,
+                    total,
+                );
+                let resumed = holdout_accuracy(
+                    &ctx,
+                    &tr_x,
+                    &tr_hot,
+                    n_tr,
+                    &te_x,
+                    &te_y,
+                    Opt::Adam,
+                    best_lr,
+                    seed,
+                    Some(90),
+                    total,
+                );
+                d.push(resumed - whole);
+            }
+            let mean = d.iter().sum::<f32>() / d.len() as f32;
+            println!("  {total:>8}  {:>12}  {mean:>+14.4}", total - 90);
         }
 
         let mean = deltas.iter().sum::<f32>() / deltas.len() as f32;
