@@ -48,8 +48,18 @@ pub enum Activation {
     /// `max(0.01x, x)`. Keeps a gradient on the negative side, which ReLU does
     /// not.
     LeakyReLU,
-    /// Row-wise softmax, for a multiclass output layer. Unlike the others this
-    /// is not elementwise: every output depends on every logit in its row.
+    /// Row-wise softmax, for a multiclass output layer.
+    ///
+    /// Unlike the others this is not elementwise: every output depends on every
+    /// logit in its row, so there is no per-element derivative to return.
+    /// [`Activation::derivative`] returns **zeros** for this variant and the
+    /// training loop is expected to fuse softmax with cross-entropy, where the
+    /// combined gradient is `p - y`.
+    ///
+    /// A caller who differentiates it directly gets a silently dead gradient —
+    /// the layer stops learning, the loss stops falling, and nothing errors.
+    /// `softmax_returns_a_zero_derivative_and_that_is_deliberate` pins the zeros
+    /// so a later change cannot quietly replace them with a wrong non-zero.
     Softmax,
 }
 
