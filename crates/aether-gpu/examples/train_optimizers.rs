@@ -25,6 +25,7 @@
 
 use std::time::Instant;
 
+use aether_gpu::datasets;
 use aether_gpu::{AdamState, GpuContext, GpuTensor};
 
 const FOLDS: usize = 5;
@@ -61,24 +62,16 @@ impl Lcg {
 /// are a deterministic sweep, and two sweeps with the same spacing differ only
 /// by their noise, which is why splitting one sweep cannot produce a test set
 /// that is both unseen and in-distribution.
+///
+/// Delegates to `datasets::spirals_iid`, which this used to reimplement line for
+/// line -- same radius, same 2.2*pi sweep, same 0.30 and 0.12 jitter, same LCG
+/// constants. Two copies of a generator are two tasks waiting to diverge, and
+/// the cost of that is not hypothetical: `train_mlp_cv` differed from this one
+/// only in its sweep and jitter and reported an accuracy 0.14 lower, a gap that
+/// read as a property of the optimiser until the generators were compared. The
+/// wrapper is kept for the arity the rest of this file calls with.
 fn spirals_iid(seed: u64, per_class: usize) -> (Vec<f32>, Vec<usize>) {
-    let mut rng = Lcg(seed);
-    let mut x = Vec::new();
-    let mut y = Vec::new();
-    for class in 0..CLASSES {
-        for _ in 0..per_class {
-            let t = rng.next_f32();
-            let radius = 0.15 + 3.85 * t;
-            let angle = 2.2 * core::f32::consts::PI * t
-                + class as f32 * 2.0 * core::f32::consts::PI / CLASSES as f32;
-            let jr = (rng.next_f32() - 0.5) * 0.30;
-            let ja = (rng.next_f32() - 0.5) * 0.12;
-            x.push((radius + jr) * (angle + ja).cos() / 4.0);
-            x.push((radius + jr) * (angle + ja).sin() / 4.0);
-            y.push(class);
-        }
-    }
-    (x, y)
+    datasets::spirals_iid(seed, CLASSES, per_class)
 }
 
 fn spirals(seed: u64) -> (Vec<f32>, Vec<usize>) {
