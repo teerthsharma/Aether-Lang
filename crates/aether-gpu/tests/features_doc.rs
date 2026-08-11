@@ -166,6 +166,54 @@ fn the_documented_mutant_count_matches_the_harness() {
     );
 }
 
+/// Every kernel count in the repository README must match the shader too.
+///
+/// The previous change corrected that number in four places and recorded that
+/// binding it would mean parsing prose in a 2,500-line document. That is true of
+/// the *test* counts, which appear in sentences with no reliable shape. It is not
+/// true of this one: "N WGSL kernels" is a fixed phrase that occurs exactly where
+/// the claim is made, so a narrow pattern binds it without reading anything else.
+///
+/// Worth binding because it is the number that drifted twice — once in
+/// FEATURES.md by being incremented rather than counted, and once in the README
+/// by being left behind entirely. Every occurrence is checked rather than the
+/// first, since the README stated it in two places and updating one of them is
+/// the obvious way to fix this badly.
+///
+/// Reaching out of the crate for a repository file is a coupling, and a
+/// deliberate one: the alternative is the front page disagreeing with the code it
+/// describes, which is the more expensive failure.
+#[test]
+fn every_kernel_count_in_the_readme_matches_the_shader() {
+    let readme = crate_root().join("../../README.md");
+    let doc = fs::read_to_string(&readme)
+        .unwrap_or_else(|e| panic!("cannot read {}: {e}", readme.display()));
+    let actual = actual_kernel_count();
+
+    let words: Vec<&str> = doc.split_whitespace().collect();
+    let mut found = 0;
+    for pair in words.windows(2) {
+        if pair[1] != "WGSL" {
+            continue;
+        }
+        if let Ok(claimed) = pair[0].parse::<usize>() {
+            found += 1;
+            assert_eq!(
+                claimed, actual,
+                "README.md claims {claimed} WGSL kernels; {actual} @compute entry \
+                 points exist"
+            );
+        }
+    }
+
+    assert!(
+        found > 0,
+        "README.md states no kernel count, so this test now passes by checking \
+         nothing — the phrase it binds has been reworded and the guard needs \
+         following"
+    );
+}
+
 /// Every command the provenance table offers must name a binary or test target
 /// that exists.
 ///

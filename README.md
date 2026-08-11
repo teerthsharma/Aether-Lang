@@ -2476,9 +2476,12 @@ Longer than most projects' feature lists. That is the point.
 
 **The core claim is unmeasured.** Whether topological convergence beats scalar convergence on real problems, against a tuned baseline, has not been tested. The machinery is correct; its *value* is unestablished.
 
-**The GPU backend is not used by anything.** `aether-gpu` is real — 13 WGSL
-kernels, resident tensors, 60 tests, verified against finite differences and a
-mutation matrix — but no line of `aether-core` or `aether-lang` calls it. Both
+**The GPU backend is not used by anything outside its own crate.** `aether-gpu`
+is real — 20 WGSL kernels, resident tensors, 93 tests, verified against finite
+differences and a mutation matrix — but no line of `aether-core` or `aether-lang`
+calls it, and none can: `aether-core` is `no_std` and `wgpu` is not. Within
+`aether-gpu`, `scheduled_attention_or_cpu` and its backward counterpart route
+between the two implementations by capability. Both
 candidate integrations have been measured and neither has been made:
 `Tensor::matmul` crosses over at n=128 and reaches 38× at n=512 with f64↔f32
 conversion counted, and `pairwise_sqdist` never pays because the persistence
