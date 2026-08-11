@@ -996,7 +996,27 @@ assumed anyway — the reason to run it was that an assumption and a measurement
 are the same shape until one of them fails.
 
 Whole-harness result on this tree, RTX 4060 over Vulkan: **0 of 24 escape**, no
-pattern unmatched. Nineteen of the twenty-four are caught by exactly one suite,
+pattern unmatched.
+
+Re-run after the accuracy work that added four tests to `gpu_parity`, and each of
+those four catches a mutant:
+
+| test added | mutants it catches |
+|---|---:|
+| `rectangular_matmul_accuracy_against_f64_tracks_the_reduction_depth` | 1 |
+| `per_entry_error_stays_inside_the_condition_number_bound` | 1 |
+| `a_single_entry_is_far_less_accurate_than_the_matrix_figure_suggests` | 1 |
+| `the_condition_number_of_every_entry_costs_one_extra_matmul` | 1 |
+
+That is worth checking rather than assuming. Those four were written to *document*
+where f32 accuracy goes — a rectangular shape, a conditioning bound, the gap
+between a matrix figure and a single entry — and a test written to record a
+property can easily assert only what the implementation already does. Each one
+independently fails on an injected defect, so they are carrying detection and not
+just prose.
+
+One cell crashed and was retried, which is the wgpu teardown intermittent this
+crate works around and has not fixed. Nineteen of the twenty-four are caught by exactly one suite,
 so dropping any single suite would let nineteen defects through — which is why
 the harness runs them separately and reports per-suite rather than combining
 them into one pass or fail.
