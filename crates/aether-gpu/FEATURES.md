@@ -1062,14 +1062,52 @@ memory.** A naive mutation score for WGSL understates coverage badly, and the
 figure to quote is the curated 0 of 24 with the mechanical sweep as context, not
 52 of 90 as though it were a hole count.
 
-Limits: three of the fifty-two are classified and forty-nine are not. The probe
-dispatches five of the twenty kernels, so a survivor in `softmax_rows`,
-`adam_update`, `transpose`, `column_sums`, `sigmoid`, `pairwise_sqdist` or any
-backward kernel produces an identical checksum because nothing ran it — which is
-indistinguishable, in that output, from a mutation that ran and changed nothing.
-Classifying the rest means extending the probe first. Only comparison operators
-were swept; arithmetic and index expressions are untouched, and the two comment
-sites were found by reading survivors rather than by anticipating them.
+#### All of them, and the four that are real
+
+The probe now dispatches all twenty kernels rather than five, and
+`assert_all_kernels_covered` fails the run if the shader gains one it does not
+reach — without that, the gap returns silently the first time a kernel is added
+and every later verdict is quietly narrower than it looks.
+`classify-survivors.sh` runs every survivor against the baseline.
+
+| of 54 survivors | |
+|---|---:|
+| equivalent — identical output, nothing to catch | **50** |
+| **changed a kernel's output with every suite passing** | **4** |
+
+Fifty are equivalent, which is the expected outcome and the reason the raw
+survivor count is not a coverage figure. The four are not.
+
+| site | kernel | flip | what it does |
+|---|---|---|---|
+| 13 | `pairwise_sqdist` | `j >= dims.m` → `j >` | thread `j = m` writes `c[i*m + m]`, the **next row's first entry** |
+| 25 | `softmax_xent_grad` | `j < dims.n` → `<=` | reads one column past the row, into the next row |
+| 43 | `scheduled_attention` | `n < block_size` → `<=` | one extra key per block |
+| 57 | `attention_row_stats` | `d < head_dim` → `<=` | one extra component per row |
+
+Every one reads or writes into **adjacent, in-bounds** memory. That is exactly
+what separates them from the fifty: a flip that runs off the end of a buffer is
+bounds-checked into a discarded write or a zero read and changes nothing, while a
+flip that lands one element further along the *same* allocation silently
+corrupts real data. The bounds checking that makes most boundary mutants harmless
+is no help at all here.
+
+The same defect is caught elsewhere, which is what makes these holes rather than
+quirks: flipping `matmul`'s column guard (site 2) writes into the next row too and
+`gpu_parity` reports 6 of 43 failing. `pairwise_sqdist` has the identical defect
+and nothing notices.
+
+Localisation was measured, not assumed. Applying site 13 changes the
+`pairwise_sqdist` checksum and no other; site 25 changes `softmax_xent_grad` and
+no other. Each defect stays inside its own kernel, so the probe is reporting the
+kernel at fault rather than a downstream consequence.
+
+Limits: only comparison operators were swept, so arithmetic and index expressions
+are untouched and the true hole count is a lower bound. The two comment sites were
+found by reading the survivor list rather than by anticipating them, so other
+classes that are equivalent for unnoticed reasons may remain. The four holes are
+identified and **not yet closed** — no test in the tree fails on any of them
+today, which is the whole point of recording them here with their sites.
 
 ### The harness deleted uncommitted work
 
