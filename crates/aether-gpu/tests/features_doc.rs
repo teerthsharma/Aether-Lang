@@ -347,6 +347,107 @@ fn the_readme_line_counts_have_not_rotted() {
     }
 }
 
+/// Every ignored-test count in the README must equal the number of gated tests.
+///
+/// The README states this figure in four places — the badge, the status
+/// dashboard, the claims table, and the paragraph explaining what hardware-gated
+/// means. All four drifted, twice, within one session: 38 became 23 became 76,
+/// and each correction was made by running a command and pasting the result,
+/// which is the process that produced the stale numbers in the first place.
+///
+/// Unlike the passed count this one is derivable. A test is ignored exactly when
+/// it carries `#[cfg_attr(not(feature = "gpu"), ignore)]` and the feature is off,
+/// so counting the attribute gives the number a run will report — checked against
+/// both `cargo test -p aether-gpu` and the workspace run, which agree at 76
+/// because every gated test lives in this crate.
+///
+/// The passed count is deliberately not bound. 301 `#[test]` attributes exist
+/// outside `aether-kernel` against 291 reported, because some are behind `cfg`
+/// gates that keep them out of the build entirely, and a guard that has to model
+/// which ones would be a second implementation of Cargo's feature resolution.
+#[test]
+fn the_readme_ignored_count_matches_the_gated_tests() {
+    let readme = crate_root().join("../../README.md");
+    let doc = fs::read_to_string(&readme)
+        .unwrap_or_else(|e| panic!("cannot read {}: {e}", readme.display()));
+
+    let gated = {
+        let dir = crate_root();
+        let mut total = 0;
+        for sub in ["tests", "src"] {
+            let Ok(entries) = fs::read_dir(dir.join(sub)) else {
+                continue;
+            };
+            for entry in entries {
+                let path = entry.expect("readable entry").path();
+                if path.extension().and_then(|e| e.to_str()) != Some("rs") {
+                    continue;
+                }
+                // Lines that *are* the attribute, not lines that mention it.
+                //
+                // The first version counted every occurrence of the string and
+                // reported 78 against 76, because this test's own doc comment and
+                // its failure message each contain one. That is the same defect
+                // as a `#[test]` counter that counts the two `#[test]`s inside the
+                // guard counting them, found in this file an hour earlier and
+                // repeated here — a counter written by pattern-matching on the
+                // thing it counts will always find itself.
+                total += fs::read_to_string(&path)
+                    .expect("readable source")
+                    .lines()
+                    .filter(|l| {
+                        l.trim_start()
+                            .starts_with(r#"#[cfg_attr(not(feature = "gpu"), ignore"#)
+                    })
+                    .count();
+            }
+        }
+        total
+    };
+
+    assert!(
+        gated > 0,
+        "no gated tests found, so this guard passes by counting nothing — the \
+         attribute's spelling has changed"
+    );
+
+    // Plain occurrences: "76 ignored".
+    let words: Vec<&str> = doc.split_whitespace().collect();
+    let mut found = 0;
+    for pair in words.windows(2) {
+        if !pair[1].starts_with("ignored") {
+            continue;
+        }
+        // Skip the badge's percent-encoded form, handled separately below: its
+        // digits run together with the encoding and parse to a different number.
+        let Ok(claimed) = pair[0].trim_start_matches('`').parse::<usize>() else {
+            continue;
+        };
+        found += 1;
+        assert_eq!(
+            claimed, gated,
+            "README.md claims {claimed} ignored tests; {gated} carry \
+             #[cfg_attr(not(feature = \"gpu\"), ignore)]. Re-run the gate and \
+             update every occurrence, not the one that was noticed."
+        );
+    }
+
+    assert!(
+        found >= 3,
+        "only {found} plain ignored-counts found in README.md; the figure appears \
+         in the dashboard, the claims table and the hardware-gated paragraph, so \
+         fewer than three means the phrasing changed and this guard is now \
+         checking less than it reads as checking"
+    );
+
+    // The badge encodes its comma and space, so it is matched literally.
+    assert!(
+        doc.contains(&format!("%20{gated}%20ignored")),
+        "the test badge does not encode {gated} ignored; it is the one place the \
+         count appears that a reader sees without scrolling"
+    );
+}
+
 /// The precision budget must quote tolerances the suites actually assert.
 ///
 /// That table is the only place the crate says how much numerical error is

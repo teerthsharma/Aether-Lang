@@ -120,7 +120,7 @@ The pitch is one sentence: *some loops should terminate when the shape of the da
 
 - Brevity. You saw the table of contents.
 - That the language is production-ready. It is a research language. It has a seal emoji as a keyword.
-- GPU acceleration of the language or the topology engine. There is a real GPU backend — `aether-gpu`, 101 tests, measured on an RTX 4060 — and **nothing in `aether-core` or `aether-lang` calls it**. The cost and precision of both candidate integrations are measured; the integrations are not made. An earlier version of this line said there was no GPU at all, which was true of the `wgpu` dependency it described and is no longer true of the tree.
+- GPU acceleration of the language or the topology engine. There is a real GPU backend — `aether-gpu`, 102 tests, measured on an RTX 4060 — and **nothing in `aether-core` or `aether-lang` calls it**. The cost and precision of both candidate integrations are measured; the integrations are not made. An earlier version of this line said there was no GPU at all, which was true of the `wgpu` dependency it described and is no longer true of the tree.
 
 Grab a coffee. There are 34,456 lines of Rust in `crates/` across 78 files and 11,637 lines of Lean in `Aether/` below — raw line counts including tests, comments and blanks, each reproduced by the command in the claims table — and roughly a third of this document is about the ways I was wrong.
 
@@ -216,7 +216,7 @@ All fixed; receipts in [PR #177](https://github.com/teerthsharma/Aether-Lang/pul
 
 The rule: a row is **Active** only if a command in [`.github/workflows/ci.yml`](.github/workflows/ci.yml) produces its evidence. Test count in a file is not evidence if the file never runs.
 
-A third status was needed once the GPU backend arrived. 🖥️ **Hardware-gated** means the tests need an adapter no CI runner has. They were briefly worse than useless: a test that returns early on a missing adapter *passes*, so `cargo test --workspace` reported roughly forty GPU tests green while executing none of them — the exact green checkmark this document spends a section warning about, built by its own author. They are now `#[ignore]`d behind an off-by-default `gpu` feature, so the same run prints `23 ignored` across the hardware suites. CI still compiles them with `cargo build -p aether-gpu --tests --features gpu`, so a broken one is caught rather than hidden behind the ignore. Asking for the hardware tests and finding no adapter now fails rather than skipping, so the feature flag is the only switch and cannot be half-honoured. The honest reading of a hardware-gated row is "verified on one developer machine", which is weaker than every other Active row here.
+A third status was needed once the GPU backend arrived. 🖥️ **Hardware-gated** means the tests need an adapter no CI runner has. They were briefly worse than useless: a test that returns early on a missing adapter *passes*, so `cargo test --workspace` reported roughly forty GPU tests green while executing none of them — the exact green checkmark this document spends a section warning about, built by its own author. They are now `#[ignore]`d behind an off-by-default `gpu` feature, so the same run prints `76 ignored` across the hardware suites. CI still compiles them with `cargo build -p aether-gpu --tests --features gpu`, so a broken one is caught rather than hidden behind the ignore. Asking for the hardware tests and finding no adapter now fails rather than skipping, so the feature flag is the only switch and cannot be half-honoured. The honest reading of a hardware-gated row is "verified on one developer machine", which is weaker than every other Active row here.
 
 | Subsystem | Status | Evidence |
 |---|---|---|
@@ -237,7 +237,7 @@ A third status was needed once the GPU backend arrived. 🖥️ **Hardware-gated
 | Kernel *boots* | ⛔ Ungated | compiles ≠ boots; needs QEMU logs |
 | External TDA parity | ⛔ Ungated | no ripser/GUDHI fixture comparison |
 | Lean 4 formalization | ⛔ Ungated | 11,637 lines, 48 theorems, **no `lake build` in CI** |
-| GPU compute backend (`aether-gpu`) | 🖥️ **Hardware-gated** | **101 tests**, RTX 4060 / Vulkan. `cargo test -p aether-gpu --features gpu --release`. In CI they report as **ignored**, not passed |
+| GPU compute backend (`aether-gpu`) | 🖥️ **Hardware-gated** | **102 tests**, RTX 4060 / Vulkan. `cargo test -p aether-gpu --features gpu --release`. In CI they report as **ignored**, not passed |
 | GPU used by `aether-core` | ⛔ **Ungated** | nothing routes through it; cost and precision measured, integration not made |
 | Attention backward pass | ❌ Does not exist | forward only; no gradcheck possible |
 | Wall-clock speedup claims | ❌ Withdrawn | see [What We Got Wrong](#what-we-got-wrong) |
@@ -2003,7 +2003,7 @@ So the same persistence code that runs in the CLI runs in `aether-kernel` on bar
 It **compiles** for `x86_64-unknown-none`. Booting is not tested. Different claims.
 
 **Is there GPU acceleration?**
-There is a GPU **backend** — `aether-gpu`, 20 WGSL kernels, resident tensors, 101 tests, an RTX 4060 over Vulkan. There is no GPU **acceleration of this project**, because nothing in `aether-core` or `aether-lang` calls it. Both integrations are measured and neither is made: `Tensor::matmul` pays above n=128, and *how much* it pays is not measurable on this machine — the same ratio has been observed anywhere from 10× to 63× at n=512, and printing the individual timings showed why: across six runs the CPU term moved 1.6× while the GPU term moved 5.2×, so the ratio inherits a swing that no amount of repetition or interleaving removes. An earlier version of this line quoted 38× as though it were a property of the code. The crossover is the durable claim, because a threshold tolerates noise that a magnitude does not. `pairwise_sqdist` never pays, because the persistence reduction is CPU-side and sequential so the matrix has to come back. Wiring the first one in means deciding whether `ml::Tensor` may drop to f32, which is a semantic change no benchmark authorises.
+There is a GPU **backend** — `aether-gpu`, 20 WGSL kernels, resident tensors, 102 tests, an RTX 4060 over Vulkan. There is no GPU **acceleration of this project**, because nothing in `aether-core` or `aether-lang` calls it. Both integrations are measured and neither is made: `Tensor::matmul` pays above n=128, and *how much* it pays is not measurable on this machine — the same ratio has been observed anywhere from 10× to 63× at n=512, and printing the individual timings showed why: across six runs the CPU term moved 1.6× while the GPU term moved 5.2×, so the ratio inherits a swing that no amount of repetition or interleaving removes. An earlier version of this line quoted 38× as though it were a property of the code. The crossover is the durable claim, because a threshold tolerates noise that a magnitude does not. `pairwise_sqdist` never pays, because the persistence reduction is CPU-side and sequential so the matrix has to come back. Wiring the first one in means deciding whether `ml::Tensor` may drop to f32, which is a semantic change no benchmark authorises.
 
 This answer used to read "No", and the `wgpu`/`pollster`/`bytemuck` entries it referred to — in `aether-lang`'s default feature set with zero call sites — have since been deleted. The current backend is a separate crate on a current wgpu.
 
@@ -2605,6 +2605,7 @@ The scheduled-attention module is a port of [`triton-lang/kernels#22`](https://g
   <em>Every number above was measured. Every claim names its control.<br>
   The section where I am wrong is a third of the document, and that is the feature.</em>
 </p>
+
 
 
 

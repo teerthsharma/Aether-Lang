@@ -15,7 +15,7 @@ wrong answer is worth keeping — but it means the current state has to be
 reconstructed from a sequence of corrections. This section is the state.
 
 **The backend works and nothing uses it.** 20 WGSL kernels, resident tensors,
-batched submission, 101 tests, 0 of 24 mutants escaping. No line of
+batched submission, 102 tests, 0 of 24 mutants escaping. No line of
 `aether-core` or `aether-lang` calls it.
 
 `scheduled_attention_resident` returns a `GpuTensor` so attention output can feed
@@ -1974,6 +1974,7 @@ Ordered by value, highest first.
 6. **f16 storage** with f32 accumulation.
 7. Raise `PersistenceConfig` caps past 1024 so the distance kernel earns its
    dispatch, then route Vietoris–Rips through it.
+
 
 
 
