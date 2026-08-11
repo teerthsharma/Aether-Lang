@@ -78,24 +78,23 @@ fn derivatives_match_central_differences_away_from_kinks() {
     }
 }
 
-/// `Activation::Softmax::derivative` returns zeros, and a caller must not use it.
+/// `Activation::Softmax::derivative` returns zeros, and nothing may consume them.
 ///
-/// This pins a trap rather than a property. Softmax is not elementwise — every
-/// output depends on every logit in its row — so there is no per-element
-/// derivative to return, and the implementation returns a zero tensor with the
-/// comment "Handled specially". The training loop is expected to fuse softmax
-/// with cross-entropy, where the combined gradient is `p - y` and this function
-/// is never called.
+/// The previous version of this comment called the zeros deliberate, on the
+/// strength of a source comment reading "Handled specially". Nothing handled
+/// them: `DenseLayer::backward` multiplied by them like any other activation,
+/// which zeroed the layer's gradient and everything upstream of it.
+/// `a_softmax_output_layer_learns` below is what established that, and the
+/// backward pass now computes the exact Jacobian-vector product instead.
 ///
-/// A caller who does call it gets zeros, which is a silently dead gradient: the
-/// layer stops learning, the loss stops falling, and nothing errors. That is
-/// worth a test not because zeros are correct but because they are *deliberate*,
-/// and a later change that made this return ones — the value the private scalar
-/// path uses — would look like a fix and would produce a wrong gradient instead
-/// of an absent one.
+/// The zeros stay, because there is no elementwise derivative for this variant
+/// to return and a plausible-looking non-zero would be worse. This pins them so
+/// that a later change returning ones — the value the private scalar path uses,
+/// and correct only under a fusion this crate cannot perform — fails here rather
+/// than in a training run.
 #[test]
-fn softmax_returns_a_zero_derivative_and_that_is_deliberate() {
-    let logits = Tensor::new(&[0.5, -1.0, 2.0], &[1, 3]);
+fn softmax_returns_a_zero_derivative_that_nothing_consumes() {
+    let logits = Tensor::new(&[0.5, -1.0, 2.0], &[3, 1]);
     let derivative = Activation::Softmax.derivative(&logits);
 
     assert_eq!(derivative.shape, logits.shape);
@@ -107,4 +106,64 @@ fn softmax_returns_a_zero_derivative_and_that_is_deliberate() {
              gradient where this produces an absent one"
         );
     }
+}
+
+/// A network with a softmax output layer must actually train.
+///
+/// The variant's doc says the training loop is expected to fuse softmax with
+/// cross-entropy, where the combined gradient is `p - y` and the elementwise
+/// derivative is never used. This checks that the loop does what the doc says.
+///
+/// If it does not, the failure is silent and total. `DenseLayer::backward`
+/// computes `delta = grad_output * activation.derivative(z)`, and that
+/// derivative is a zero tensor for softmax — so the output layer's gradients are
+/// zero, and the zero it propagates backwards kills every layer before it too. A
+/// network like this does not train slowly; it does not train at all, while the
+/// loss stays finite and nothing errors.
+#[test]
+fn a_softmax_output_layer_learns() {
+    use aether_core::ml::linalg::LossConfig;
+    use aether_core::ml::neural::{OptimizerConfig, MLP};
+
+    let mut mlp = MLP::new(
+        OptimizerConfig::SGD {
+            learning_rate: 0.5,
+            momentum: 0.0,
+        },
+        LossConfig::BinaryCrossEntropy,
+    );
+    mlp.add_layer(3, 4, Activation::ReLU, Some(1));
+    mlp.add_layer(4, 2, Activation::Softmax, Some(2));
+
+    let x = vec![
+        Tensor::new(&[1.0, 0.0, 0.0], &[3, 1]),
+        Tensor::new(&[0.0, 1.0, 0.0], &[3, 1]),
+    ];
+    let y = vec![
+        Tensor::new(&[1.0, 0.0], &[2, 1]),
+        Tensor::new(&[0.0, 1.0], &[2, 1]),
+    ];
+
+    let before = mlp.layers[1].weights.data.borrow().clone();
+    let result = mlp.fit(&x, &y, 40);
+    let after = mlp.layers[1].weights.data.borrow().clone();
+
+    let moved = before
+        .iter()
+        .zip(&after)
+        .map(|(a, b)| (a - b).abs())
+        .fold(0.0f64, f64::max);
+
+    assert!(
+        moved > 1e-9,
+        "the softmax layer's weights did not move at all after 40 epochs \
+         (largest change {moved:.3e}); its gradient is being multiplied by the \
+         zero tensor that Activation::Softmax::derivative returns"
+    );
+    assert!(
+        result.final_loss < result.loss_history[0],
+        "loss did not fall: {} to {}",
+        result.loss_history[0],
+        result.final_loss
+    );
 }

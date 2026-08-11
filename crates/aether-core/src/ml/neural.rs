@@ -51,15 +51,20 @@ pub enum Activation {
     /// Row-wise softmax, for a multiclass output layer.
     ///
     /// Unlike the others this is not elementwise: every output depends on every
-    /// logit in its row, so there is no per-element derivative to return.
-    /// [`Activation::derivative`] returns **zeros** for this variant and the
-    /// training loop is expected to fuse softmax with cross-entropy, where the
-    /// combined gradient is `p - y`.
+    /// logit in its row, so there is no per-element derivative to return and
+    /// [`Activation::derivative`] returns zeros for this variant.
     ///
-    /// A caller who differentiates it directly gets a silently dead gradient —
-    /// the layer stops learning, the loss stops falling, and nothing errors.
-    /// `softmax_returns_a_zero_derivative_and_that_is_deliberate` pins the zeros
-    /// so a later change cannot quietly replace them with a wrong non-zero.
+    /// [`DenseLayer::backward`] therefore computes the exact Jacobian-vector
+    /// product instead, `dL/dz_i = p_i (g_i - <p, g>)`, which is correct for any
+    /// loss. It does *not* assume the pass-through form that a fused categorical
+    /// cross-entropy would allow, because this crate has no such loss to fuse
+    /// with.
+    ///
+    /// Do not multiply by [`Activation::derivative`] for this variant. Until it
+    /// was fixed, that is what happened: the zeros silently killed the gradient
+    /// for the layer and for every layer before it, so a network with a softmax
+    /// output did not train at all while its loss stayed finite and nothing
+    /// errored. `a_softmax_output_layer_learns` is the regression test.
     Softmax,
 }
 
@@ -330,8 +335,41 @@ impl DenseLayer {
             .expect("Forward must be called before backward")
             .clone();
 
-        let act_deriv = self.activation.derivative(&last_z);
-        let delta = grad_output.mul(&act_deriv);
+        // Softmax has no elementwise derivative — every output depends on every
+        // logit in its row — so it cannot be handled by the multiply below and
+        // is computed here as an exact Jacobian-vector product:
+        //
+        //     dL/dz_i = p_i * (g_i - sum_j p_j g_j)
+        //
+        // `Activation::derivative` returns a zero tensor for this variant, with
+        // a comment reading "Handled specially". Nothing handled it. The
+        // multiply below therefore produced a zero delta, which zeroed this
+        // layer's gradients *and* the gradient it propagates backwards, so a
+        // network with a softmax output layer did not train at all while its
+        // loss stayed finite and nothing errored.
+        //
+        // The exact form is used rather than the pass-through that
+        // `derivative_scalar` implies, because pass-through is only correct when
+        // the incoming gradient is already `p - y` from a fused categorical
+        // cross-entropy, and this crate has no such loss to fuse with. A wrong
+        // gradient is worse than the absent one it replaces.
+        let delta = if self.activation == Activation::Softmax {
+            let p = self.activation.apply(&last_z);
+            let p_data = p.data.borrow();
+            let g_data = grad_output.data.borrow();
+            let dot: f64 = p_data.iter().zip(g_data.iter()).map(|(a, b)| a * b).sum();
+            let values: Vec<f64> = p_data
+                .iter()
+                .zip(g_data.iter())
+                .map(|(pi, gi)| pi * (gi - dot))
+                .collect();
+            drop(p_data);
+            drop(g_data);
+            Tensor::new(&values, &grad_output.shape)
+        } else {
+            let act_deriv = self.activation.derivative(&last_z);
+            grad_output.mul(&act_deriv)
+        };
 
         // Gradients
         // dW = delta * input^T
