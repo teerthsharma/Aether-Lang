@@ -7,13 +7,13 @@
 //!
 //! ═══════════════════════════════════════════════════════════════════════════════
 
+#![warn(missing_docs)]
 // ═══════════════════════════════════════════════════════════════════════════════
 // Aether-Lang — invented by Teerth Sharma
 // https://github.com/teerthsharma/Aether-Lang
 // Copyright (c) 2026 Teerth Sharma. All Rights Reserved.
 // ═══════════════════════════════════════════════════════════════════════════════
 //
-
 #![allow(dead_code)]
 
 #[cfg(feature = "alloc")]
@@ -34,11 +34,22 @@ use super::tensor::Tensor;
 /// Activation function types
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum Activation {
+    /// `max(0, x)`. Derivative is zero at exactly zero, matching the GPU
+    /// kernel — the two agree on the kink, which a parity test pins.
     ReLU,
+    /// Logistic. Saturates at both tails, where the gradient it passes back is
+    /// near zero regardless of the loss.
     Sigmoid,
+    /// Hyperbolic tangent: sigmoid rescaled to `[-1, 1]` and centred.
     Tanh,
+    /// Identity. The output layer of a regressor, where squashing would bound a
+    /// target that is not bounded.
     Linear,
+    /// `max(0.01x, x)`. Keeps a gradient on the negative side, which ReLU does
+    /// not.
     LeakyReLU,
+    /// Row-wise softmax, for a multiclass output layer. Unlike the others this
+    /// is not elementwise: every output depends on every logit in its row.
     Softmax,
 }
 
@@ -136,33 +147,62 @@ impl Activation {
 // Optimizers
 // ═══════════════════════════════════════════════════════════════════════════════
 
+/// Which optimiser to use, and its hyperparameters.
 #[derive(Debug, Clone)]
 pub enum OptimizerConfig {
+    /// Gradient descent, optionally with momentum.
     SGD {
+        /// Step size. Applied to the averaged batch gradient, so it does not
+        /// need rescaling with batch size.
         learning_rate: f64,
+        /// Fraction of the previous step carried forward. Zero is plain descent.
         momentum: f64,
     },
+    /// Adam: per-parameter steps from the first and second gradient moments.
     Adam {
+        /// Step size, before bias correction and the second-moment scaling.
         learning_rate: f64,
+        /// Decay for the first moment.
         beta1: f64,
+        /// Decay for the second moment.
         beta2: f64,
+        /// Added to the square root of the second moment, **outside** it. Inside
+        /// changes the update at small gradients and is a mutant this crate
+        /// tests for.
         epsilon: f64,
     },
 }
 
+/// Per-layer optimiser buffers, allocated to match an [`OptimizerConfig`].
+///
+/// Held separately from the config because the shapes depend on the layer while
+/// the hyperparameters do not, and because a layer exists before an optimiser is
+/// chosen for it.
 #[derive(Debug, Clone)]
 pub enum OptimizerState {
+    /// Momentum buffers, one per parameter tensor.
     SGD {
+        /// Weight velocity.
         velocity_w: Tensor,
+        /// Bias velocity.
         velocity_b: Tensor,
     },
+    /// Adam's two moment estimates per parameter, plus the step count.
     Adam {
+        /// First moment of the weight gradient.
         m_w: Tensor,
+        /// Second moment of the weight gradient.
         v_w: Tensor,
+        /// First moment of the bias gradient.
         m_b: Tensor,
+        /// Second moment of the bias gradient.
         v_b: Tensor,
+        /// Updates applied so far. Bias correction divides by `1 - beta^t`, so
+        /// this is load-bearing rather than diagnostic: dropping it is a mutant
+        /// this crate tests for.
         t: u64,
     },
+    /// No state, before [`DenseLayer::init_optimizer`] has run.
     None,
 }
 
@@ -173,10 +213,15 @@ pub enum OptimizerState {
 /// Dense (fully connected) layer
 #[derive(Debug, Clone)]
 pub struct DenseLayer {
-    pub weights: Tensor, // [output_size, input_size]
-    pub biases: Tensor,  // [output_size]
+    /// `[output_size, input_size]`, row-major.
+    pub weights: Tensor,
+    /// `[output_size]`, broadcast across the batch.
+    pub biases: Tensor,
+    /// Features accepted per sample.
     pub input_size: usize,
+    /// Features produced per sample.
     pub output_size: usize,
+    /// Applied after the affine map.
     pub activation: Activation,
 
     // Cache for backprop
@@ -188,6 +233,10 @@ pub struct DenseLayer {
 }
 
 impl DenseLayer {
+    /// A layer with randomly initialised weights and zero biases.
+    ///
+    /// The optimiser state starts as [`OptimizerState::None`];
+    /// [`DenseLayer::init_optimizer`] allocates it once the optimiser is known.
     pub fn new(
         input_size: usize,
         output_size: usize,
@@ -220,6 +269,10 @@ impl DenseLayer {
         }
     }
 
+    /// Allocate the optimiser state this layer needs.
+    ///
+    /// Separate from construction because the buffers depend on which optimiser
+    /// will run, and a layer can be built before that is decided.
     pub fn init_optimizer(&mut self, config: &OptimizerConfig) {
         match config {
             OptimizerConfig::SGD { .. } => {
@@ -375,12 +428,17 @@ impl DenseLayer {
 /// Multi-Layer Perceptron neural network
 #[derive(Debug, Clone)]
 pub struct MLP {
+    /// Layers in forward order. Each layer's `input_size` must equal the
+    /// previous layer's `output_size`; nothing enforces that at construction.
     pub layers: Vec<DenseLayer>,
+    /// Optimiser applied to every layer.
     pub config: OptimizerConfig,
+    /// Loss the backward pass differentiates.
     pub loss: LossConfig,
 }
 
 impl MLP {
+    /// An empty network. Add layers before training.
     pub fn new(config: OptimizerConfig, loss: LossConfig) -> Self {
         Self {
             layers: Vec::new(),
@@ -441,6 +499,10 @@ impl MLP {
         loss
     }
 
+    /// Train for a fixed number of epochs and report what happened.
+    ///
+    /// Returns rather than prints, so a caller comparing configurations reads
+    /// the loss history instead of the terminal.
     pub fn fit(&mut self, x: &[Tensor], y: &[Tensor], epochs: usize) -> TrainingResult {
         let mut result = TrainingResult::default();
         let n_samples = x.len();
@@ -467,9 +529,17 @@ impl MLP {
 /// Training result
 #[derive(Debug, Clone)]
 pub struct TrainingResult {
+    /// Epochs actually run, which is fewer than requested if training stopped
+    /// early.
     pub epochs: u32,
+    /// Loss after the last epoch.
     pub final_loss: f64,
+    /// Whether the convergence criterion fired rather than the epoch budget
+    /// running out. A run that used its whole budget has not converged, however
+    /// low its loss.
     pub converged: bool,
+    /// Loss after every epoch, in order. Kept because a final number cannot
+    /// distinguish converging from oscillating around the same value.
     pub loss_history: Vec<f64>,
 }
 
