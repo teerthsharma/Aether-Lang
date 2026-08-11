@@ -69,6 +69,24 @@ mutant_run_suite() {
         return 1
     fi
 
+    # A test binary that died rather than reporting. This is a third thing again,
+    # and it is deliberately *not* counted as catching the mutant.
+    #
+    # A crash has two possible causes and the output cannot separate them: the
+    # mutant broke something badly enough to take the process down, or something
+    # unrelated did. This crate has a documented intermittent of the second kind
+    # — a STATUS_ACCESS_VIOLATION in wgpu's instance teardown, worked around by
+    # pinning a single backend and never fully eliminated. Scoring a crash as a
+    # catch would credit coverage to whichever of those it was.
+    #
+    # Returning "survives" errs toward reporting less coverage than exists, which
+    # is the safe direction for a number whose whole purpose is to say how much
+    # the suite would notice.
+    if printf '%s' "$out" | grep -qE 'STATUS_ACCESS_VIOLATION|test exited abnormally|didn.t exit successfully'; then
+        printf " %-${width}s" "crash"
+        return 0
+    fi
+
     printf '\n'
     echo "cargo produced neither a test result nor a compile error for" >&2
     echo "  mutant: $mutant" >&2
