@@ -42,7 +42,7 @@
 //! `matmul` uses the untiled kernel), and `adam_moments` runs as the first of the
 //! two dispatches inside `adam_update_resident`.
 
-use aether_core::scheduled::dense_causal_block_schedule;
+use aether_core::scheduled::{dense_causal_block_schedule, random_block_schedule};
 use aether_gpu::{AttentionPath, GpuContext};
 
 /// FNV-1a over the raw bits of every output element.
@@ -89,8 +89,29 @@ fn main() {
     );
     println!();
 
+    // `--values` prints every output instead of a checksum.
+    //
+    // A checksum answers "did anything change" and deliberately cannot answer
+    // "by how much", which turns out to be the question that matters. Several
+    // kernels subtract a running maximum purely for numerical stability, and the
+    // result is invariant to it: `exp(a - mx) / sum(exp(a - mx))` is the same
+    // softmax for any `mx`. A mutation that perturbs such a maximum changes the
+    // last bits of the output and nothing else, so it registers as a changed
+    // checksum while the kernel remains correct.
+    //
+    // Calling that a coverage hole would demand a test asserting bit-exact
+    // internals, which is a test of the rounding and not of the arithmetic. The
+    // values let the difference be measured against a tolerance instead.
+    let dump_values = std::env::args().any(|a| a == "--values");
+
     let mut all: u64 = 0xcbf2_9ce4_8422_2325;
     let mut report = |name: &str, out: &[f32]| {
+        if dump_values {
+            for (i, v) in out.iter().enumerate() {
+                println!("{name}\t{i}\t{v:.9e}");
+            }
+            return;
+        }
         let c = checksum(out);
         println!("  {name:<28} {c:#018x}  {} elements", out.len());
         all ^= c;
@@ -237,6 +258,27 @@ fn main() {
             .expect("attention"),
     );
 
+    // The same attention against a *sparse* schedule, which is a different test
+    // rather than more of the same.
+    //
+    // Under a dense causal schedule every block a query may see is already in its
+    // row, so a mutation that reads one column past a block's end lands either on
+    // a column the causal mask rejects or on one the schedule already covers.
+    // Both are nearly invisible: the measured effect of the `block_size` loop
+    // flip was 8.3e-07, at the level of f32 rounding.
+    //
+    // With blocks omitted, the column past the end can belong to a block the
+    // schedule deliberately excluded, and attending to it is a real error rather
+    // than a duplicated one. A fixture that cannot distinguish those is a fixture
+    // that reports a defect as equivalent.
+    let sparse_budget: Vec<usize> = (0..seq / block).map(|q| 1 + q % 2).collect();
+    let sparse = random_block_schedule(&sparse_budget, 20260811).expect("sparse schedule");
+    report(
+        "scheduled_attention/sparse",
+        &ctx.scheduled_attention(&q, &kk, &v, seq, head_dim, &sparse, block)
+            .expect("sparse attention"),
+    );
+
     // attention_row_stats, attention_dq, attention_dk, attention_dv. The
     // backward entry point takes f64 and narrows internally.
     let wide = |xs: &[f32]| xs.iter().map(|&x| f64::from(x)).collect::<Vec<f64>>();
@@ -269,15 +311,19 @@ fn main() {
     report("attention_dv", &narrow(&grads.dv));
 
     println!();
-    println!("  {:<28} {all:#018x}", "COMBINED");
-
     assert_all_kernels_covered();
 
+    if dump_values {
+        return;
+    }
+
+    println!("  {:<28} {all:#018x}", "COMBINED");
     println!();
     println!("Run on a clean tree, then again with a mutant applied. Identical");
     println!("combined checksums mean the mutation changed no output and is an");
     println!("equivalent mutant. A different checksum while the suites still pass");
-    println!("means a tolerance absorbed a real difference.");
+    println!("means a real difference — run again with --values to see whether it");
+    println!("is arithmetic or only rounding.");
 }
 
 /// Fail if the shader declares a kernel this probe does not dispatch.

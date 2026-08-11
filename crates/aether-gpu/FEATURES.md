@@ -680,7 +680,7 @@ Listed here so a reader is not misled by encountering them mid-file:
 | "The suite never reports success for work that did not happen" | **withdrawn** — it did exactly that for twenty-odd commits |
 | "Ratios are more stable than the timings they divide" | **withdrawn** — measured at 96% spread against 43% and 12% for the terms |
 | "The benchmark noise is short-timescale" | **withdrawn** — inferred from pairing failing; raw samples show the variance is GPU-side and between runs |
-| "Four mechanical mutants escape every suite" | **narrowed to three** — site 13 is caught 2 of 3 runs; one sample was taken of a racing mutant |
+| "Four mechanical mutants escape every suite" | **withdrawn** — site 13 is caught 2 of 3 runs, and the other three differ only within f32 rounding of a maximum that cancels; no hole was found |
 
 ## Shipped
 
@@ -1073,12 +1073,16 @@ and every later verdict is quietly narrower than it looks.
 
 | of 54 survivors | |
 |---|---:|
-| equivalent — identical output, nothing to catch | 50 |
-| changed output, then found to be caught on re-run | 1 |
-| **changed output and uncaught in 3 of 3 runs per suite** | **3** |
+| bit-identical output — nothing to catch | 50 |
+| caught on re-run; the first sample was unlucky | 1 |
+| differ only within f32 rounding | 3 |
+| **genuine coverage holes** | **0** |
 
-Fifty are equivalent, which is the expected outcome and the reason the raw
-survivor count is not a coverage figure. Three are real.
+**No coverage hole was found.** That conclusion took three corrections to reach,
+and each one is recorded below rather than folded away, because the sequence is
+the useful part: a bitwise probe reports "changed" for a mutation that is
+mathematically inert, and "changed while the suites pass" reads like a hole every
+time.
 
 | site | kernel | flip | what it does |
 |---|---|---|---|
@@ -1105,12 +1109,50 @@ suite, where the test harness executes in parallel and the device is under load,
 it failed **2 of 3**. The sweep took one sample and drew the wrong conclusion
 from it.
 
-So the count is **three holes, not four**, and the harness now confirms a
-survival with a second pass before reporting it. Only survivors are re-run: a
-catch is positive evidence that repetition cannot overturn, while a survival is
-an absence of evidence and is exactly what an unlucky schedule manufactures.
-Two observations do not make it sound, only less wrong — a mutant caught one run
-in ten still reads as a survivor most of the time.
+So the count went from four to **three**, and the harness now confirms a survival
+with a second pass before reporting it. Only survivors are re-run: a catch is
+positive evidence that repetition cannot overturn, while a survival is an absence
+of evidence and is exactly what an unlucky schedule manufactures. Two
+observations do not make it sound, only less wrong — a mutant caught one run in
+ten still reads as a survivor most of the time.
+
+##### And then three went to zero
+
+A checksum answers "did anything change" and cannot answer "by how much", which
+is the question that decides whether a difference is a defect.
+`equivalence_probe --values` prints every output instead, so the remaining three
+can be measured rather than assumed:
+
+| site | kernel | worst relative difference | against f32 epsilon 1.19e-07 |
+|---|---|---:|---|
+| 25 | `softmax_xent_grad` | 2.276e-07 | 1.9× |
+| 43 | `scheduled_attention` | 8.333e-07 | 7× |
+| 57 | attention backward (`dq`, `dk`, `dv`) | 3.255e-05 | 273× |
+
+All three flips land on a loop computing a **running maximum subtracted purely
+for numerical stability**, and every one of those cancels:
+`exp(a - mx) / Σ exp(a - mx)` is the same softmax for any `mx`, and the backward
+pass divides `weighted` by `denom`, which carries `exp(-mx)` in both. Perturbing
+the maximum therefore cannot change what the kernel computes. It changes only
+where the exponentials sit in the floating-point range, which is why site 57
+moves 273 epsilons while remaining exactly as correct as before.
+
+Calling these holes would demand tests asserting bit-exact intermediate rounding —
+tests of the arithmetic's last place rather than of the arithmetic. The suites are
+right not to fail on them.
+
+A sparse schedule was added to the probe on the theory that site 43's extra
+column is masked by `col > row` under a dense causal schedule and would not be
+under a sparse one. It measured **8.333e-07 either way**, identical to three
+decimal places, because the flip is on the max pass rather than the accumulation
+pass. The hypothesis was wrong; the fixture is kept because attention against a
+schedule with blocks genuinely omitted is worth covering regardless of what it
+proved here.
+
+**So the mechanical sweep found no coverage hole.** For this operator class, on
+these fixtures, the curated mutants and the suites scoring them are not missing
+anything — which is a stronger statement about the suites than the 0 of 24 that
+prompted the sweep, because nobody chose these sites.
 
 Every one reads or writes into **adjacent, in-bounds** memory. That is exactly
 what separates them from the fifty: a flip that runs off the end of a buffer is
@@ -1130,11 +1172,15 @@ no other. Each defect stays inside its own kernel, so the probe is reporting the
 kernel at fault rather than a downstream consequence.
 
 Limits: only comparison operators were swept, so arithmetic and index expressions
-are untouched and the true hole count is a lower bound. The two comment sites were
-found by reading the survivor list rather than by anticipating them, so other
-classes that are equivalent for unnoticed reasons may remain. The four holes are
-identified and **not yet closed** — no test in the tree fails on any of them
-today, which is the whole point of recording them here with their sites.
+are untouched, and zero holes in this class says nothing about those. The two
+comment sites were found by reading the survivor list rather than by anticipating
+them, so other classes that are equivalent for unnoticed reasons may remain. Every
+verdict is against these fixtures — an equivalent verdict means "changed nothing
+measurable on this input", not "cannot change anything", and the sparse-schedule
+fixture was added precisely because the first one could not have told the
+difference for site 43. The tolerance that separates rounding from a defect is
+read off f32 epsilon rather than from a stated requirement, so a kernel whose
+callers need better than 273 epsilons would not agree with the verdict on site 57.
 
 ### The harness deleted uncommitted work
 
