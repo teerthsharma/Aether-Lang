@@ -138,6 +138,7 @@ printf '\n'
 catchers="$(mktemp)"
 trap 'restore; rm -f "$catchers"' EXIT
 escaped=0
+expected_names=0
 
 for entry in "${mutants[@]}"; do
     name="${entry%%|*}"
@@ -189,6 +190,7 @@ for entry in "${mutants[@]}"; do
                 failed="${counts##*; }"
                 failed="${failed%% failed}"
                 printf ' %-12s' "$failed/$((passed + failed))"
+                expected_names=$((expected_names + failed))
             fi
             # Which tests, not just how many. A fraction of 1/17 repeated across
             # three defects reads as three independent single-test catches, and
@@ -230,6 +232,25 @@ fi
 
 # Which test caught what. The count above says how much of a suite notices a
 # defect; this says whether the tests that notice are the same ones each time.
+# The two summaries come from the same cargo output by different means: the
+# fractions from its "N passed; M failed" line, the names from its per-test
+# FAILED lines. Requiring them to agree makes each a check on the other.
+#
+# Without this the name parser could stop matching — a cargo output change, a
+# renamed flag, an edit here — and the run would print an empty summary beneath a
+# table of entirely correct counts. That is a silent degradation of exactly the
+# kind this harness exists to find in the code it mutates, and it has no business
+# living in the harness itself.
+found_names="$(wc -l < "$catchers" | tr -d ' ')"
+if [ "$found_names" -ne "$expected_names" ]; then
+    echo >&2
+    echo "the failing-test parser recorded $found_names names for $expected_names failures." >&2
+    echo "Both are parsed from the same cargo output, so disagreement means one" >&2
+    echo "of them has stopped matching. The table above is still correct, which" >&2
+    echo "is what would have made this quiet." >&2
+    exit 98
+fi
+
 echo
 echo "tests that caught each mutant, by how many defects they carry"
 if [ -s "$catchers" ]; then
