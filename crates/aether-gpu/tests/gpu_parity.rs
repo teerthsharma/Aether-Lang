@@ -414,6 +414,89 @@ fn the_tiled_kernel_is_correct_across_many_tile_iterations() {
     }
 }
 
+/// Two Adam steps, with the parameters round-tripping between them.
+///
+/// The single-step comparison beside this one is stateless: SGD reads the
+/// parameters, subtracts, and keeps nothing. Adam keeps two moment buffers and a
+/// step counter, and its bias correction divides by `1 - beta^t`, so a defect in
+/// how state survives a step is identical to correct behaviour at t = 1 and only
+/// separates at t = 2. One step cannot reach it.
+///
+/// The moments stay resident in both paths because `AdamState` does not expose
+/// them — which is the right design and means this compares what round-tripping
+/// the *parameters* does to a stateful sequence, not what round-tripping the
+/// state would.
+#[test]
+#[cfg_attr(not(feature = "gpu"), ignore = "needs a GPU adapter: --features gpu")]
+fn two_adam_steps_survive_the_parameters_round_tripping() {
+    let ctx = require_context();
+
+    let n = 24usize;
+    let params = fill(n, 921);
+    let grad_one = fill(n, 922);
+    let grad_two = fill(n, 923);
+    let lr = 0.01f32;
+
+    // Parameters never leave the device.
+    let (resident, resident_steps) = {
+        let p = ctx.upload(&params, 1, n).expect("p");
+        let g1 = ctx.upload(&grad_one, 1, n).expect("g1");
+        let g2 = ctx.upload(&grad_two, 1, n).expect("g2");
+        let mut state = ctx.adam_state(&p).expect("state");
+
+        let after_one = ctx
+            .adam_update_resident(&p, &g1, &mut state, lr)
+            .expect("step 1");
+        let after_two = ctx
+            .adam_update_resident(&after_one, &g2, &mut state, lr)
+            .expect("step 2");
+        (ctx.read(&after_two).expect("read"), state.step())
+    };
+
+    // Parameters come back to the host between the two steps and go up again.
+    let (readback, readback_steps) = {
+        let p = ctx.upload(&params, 1, n).expect("p");
+        let g1 = ctx.upload(&grad_one, 1, n).expect("g1");
+        let mut state = ctx.adam_state(&p).expect("state");
+
+        let after_one = ctx
+            .adam_update_resident(&p, &g1, &mut state, lr)
+            .expect("step 1");
+        let host = ctx.read(&after_one).expect("read between steps");
+
+        let p2 = ctx.upload(&host, 1, n).expect("re-upload");
+        let g2 = ctx.upload(&grad_two, 1, n).expect("g2");
+        let after_two = ctx
+            .adam_update_resident(&p2, &g2, &mut state, lr)
+            .expect("step 2");
+        (ctx.read(&after_two).expect("read"), state.step())
+    };
+
+    assert_eq!(
+        (resident_steps, readback_steps),
+        (2, 2),
+        "the step counter must reach 2 in both paths, since bias correction          divides by 1 - beta^t and a counter that does not advance makes the          second step repeat the first's correction"
+    );
+
+    let differing = resident
+        .iter()
+        .zip(&readback)
+        .filter(|(r, b)| r.to_bits() != b.to_bits())
+        .count();
+    let worst = resident
+        .iter()
+        .zip(&readback)
+        .map(|(r, b)| (r - b).abs())
+        .fold(0.0f32, f32::max);
+
+    println!("two adam steps: {differing} of {n} parameters differ, worst {worst:e}");
+
+    assert_eq!(
+        differing, 0,
+        "{differing} of {n} parameters differ after two Adam steps, worst by          {worst:e}. The only difference between the paths is that one wrote the          intermediate parameters to the host and read them back, so a difference          means that round trip is not lossless."
+    );
+}
+
 /// A whole training step, resident against read-back, parameter for parameter.
 ///
 /// The resident path is verified op by op and for a chain of matmuls, and for
