@@ -192,7 +192,9 @@ fn the_softmax_layer_gradient_matches_finite_differences() {
     let lr = 1e-3;
     let h = 1e-6;
     let x = Tensor::new(&[0.7, -0.2, 0.4], &[3, 1]);
-    let y = Tensor::new(&[1.0, 0.0], &[2, 1]);
+    // Three classes, so a formula that happens to be right for a pair does not
+    // pass — with two, several wrong expressions coincide with the correct one.
+    let y = Tensor::new(&[0.0, 1.0, 0.0], &[3, 1]);
 
     let build = || {
         let mut mlp = MLP::new(
@@ -203,63 +205,70 @@ fn the_softmax_layer_gradient_matches_finite_differences() {
             LossConfig::BinaryCrossEntropy,
         );
         mlp.add_layer(3, 4, Activation::Tanh, Some(7));
-        mlp.add_layer(4, 2, Activation::Softmax, Some(11));
+        mlp.add_layer(4, 3, Activation::Softmax, Some(11));
         mlp
     };
 
-    // One step, then read back what the optimiser applied.
-    let mut trained = build();
-    let before: Vec<f64> = trained.layers[1].weights.data.borrow().clone();
-    trained.train_step(&x, &y);
-    let after: Vec<f64> = trained.layers[1].weights.data.borrow().clone();
+    // Both layers. The hidden one is the point: the fix changed `delta`, which
+    // feeds the softmax layer's own weight gradients *and* the gradient it hands
+    // backwards, and the second is what made the original bug total rather than
+    // local -- a zero there killed every layer before it. Checking only the
+    // output layer verifies the half that was never dangerous.
+    for layer in [1usize, 0] {
+        // One step, then read back what the optimiser applied.
+        let mut trained = build();
+        let before: Vec<f64> = trained.layers[layer].weights.data.borrow().clone();
+        trained.train_step(&x, &y);
+        let after: Vec<f64> = trained.layers[layer].weights.data.borrow().clone();
 
-    let analytic: Vec<f64> = before
-        .iter()
-        .zip(&after)
-        .map(|(b, a)| (b - a) / lr)
-        .collect();
+        let analytic: Vec<f64> = before
+            .iter()
+            .zip(&after)
+            .map(|(b, a)| (b - a) / lr)
+            .collect();
 
-    let loss_with = |perturbed: &[f64]| -> f64 {
-        let mut probe = build();
-        probe.layers[1]
-            .weights
-            .data
-            .borrow_mut()
-            .copy_from_slice(perturbed);
-        let output = probe.predict(&x);
-        probe.loss.compute(&y, &output)
-    };
+        let loss_with = |perturbed: &[f64]| -> f64 {
+            let mut probe = build();
+            probe.layers[layer]
+                .weights
+                .data
+                .borrow_mut()
+                .copy_from_slice(perturbed);
+            let output = probe.predict(&x);
+            probe.loss.compute(&y, &output)
+        };
 
-    let mut worst = 0.0f64;
-    let mut worst_at = 0usize;
-    for i in 0..before.len() {
-        let mut plus = before.clone();
-        let mut minus = before.clone();
-        plus[i] += h;
-        minus[i] -= h;
+        let mut worst = 0.0f64;
+        let mut worst_at = 0usize;
+        for i in 0..before.len() {
+            let mut plus = before.clone();
+            let mut minus = before.clone();
+            plus[i] += h;
+            minus[i] -= h;
 
-        let numerical = (loss_with(&plus) - loss_with(&minus)) / (2.0 * h);
-        let error = (analytic[i] - numerical).abs();
-        if error > worst {
-            worst = error;
-            worst_at = i;
+            let numerical = (loss_with(&plus) - loss_with(&minus)) / (2.0 * h);
+            let error = (analytic[i] - numerical).abs();
+            if error > worst {
+                worst = error;
+                worst_at = i;
+            }
         }
+
+        assert!(
+            worst <= 1e-5,
+            "weight {worst_at}: analytic {} against numerical, worst disagreement \
+             {worst:.3e}. The softmax backward is applying a gradient that is not \
+             the derivative of the loss it is minimising.",
+            analytic[worst_at]
+        );
+
+        // The control. Every assertion above holds trivially if the gradient is
+        // zero and the loss is flat, which is the bug this file exists to guard.
+        let magnitude = analytic.iter().fold(0.0f64, |m, g| m.max(g.abs()));
+        assert!(
+            magnitude > 1e-6,
+            "the recovered gradient is {magnitude:.3e}, indistinguishable from zero, \
+             so agreeing with a finite difference says nothing"
+        );
     }
-
-    assert!(
-        worst <= 1e-5,
-        "weight {worst_at}: analytic {} against numerical, worst disagreement \
-         {worst:.3e}. The softmax backward is applying a gradient that is not \
-         the derivative of the loss it is minimising.",
-        analytic[worst_at]
-    );
-
-    // The control. Every assertion above holds trivially if the gradient is
-    // zero and the loss is flat, which is the bug this file exists to guard.
-    let magnitude = analytic.iter().fold(0.0f64, |m, g| m.max(g.abs()));
-    assert!(
-        magnitude > 1e-6,
-        "the recovered gradient is {magnitude:.3e}, indistinguishable from zero, \
-         so agreeing with a finite difference says nothing"
-    );
 }
