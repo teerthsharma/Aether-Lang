@@ -97,29 +97,35 @@ impl LossConfig {
 /// Mean Squared Error
 pub fn mse(y_true: &Tensor, y_pred: &Tensor) -> f64 {
     assert_eq!(y_true.shape, y_pred.shape);
-    let mut sum = 0.0;
     let true_data = y_true.data.borrow();
     let pred_data = y_pred.data.borrow();
     let n = true_data.len();
 
-    for i in 0..n {
-        let diff = true_data[i] - pred_data[i];
-        sum += diff * diff;
-    }
+    // ⚡ Bolt: Use iterator zip to elide bounds checks and enable auto-vectorization
+    let sum: f64 = true_data
+        .iter()
+        .zip(pred_data.iter())
+        .map(|(&y, &p)| {
+            let diff = y - p;
+            diff * diff
+        })
+        .sum();
     sum / n as f64
 }
 
 /// Mean Absolute Error
 pub fn mae(y_true: &Tensor, y_pred: &Tensor) -> f64 {
     assert_eq!(y_true.shape, y_pred.shape);
-    let mut sum = 0.0;
     let true_data = y_true.data.borrow();
     let pred_data = y_pred.data.borrow();
     let n = true_data.len();
 
-    for i in 0..n {
-        sum += fabs(true_data[i] - pred_data[i]);
-    }
+    // ⚡ Bolt: Use iterator zip to elide bounds checks and enable auto-vectorization
+    let sum: f64 = true_data
+        .iter()
+        .zip(pred_data.iter())
+        .map(|(&y, &p)| fabs(y - p))
+        .sum();
     sum / n as f64
 }
 
