@@ -46,6 +46,9 @@ const DENSITY_MAX: f64 = 0.6;
 /// Maximum allowed Betti-1 (loop complexity) per window
 const MAX_BETTI_1: u32 = 10;
 
+/// Tolerance for loop detection (Betti-1)
+const LOOP_TOLERANCE: i16 = 5;
+
 // ═══════════════════════════════════════════════════════════════════════════════
 // Topological Shape Signature
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -93,6 +96,64 @@ impl TopologicalShape {
 // Betti Number Computation
 // ═══════════════════════════════════════════════════════════════════════════════
 
+/// Internal helper to compute topological metrics in a single pass.
+///
+/// # Arguments
+/// * `data` - Binary data
+/// * `calc_b0` - Whether to compute Betti-0
+/// * `calc_b1` - Whether to compute Betti-1
+fn compute_topology_metrics(data: &[u8], calc_b0: bool, calc_b1: bool) -> (u32, u32) {
+    if data.len() < 2 {
+        let b0 = if data.is_empty() { 0 } else { 1 };
+        // Betti-1 requires len >= 4, so it's always 0 here
+        return (if calc_b0 { b0 } else { 0 }, 0);
+    }
+
+    let mut betti_0 = 0u32;
+    let mut betti_1 = 0u32;
+    let mut in_component = false;
+
+    // Single pass optimization: compute both metrics in one traversal
+    for i in 0..data.len() - 1 {
+        let v0 = data[i] as i16;
+        let v1 = data[i+1] as i16;
+
+        // --- Betti 0 Logic (Window Size 2) ---
+        if calc_b0 {
+            let dist = (v0 - v1).abs();
+
+            if dist > CLUSTER_THRESHOLD {
+                if !in_component {
+                    betti_0 += 1;
+                    in_component = true;
+                }
+            } else {
+                in_component = false;
+            }
+        }
+
+        // --- Betti 1 Logic (Window Size 4) ---
+        if calc_b1 {
+            // Only run if we have enough elements for window size 4
+            // i + 3 < data.len() => i <= data.len() - 4
+            if i + 3 < data.len() {
+                let v2 = data[i+2] as i16;
+                let v3 = data[i+3] as i16;
+
+                // Detect cycles: v0 -> v1 -> v2 -> v3 ~ v0
+                if (v0 - v3).abs() <= LOOP_TOLERANCE {
+                    // Check that middle values are different (actual traversal)
+                    if (v0 - v1).abs() > LOOP_TOLERANCE || (v0 - v2).abs() > LOOP_TOLERANCE {
+                        betti_1 += 1;
+                    }
+                }
+            }
+        }
+    }
+
+    (betti_0, betti_1)
+}
+
 /// Compute β₀ (connected components) via 1D clustering approximation
 ///
 /// This is a simplified Vietoris-Rips filtration for 1D point clouds.
@@ -105,27 +166,7 @@ impl TopologicalShape {
 /// # Returns
 /// β₀: Number of connected components
 pub fn compute_betti_0(data: &[u8]) -> u32 {
-    if data.len() < 2 {
-        return if data.is_empty() { 0 } else { 1 };
-    }
-
-    let mut components = 0u32;
-    let mut in_component = false;
-
-    for window in data.windows(2) {
-        let dist = (window[0] as i16 - window[1] as i16).abs();
-
-        if dist > CLUSTER_THRESHOLD {
-            if !in_component {
-                components += 1;
-                in_component = true;
-            }
-        } else {
-            in_component = false;
-        }
-    }
-
-    components
+    compute_topology_metrics(data, true, false).0
 }
 
 /// Compute β₁ (loops/cycles) via local pattern detection
@@ -139,38 +180,12 @@ pub fn compute_betti_0(data: &[u8]) -> u32 {
 /// # Returns
 /// β₁: Approximate number of loops/cycles
 pub fn compute_betti_1(data: &[u8]) -> u32 {
-    if data.len() < 4 {
-        return 0;
-    }
-
-    let mut loops = 0u32;
-    let tolerance = 5i16; // How close values must be to "close a loop"
-
-    // Detect cycles: a -> b -> c -> ~a (return to start)
-    for window in data.windows(4) {
-        let a = window[0] as i16;
-        let d = window[3] as i16;
-
-        // If we return to approximately the same value, it's a "loop"
-        if (a - d).abs() <= tolerance {
-            // Check that middle values are different (actual traversal)
-            let b = window[1] as i16;
-            let c = window[2] as i16;
-
-            if (a - b).abs() > tolerance || (a - c).abs() > tolerance {
-                loops += 1;
-            }
-        }
-    }
-
-    loops
+    compute_topology_metrics(data, false, true).1
 }
 
 /// Compute full topological shape signature
 pub fn compute_shape(data: &[u8]) -> TopologicalShape {
-    let betti_0 = compute_betti_0(data);
-    let betti_1 = compute_betti_1(data);
-
+    let (betti_0, betti_1) = compute_topology_metrics(data, true, true);
     TopologicalShape::new(betti_0, betti_1, data.len())
 }
 
