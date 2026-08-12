@@ -1,9 +1,7 @@
-## 2026-07-06 - Tensor metadata cloning in autograd
-**Learning:** In reverse-mode autograd passes, cloning `Option<Tensor>` or passing references triggers unnecessary heap allocations for tensor metadata (shape/strides), even though the underlying data is reference-counted.
-**Action:** Use `Option::take()` to acquire ownership of gradients during the backward pass, and pass tensors by value to `accumulate_grad` to eliminate metadata clones.
-## 2026-07-14 - Optimizing Tensor allocations in linear algebra
-**Learning:** High-level tensor operations like `.sub()` and `.map()` during gradient calculations trigger costly intermediate heap allocations for both data and metadata.
-**Action:** Use single-pass iterators (`.iter().zip().map().collect()`) directly over the borrowed data arrays and consume the resulting vector with `Tensor::from_vec()` to avoid redundant O(N) slice allocations.
-## 2026-07-25 - Tensor metadata cloning in MLP forward passes
-**Learning:** In `aether-core::ml::neural`, cloning the `input` tensor in `MLP::forward` before passing its reference to the first layer's `forward` method triggers an unnecessary heap allocation for tensor metadata and an `Rc` increment.
-**Action:** Extract the first layer using `self.layers.iter_mut()` to pass the initial `input` as a `&Tensor` reference directly, as subsequent layers naturally consume the output of the previous layer.
+## 2026-08-10 - Refactoring Index-based Loops in ML Linalg
+**Learning:** In `aether-core::ml::linalg`, avoid high-level tensor operations like `a.sub(b)` and `.mul()` when computing scalar reductions (e.g., `mse`, `mae`, etc.) as they trigger costly intermediate heap allocations. Instead, assert shape equality and perform a single-pass iteration directly over the underlying borrowed data arrays using functional iterator chains (e.g., `.iter().zip().map().sum()`). This elides bounds checks and allows LLVM to auto-vectorize more effectively compared to manual `for i in 0..n` index-based loops. When scalar reductions require a maximum value (like Chebyshev distance), `f64` does not implement `Ord`, preventing standard `.max()`, use `.fold(0.0, |max_val, abs_val| if abs_val > max_val { abs_val } else { max_val })`. When replacing index-based loops into functional iterator chains, inline conditional compilation `#[cfg(feature = "std")]` inside the closure block must be carefully preserved.
+**Action:** Replace `for i in 0..n` loops in `aether-core::ml::linalg` (e.g., `mse`, `mae`, `binary_cross_entropy`, `hinge_loss`, `euclidean_distance`, `manhattan_distance`, `chebyshev_distance`, `rbf_kernel`) with functional iterator chains like `.iter().zip().map().sum()` or `.fold()`.
+
+## 2026-08-10 - Refactoring Index-based Loops in ML Linalg
+**Learning:** In `aether-core::ml::linalg`, replacing manual `for i in 0..n` loops with functional iterator chains like `.iter().zip().map().sum()` elides bounds checks and allows LLVM to auto-vectorize scalar reduction operations effectively. When scalar reductions require tracking a maximum value (e.g., Chebyshev distance) where `f64` does not implement `Ord`, `fold` must be used. Inline conditional compilation `#[cfg(feature = "std")]` inside mapping closures must be carefully preserved during refactoring.
+**Action:** Replace manual iteration with functional iterator chains in math functions.
