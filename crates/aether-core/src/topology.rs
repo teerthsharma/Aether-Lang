@@ -34,6 +34,9 @@
 /// Geometric distance threshold for clustering (Betti-0 calculation)
 const CLUSTER_THRESHOLD: i16 = 15;
 
+/// Tolerance for loop closure (Betti-1 calculation)
+const LOOP_TOLERANCE: i16 = 5;
+
 /// Sliding window size for topology analysis
 const WINDOW_SIZE: usize = 64;
 
@@ -144,7 +147,6 @@ pub fn compute_betti_1(data: &[u8]) -> u32 {
     }
 
     let mut loops = 0u32;
-    let tolerance = 5i16; // How close values must be to "close a loop"
 
     // Detect cycles: a -> b -> c -> ~a (return to start)
     for window in data.windows(4) {
@@ -152,12 +154,12 @@ pub fn compute_betti_1(data: &[u8]) -> u32 {
         let d = window[3] as i16;
 
         // If we return to approximately the same value, it's a "loop"
-        if (a - d).abs() <= tolerance {
+        if (a - d).abs() <= LOOP_TOLERANCE {
             // Check that middle values are different (actual traversal)
             let b = window[1] as i16;
             let c = window[2] as i16;
 
-            if (a - b).abs() > tolerance || (a - c).abs() > tolerance {
+            if (a - b).abs() > LOOP_TOLERANCE || (a - c).abs() > LOOP_TOLERANCE {
                 loops += 1;
             }
         }
@@ -168,10 +170,49 @@ pub fn compute_betti_1(data: &[u8]) -> u32 {
 
 /// Compute full topological shape signature
 pub fn compute_shape(data: &[u8]) -> TopologicalShape {
-    let betti_0 = compute_betti_0(data);
-    let betti_1 = compute_betti_1(data);
+    let len = data.len();
+    if len < 2 {
+        let betti_0 = if data.is_empty() { 0 } else { 1 };
+        return TopologicalShape::new(betti_0, 0, len);
+    }
 
-    TopologicalShape::new(betti_0, betti_1, data.len())
+    let mut betti_0 = 0u32;
+    let mut in_component = false;
+
+    let mut betti_1 = 0u32;
+
+    // Single pass optimization: compute both Betti numbers in one loop
+    for i in 0..(len - 1) {
+        // Betti-0 logic (window size 2)
+        let p1 = data[i] as i16;
+        let p2 = data[i + 1] as i16;
+        let dist = (p1 - p2).abs();
+
+        if dist > CLUSTER_THRESHOLD {
+            if !in_component {
+                betti_0 += 1;
+                in_component = true;
+            }
+        } else {
+            in_component = false;
+        }
+
+        // Betti-1 logic (window size 4)
+        if i + 3 < len {
+            let p4 = data[i + 3] as i16;
+
+            // Check loop closure: start approx equals end
+            if (p1 - p4).abs() <= LOOP_TOLERANCE {
+                let p3 = data[i + 2] as i16;
+                // Check traversal: middle points significantly different from start
+                if (p1 - p2).abs() > LOOP_TOLERANCE || (p1 - p3).abs() > LOOP_TOLERANCE {
+                    betti_1 += 1;
+                }
+            }
+        }
+    }
+
+    TopologicalShape::new(betti_0, betti_1, len)
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -403,6 +444,45 @@ mod tests {
 
         // Should have reasonable density for compiled code
         assert!(shape.density >= 0.0);
+    }
+
+    #[test]
+    fn test_compute_shape_matches_individual() {
+        // Test with varying sizes and patterns
+        let patterns: &[&[u8]] = &[
+            &[],
+            &[10],
+            &[10, 20],
+            &[10, 100], // Gap > 15
+            &[10, 11, 12, 13], // No gap, no loop
+            &[10, 11, 12, 10], // Loop
+            &[0; 100],
+            &[0, 100, 200, 205, 204, 205, 100, 0],
+        ];
+
+        for (idx, data) in patterns.iter().enumerate() {
+            let shape = compute_shape(data);
+            let b0 = compute_betti_0(data);
+            let b1 = compute_betti_1(data);
+
+            assert_eq!(shape.betti_0, b0, "Betti-0 mismatch for pattern {}", idx);
+            assert_eq!(shape.betti_1, b1, "Betti-1 mismatch for pattern {}", idx);
+        }
+
+        // Also test a longer sequence with simple LCG to simulate random data
+        let mut data = [0u8; 100];
+        let mut seed = 42u8;
+        for x in data.iter_mut() {
+            seed = seed.wrapping_mul(13).wrapping_add(7);
+            *x = seed;
+        }
+
+        let shape = compute_shape(&data);
+        let b0 = compute_betti_0(&data);
+        let b1 = compute_betti_1(&data);
+
+        assert_eq!(shape.betti_0, b0, "Betti-0 mismatch for pseudo-random data");
+        assert_eq!(shape.betti_1, b1, "Betti-1 mismatch for pseudo-random data");
     }
 
     #[test]
