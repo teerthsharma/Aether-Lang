@@ -168,10 +168,53 @@ pub fn compute_betti_1(data: &[u8]) -> u32 {
 
 /// Compute full topological shape signature
 pub fn compute_shape(data: &[u8]) -> TopologicalShape {
-    let betti_0 = compute_betti_0(data);
-    let betti_1 = compute_betti_1(data);
+    // Single pass optimization: compute betti_0 and betti_1 in one loop
+    // to improve cache locality and avoid traversing memory twice.
 
-    TopologicalShape::new(betti_0, betti_1, data.len())
+    let len = data.len();
+
+    if len < 2 {
+        let betti_0 = if data.is_empty() { 0 } else { 1 };
+        return TopologicalShape::new(betti_0, 0, len);
+    }
+
+    let mut betti_0 = 0u32;
+    let mut b0_in_component = false;
+    let mut betti_1 = 0u32;
+    let tolerance = 5i16;
+
+    // We iterate 0..len-1 for betti_0 (looking at i, i+1)
+    for i in 0..len - 1 {
+        // Betti 0 logic
+        let w0 = data[i] as i16;
+        let w1 = data[i + 1] as i16;
+        let dist = (w0 - w1).abs();
+
+        if dist > CLUSTER_THRESHOLD {
+            if !b0_in_component {
+                betti_0 += 1;
+                b0_in_component = true;
+            }
+        } else {
+            b0_in_component = false;
+        }
+
+        // Betti 1 logic: requires 4 elements (i, i+1, i+2, i+3)
+        if i + 3 < len {
+            let a = w0; // data[i]
+            // b is w1 // data[i+1]
+            let c = data[i + 2] as i16;
+            let d = data[i + 3] as i16;
+
+            if (a - d).abs() <= tolerance {
+                if (a - w1).abs() > tolerance || (a - c).abs() > tolerance {
+                    betti_1 += 1;
+                }
+            }
+        }
+    }
+
+    TopologicalShape::new(betti_0, betti_1, len)
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -418,5 +461,29 @@ mod tests {
         let result = verify_shape(&prologue);
         // Just ensure it doesn't panic
         if let VerifyResult::Pass = result {}
+    }
+
+    #[test]
+    fn test_compute_shape_consistency() {
+        let cases: Vec<Vec<u8>> = vec![
+            vec![],
+            vec![1],
+            vec![1, 2],
+            vec![1, 2, 3],
+            vec![1, 2, 3, 4],
+            vec![0; 10],
+            vec![0, 100, 0, 100, 0], // High variance
+            (0..100).map(|x| x as u8).collect(),
+            (0..100).map(|x| (x % 10) as u8).collect(),
+        ];
+
+        for data in cases {
+            let shape = compute_shape(&data);
+            let b0 = compute_betti_0(&data);
+            let b1 = compute_betti_1(&data);
+
+            assert_eq!(shape.betti_0, b0, "Betti 0 mismatch for data {:?}", data);
+            assert_eq!(shape.betti_1, b1, "Betti 1 mismatch for data {:?}", data);
+        }
     }
 }
