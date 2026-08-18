@@ -1,0 +1,29 @@
+cff-version: 1.2.0
+message: "If you use this software, please cite it using the metadata below."
+type: software
+title: "Aether-Lang: a Rust runtime for topological machine learning"
+abstract: >-
+  A Rust workspace for a small language runtime, a bounded topological
+  computation core, ML primitives, and a sparse-event kernel prototype.
+  Topology is used as a systems signal: embeddings, residuals, binary
+  streams, and scheduler state are converted into geometric or topological
+  objects, then used for execution, diagnostics, convergence checks, or
+  pruning. Includes a Lean 4 verified kernel.
+authors:
+  - family-names: Sharma
+    given-names: Teerth
+    email: teerths57@gmail.com
+version: 0.1.0
+date-released: 2026-08-18
+url: "https://github.com/teerthsharma/Aether-Lang"
+repository-code: "https://github.com/teerthsharma/Aether-Lang"
+license-url: "https://github.com/teerthsharma/Aether-Lang/blob/master/LICENSE"
+keywords:
+  - topological machine learning
+  - persistent homology
+  - manifold embeddings
+  - programming language runtime
+  - Rust
+  - Lean 4
+  - formal verification
+  - sparse attention
