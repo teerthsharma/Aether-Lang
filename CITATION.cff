@@ -13,8 +13,8 @@ authors:
   - family-names: Sharma
     given-names: Teerth
     email: teerths57@gmail.com
-version: 0.1.0
-date-released: 2026-08-18
+version: 0.1.7
+date-released: 2026-01-25
 url: "https://github.com/teerthsharma/Aether-Lang"
 repository-code: "https://github.com/teerthsharma/Aether-Lang"
 license-url: "https://github.com/teerthsharma/Aether-Lang/blob/master/LICENSE"
