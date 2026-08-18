@@ -10,8 +10,9 @@
 </p>
 
 <p align="center">
+  <a href="https://doi.org/10.5281/zenodo.21997728"><img src="https://img.shields.io/badge/DOI-10.5281%2Fzenodo.21997728-1682D4?style=flat-square" alt="DOI 10.5281/zenodo.21997728"></a>
   <a href=".github/workflows/ci.yml"><img src="https://img.shields.io/github/actions/workflow/status/teerthsharma/Aether-Lang/ci.yml?branch=master&label=CI&style=flat-square" alt="CI"></a>
-  <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-00aaff?style=flat-square" alt="License: MIT"></a>
+  <a href="LICENSE"><img src="https://img.shields.io/badge/license-Custom%20Attribution-00aaff?style=flat-square" alt="License: Custom Attribution"></a>
   <a href="rust-toolchain.toml"><img src="https://img.shields.io/badge/rust-nightly-orange?style=flat-square&logo=rust" alt="Rust nightly"></a>
   <a href="#results"><img src="https://img.shields.io/badge/tests-229%20passing%2C%2080%20ignored-brightgreen?style=flat-square" alt="229 passing, 80 ignored"></a>
   <a href="#mutation-testing-or-how-i-learned-to-stop-trusting-green-checkmarks"><img src="https://img.shields.io/badge/mutants-52%20injected-purple?style=flat-square" alt="52 mutants"></a>
