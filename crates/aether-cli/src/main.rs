@@ -30,7 +30,7 @@ use aether_lang::{Interpreter, Parser};
 /// AEGIS - The Universal Programming Language
 #[derive(ClapParser)]
 #[command(name = "aether")]
-#[command(author = "AEGIS Research Team")]
+#[command(author = "Teerth Sharma")]
 #[command(version = "0.1.0")]
 #[command(about = "Cross-platform AEGIS language runtime", long_about = None)]
 struct Cli {
