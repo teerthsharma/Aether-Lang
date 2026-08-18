@@ -30,9 +30,9 @@ resolver = "2"
 [workspace.package]
 version = "0.1.0"
 edition = "2021"
-authors = ["AEGIS Research Team"]
-license = "MIT"
-repository = "https://github.com/teerthsharma/aether"
+authors = ["Teerth Sharma <teerths57@gmail.com>"]
+license-file = "LICENSE"
+repository = "https://github.com/teerthsharma/Aether-Lang"
 
 [workspace.dependencies]
 # Shared dependencies across workspace
