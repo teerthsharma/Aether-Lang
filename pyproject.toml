@@ -7,7 +7,7 @@ name = "aether-lang"
 version = "0.1.0"
 description = "A topological DSL for machine learning: bounded persistent homology, manifold embeddings, and a sparse-event runtime"
 authors = [
-    { name = "AETHER Research Team", email = "teerths57@gmail.com" },
+    { name = "Teerth Sharma", email = "teerths57@gmail.com" },
 ]
 readme = "README.md"
 requires-python = ">=3.7"
@@ -18,7 +18,7 @@ classifiers = [
     "Topic :: Software Development :: Compilers",
     "Topic :: Software Development :: Interpreters",
     "Intended Audience :: Developers",
-    "License :: OSI Approved :: MIT License",
+    "License :: Other/Proprietary License",
 ]
 
 [tool.maturin]
