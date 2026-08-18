@@ -5,7 +5,10 @@
   "access_right": "open",
   "license": "other-open",
   "creators": [
-    { "name": "Sharma, Teerth" }
+    {
+      "name": "Sharma, Teerth",
+      "orcid": "0009-0005-0882-9168"
+    }
   ],
   "keywords": [
     "topological machine learning",
