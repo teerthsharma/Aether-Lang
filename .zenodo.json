@@ -1,0 +1,27 @@
+{
+  "title": "Aether-Lang: a Rust runtime for topological machine learning",
+  "description": "<p>Aether-Lang is a Rust workspace for a small language runtime, a bounded topological computation core, ML primitives, and a sparse-event kernel prototype. The project uses topology as a systems signal: embeddings, residuals, binary streams, and scheduler state are converted into geometric or topological objects, then used for execution, diagnostics, convergence checks, or pruning. Includes a Lean 4 verified kernel.</p>",
+  "upload_type": "software",
+  "access_right": "open",
+  "license": "other-open",
+  "creators": [
+    { "name": "Sharma, Teerth" }
+  ],
+  "keywords": [
+    "topological machine learning",
+    "persistent homology",
+    "manifold embeddings",
+    "programming language runtime",
+    "Rust",
+    "Lean 4",
+    "formal verification",
+    "sparse attention"
+  ],
+  "related_identifiers": [
+    {
+      "identifier": "https://github.com/teerthsharma/Aether-Lang",
+      "relation": "isSupplementTo",
+      "scheme": "url"
+    }
+  ]
+}
