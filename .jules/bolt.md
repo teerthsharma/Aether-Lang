@@ -1,9 +1,3 @@
-## 2026-07-06 - Tensor metadata cloning in autograd
-**Learning:** In reverse-mode autograd passes, cloning `Option<Tensor>` or passing references triggers unnecessary heap allocations for tensor metadata (shape/strides), even though the underlying data is reference-counted.
-**Action:** Use `Option::take()` to acquire ownership of gradients during the backward pass, and pass tensors by value to `accumulate_grad` to eliminate metadata clones.
-## 2026-07-14 - Optimizing Tensor allocations in linear algebra
-**Learning:** High-level tensor operations like `.sub()` and `.map()` during gradient calculations trigger costly intermediate heap allocations for both data and metadata.
-**Action:** Use single-pass iterators (`.iter().zip().map().collect()`) directly over the borrowed data arrays and consume the resulting vector with `Tensor::from_vec()` to avoid redundant O(N) slice allocations.
-## 2026-07-25 - Tensor metadata cloning in MLP forward passes
-**Learning:** In `aether-core::ml::neural`, cloning the `input` tensor in `MLP::forward` before passing its reference to the first layer's `forward` method triggers an unnecessary heap allocation for tensor metadata and an `Rc` increment.
-**Action:** Extract the first layer using `self.layers.iter_mut()` to pass the initial `input` as a `&Tensor` reference directly, as subsequent layers naturally consume the output of the previous layer.
+## 2026-08-20 - [Loss Function Allocation Minimization]
+**Learning:** [In `aether-core::ml::linalg`, scalar reductions such as `.sum()` or `.fold()` on tensor properties often incur high allocations if manual iterator loops extract and copy properties. Converting O(N) loops that aggregate array items directly into functional `.iter().zip().map()` loops avoids bounds checking and allows LLVM to auto-vectorize safely and faster, as observed here.]
+**Action:** [Always aim to replace `for i in 0..n` on slices or arrays with zipped iterator chains in performance-sensitive areas, specifically in tensor operations.]
