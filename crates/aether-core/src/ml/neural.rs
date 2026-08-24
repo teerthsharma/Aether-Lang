@@ -384,7 +384,7 @@ impl DenseLayer {
                 dw_data.push(delta_data[i] * input_data[j]);
             }
         }
-        let grad_w = Tensor::new(&dw_data, &self.weights.shape);
+        let grad_w = Tensor::from_vec(dw_data, self.weights.shape.clone());
         let grad_b = delta.clone();
 
         // Compute input gradient for next layer
