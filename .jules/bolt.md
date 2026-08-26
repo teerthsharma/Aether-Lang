@@ -7,3 +7,6 @@
 ## 2026-07-25 - Tensor metadata cloning in MLP forward passes
 **Learning:** In `aether-core::ml::neural`, cloning the `input` tensor in `MLP::forward` before passing its reference to the first layer's `forward` method triggers an unnecessary heap allocation for tensor metadata and an `Rc` increment.
 **Action:** Extract the first layer using `self.layers.iter_mut()` to pass the initial `input` as a `&Tensor` reference directly, as subsequent layers naturally consume the output of the previous layer.
+## 2026-08-26 - [Refactored Loss and Distance Functions]
+**Learning:** In aether-core::ml::linalg, high-level tensor operations like `a.sub(b)` and `.mul()` when computing scalar reductions (e.g., `mse`, `mae`) trigger costly intermediate heap allocations. Replacing manual `for i in 0..n` index-based loops with single-pass iterator chains (e.g., `.iter().zip().map().sum()`) directly over the borrowed data arrays elides bounds checks and allows LLVM to auto-vectorize effectively.
+**Action:** Assert shape equality and perform a single-pass iteration directly over the underlying borrowed data arrays using functional iterator chains for computing scalar reductions like `mse` and `mae`.
