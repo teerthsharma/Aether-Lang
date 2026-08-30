@@ -7,3 +7,6 @@
 ## 2026-07-25 - Tensor metadata cloning in MLP forward passes
 **Learning:** In `aether-core::ml::neural`, cloning the `input` tensor in `MLP::forward` before passing its reference to the first layer's `forward` method triggers an unnecessary heap allocation for tensor metadata and an `Rc` increment.
 **Action:** Extract the first layer using `self.layers.iter_mut()` to pass the initial `input` as a `&Tensor` reference directly, as subsequent layers naturally consume the output of the previous layer.
+## 2026-08-30 - Optimizing scalar reductions in linalg
+**Learning:** Manual `for i in 0..n` index-based loops for scalar reductions (like `mse`, `mae`, and distances) over tensor data arrays require bounds checks that LLVM cannot easily elide, leading to suboptimal auto-vectorization.
+**Action:** Replace manual loops with functional iterator chains (e.g., `.iter().zip().map().sum()`) directly over the underlying borrowed data arrays to enable bounds-check elision and optimal SIMD vectorization.
