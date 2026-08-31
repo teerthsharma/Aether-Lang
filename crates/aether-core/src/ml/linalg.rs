@@ -97,29 +97,33 @@ impl LossConfig {
 /// Mean Squared Error
 pub fn mse(y_true: &Tensor, y_pred: &Tensor) -> f64 {
     assert_eq!(y_true.shape, y_pred.shape);
-    let mut sum = 0.0;
     let true_data = y_true.data.borrow();
     let pred_data = y_pred.data.borrow();
     let n = true_data.len();
 
-    for i in 0..n {
-        let diff = true_data[i] - pred_data[i];
-        sum += diff * diff;
-    }
+    let sum: f64 = true_data
+        .iter()
+        .zip(pred_data.iter())
+        .map(|(&y, &p)| {
+            let diff = y - p;
+            diff * diff
+        })
+        .sum();
     sum / n as f64
 }
 
 /// Mean Absolute Error
 pub fn mae(y_true: &Tensor, y_pred: &Tensor) -> f64 {
     assert_eq!(y_true.shape, y_pred.shape);
-    let mut sum = 0.0;
     let true_data = y_true.data.borrow();
     let pred_data = y_pred.data.borrow();
     let n = true_data.len();
 
-    for i in 0..n {
-        sum += fabs(true_data[i] - pred_data[i]);
-    }
+    let sum: f64 = true_data
+        .iter()
+        .zip(pred_data.iter())
+        .map(|(&y, &p)| fabs(y - p))
+        .sum();
     sum / n as f64
 }
 
@@ -131,41 +135,48 @@ pub fn rmse(y_true: &Tensor, y_pred: &Tensor) -> f64 {
 /// Binary Cross-Entropy
 pub fn binary_cross_entropy(y_true: &Tensor, y_pred: &Tensor) -> f64 {
     assert_eq!(y_true.shape, y_pred.shape);
-    let mut sum = 0.0;
     let true_data = y_true.data.borrow();
     let pred_data = y_pred.data.borrow();
     let n = true_data.len();
 
-    for i in 0..n {
-        let p = pred_data[i].clamp(1e-7, 1.0 - 1e-7);
-        let y = true_data[i];
+    let sum: f64 = true_data
+        .iter()
+        .zip(pred_data.iter())
+        .map(|(&y, &p_raw)| {
+            let p = p_raw.clamp(1e-7, 1.0 - 1e-7);
 
-        #[cfg(not(feature = "std"))]
-        {
-            sum -= y * log(p) + (1.0 - y) * log(1.0 - p);
-        }
-        #[cfg(feature = "std")]
-        {
-            sum -= y * p.ln() + (1.0 - y) * (1.0 - p).ln();
-        }
-    }
+            #[cfg(not(feature = "std"))]
+            {
+                -(y * log(p) + (1.0 - y) * log(1.0 - p))
+            }
+            #[cfg(feature = "std")]
+            {
+                -(y * p.ln() + (1.0 - y) * (1.0 - p).ln())
+            }
+        })
+        .sum();
     sum / n as f64
 }
 
 /// Hinge Loss (for SVM)
 pub fn hinge_loss(y_true: &Tensor, y_pred: &Tensor) -> f64 {
     assert_eq!(y_true.shape, y_pred.shape);
-    let mut sum = 0.0;
     let true_data = y_true.data.borrow();
     let pred_data = y_pred.data.borrow();
     let n = true_data.len();
 
-    for i in 0..n {
-        let margin = 1.0 - true_data[i] * pred_data[i];
-        if margin > 0.0 {
-            sum += margin;
-        }
-    }
+    let sum: f64 = true_data
+        .iter()
+        .zip(pred_data.iter())
+        .map(|(&y, &p)| {
+            let margin = 1.0 - y * p;
+            if margin > 0.0 {
+                margin
+            } else {
+                0.0
+            }
+        })
+        .sum();
     sum / n as f64
 }
 
