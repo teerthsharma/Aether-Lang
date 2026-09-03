@@ -31,7 +31,7 @@ resolver = "2"
 version = "0.1.7"
 edition = "2021"
 authors = ["Teerth Sharma <teerths57@gmail.com>"]
-license-file = "LICENSE"
+license = "Custom Attribution"
 repository = "https://github.com/teerthsharma/Aether-Lang"
 
 [workspace.dependencies]
