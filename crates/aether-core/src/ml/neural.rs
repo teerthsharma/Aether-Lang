@@ -17,9 +17,9 @@
 #![allow(dead_code)]
 
 #[cfg(feature = "alloc")]
-use alloc::vec::Vec;
-#[cfg(feature = "alloc")]
 use alloc::vec;
+#[cfg(feature = "alloc")]
+use alloc::vec::Vec;
 
 // No `use std::f64;` here on purpose. Importing the module shadows the `f64`
 // primitive at path position, so `f64::MAX` resolves to the deprecated module
