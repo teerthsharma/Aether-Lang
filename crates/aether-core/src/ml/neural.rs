@@ -17,6 +17,8 @@
 #![allow(dead_code)]
 
 #[cfg(feature = "alloc")]
+use alloc::vec;
+#[cfg(feature = "alloc")]
 use alloc::vec::Vec;
 
 // No `use std::f64;` here on purpose. Importing the module shadows the `f64`
@@ -86,7 +88,7 @@ impl Activation {
                     .collect();
 
                 let normalized: Vec<f64> = data.iter().map(|&v| v / sum.max(1e-10)).collect();
-                Tensor::new(&normalized, &x.shape)
+                Tensor::from_vec(normalized, x.shape.clone())
             }
             _ => x.map(|v| self.apply_scalar(v)),
         }
@@ -269,7 +271,7 @@ impl DenseLayer {
             w_data.push(r * scale);
         }
 
-        let weights = Tensor::new(&w_data, &[output_size, input_size]);
+        let weights = Tensor::from_vec(w_data, vec![output_size, input_size]);
         let biases = Tensor::zeros(&[output_size, 1]);
 
         Self {
@@ -365,7 +367,7 @@ impl DenseLayer {
                 .collect();
             drop(p_data);
             drop(g_data);
-            Tensor::new(&values, &grad_output.shape)
+            Tensor::from_vec(values, grad_output.shape.clone())
         } else {
             let act_deriv = self.activation.derivative(&last_z);
             grad_output.mul(&act_deriv)
@@ -384,7 +386,7 @@ impl DenseLayer {
                 dw_data.push(delta_data[i] * input_data[j]);
             }
         }
-        let grad_w = Tensor::new(&dw_data, &self.weights.shape);
+        let grad_w = Tensor::from_vec(dw_data, self.weights.shape.clone());
         let grad_b = delta.clone();
 
         // Compute input gradient for next layer

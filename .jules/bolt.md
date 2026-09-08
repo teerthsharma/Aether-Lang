@@ -7,3 +7,6 @@
 ## 2026-07-25 - Tensor metadata cloning in MLP forward passes
 **Learning:** In `aether-core::ml::neural`, cloning the `input` tensor in `MLP::forward` before passing its reference to the first layer's `forward` method triggers an unnecessary heap allocation for tensor metadata and an `Rc` increment.
 **Action:** Extract the first layer using `self.layers.iter_mut()` to pass the initial `input` as a `&Tensor` reference directly, as subsequent layers naturally consume the output of the previous layer.
+## 2026-09-08 - Optimizing Tensor creation in neural network components
+**Learning:** Calling `Tensor::new(&vec, &shape)` clones the borrowed slice, triggering unnecessary O(N) heap allocations when the caller already owns the vector (e.g., from `.collect()` or `Vec::with_capacity`).
+**Action:** Use `Tensor::from_vec(vec, shape)` to consume the vector and take ownership, avoiding redundant allocations during both initialization and backpropagation.
