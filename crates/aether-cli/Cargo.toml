@@ -3,7 +3,7 @@ name = "aether-cli"
 version.workspace = true
 edition.workspace = true
 authors.workspace = true
-license.workspace = true
+license-file.workspace = true
 description = "AETHER Cross-Platform CLI - Run AETHER on Windows, Linux, macOS"
 
 # ═══════════════════════════════════════════════════════════════════════════════
