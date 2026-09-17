@@ -145,13 +145,10 @@ pub fn binary_cross_entropy(y_true: &Tensor, y_pred: &Tensor) -> f64 {
         .map(|(&y, &p_raw)| {
             let p = p_raw.clamp(1e-7, 1.0 - 1e-7);
             #[cfg(not(feature = "std"))]
-            {
-                -(y * log(p) + (1.0 - y) * log(1.0 - p))
-            }
+            let val = -(y * log(p) + (1.0 - y) * log(1.0 - p));
             #[cfg(feature = "std")]
-            {
-                -(y * p.ln() + (1.0 - y) * (1.0 - p).ln())
-            }
+            let val = -(y * p.ln() + (1.0 - y) * (1.0 - p).ln());
+            val
         })
         .sum();
     sum / n as f64
