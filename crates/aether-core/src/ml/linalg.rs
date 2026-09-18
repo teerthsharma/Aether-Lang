@@ -104,12 +104,11 @@ pub fn mse(y_true: &Tensor, y_pred: &Tensor) -> f64 {
     let sum: f64 = true_data
         .iter()
         .zip(pred_data.iter())
-        .map(|(y, p)| {
+        .map(|(&y, &p)| {
             let diff = y - p;
             diff * diff
         })
         .sum();
-
     sum / n as f64
 }
 
@@ -123,9 +122,8 @@ pub fn mae(y_true: &Tensor, y_pred: &Tensor) -> f64 {
     let sum: f64 = true_data
         .iter()
         .zip(pred_data.iter())
-        .map(|(y, p)| fabs(y - p))
+        .map(|(&y, &p)| fabs(y - p))
         .sum();
-
     sum / n as f64
 }
 
@@ -144,9 +142,8 @@ pub fn binary_cross_entropy(y_true: &Tensor, y_pred: &Tensor) -> f64 {
     let sum: f64 = true_data
         .iter()
         .zip(pred_data.iter())
-        .map(|(y, p_raw)| {
+        .map(|(&y, &p_raw)| {
             let p = p_raw.clamp(1e-7, 1.0 - 1e-7);
-
             #[cfg(not(feature = "std"))]
             {
                 -(y * log(p) + (1.0 - y) * log(1.0 - p))
@@ -157,7 +154,6 @@ pub fn binary_cross_entropy(y_true: &Tensor, y_pred: &Tensor) -> f64 {
             }
         })
         .sum();
-
     sum / n as f64
 }
 
@@ -171,7 +167,7 @@ pub fn hinge_loss(y_true: &Tensor, y_pred: &Tensor) -> f64 {
     let sum: f64 = true_data
         .iter()
         .zip(pred_data.iter())
-        .map(|(y, p)| {
+        .map(|(&y, &p)| {
             let margin = 1.0 - y * p;
             if margin > 0.0 {
                 margin
@@ -180,7 +176,6 @@ pub fn hinge_loss(y_true: &Tensor, y_pred: &Tensor) -> f64 {
             }
         })
         .sum();
-
     sum / n as f64
 }
 
@@ -241,12 +236,11 @@ pub fn euclidean_distance(a: &Tensor, b: &Tensor) -> f64 {
     let sum: f64 = a_data
         .iter()
         .zip(b_data.iter())
-        .map(|(a_val, b_val)| {
-            let diff = a_val - b_val;
+        .map(|(&x, &y)| {
+            let diff = x - y;
             diff * diff
         })
         .sum();
-
     sqrt(sum)
 }
 
@@ -256,11 +250,12 @@ pub fn manhattan_distance(a: &Tensor, b: &Tensor) -> f64 {
     let a_data = a.data.borrow();
     let b_data = b.data.borrow();
 
-    a_data
+    let sum: f64 = a_data
         .iter()
         .zip(b_data.iter())
-        .map(|(a_val, b_val)| fabs(a_val - b_val))
-        .sum()
+        .map(|(&x, &y)| fabs(x - y))
+        .sum();
+    sum
 }
 
 /// Chebyshev distance (L∞)
@@ -272,8 +267,8 @@ pub fn chebyshev_distance(a: &Tensor, b: &Tensor) -> f64 {
     a_data
         .iter()
         .zip(b_data.iter())
-        .fold(0.0, |max_val, (a_val, b_val)| {
-            let abs_val = fabs(a_val - b_val);
+        .fold(0.0, |max_val, (&x, &y)| {
+            let abs_val = fabs(x - y);
             if abs_val > max_val {
                 abs_val
             } else {
@@ -291,12 +286,11 @@ pub fn rbf_kernel(a: &Tensor, b: &Tensor, gamma: f64) -> f64 {
     let sum: f64 = a_data
         .iter()
         .zip(b_data.iter())
-        .map(|(a_val, b_val)| {
-            let diff = a_val - b_val;
+        .map(|(&x, &y)| {
+            let diff = x - y;
             diff * diff
         })
         .sum();
-
     exp(-gamma * sum)
 }
 
