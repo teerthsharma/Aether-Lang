@@ -1,0 +1,6 @@
+⚡ Bolt: Optimize scalar tensor reductions
+
+💡 What: Replaced index-based `for` loops in tensor loss functions (MSE, MAE, Binary Cross-Entropy, Hinge Loss) with single-pass iterator chains using `.iter().zip().map().sum()`. Fixed aether-kernel no_std build failure.
+🎯 Why: High-level tensor operations or manual index loops during scalar reductions involve unnecessary bounds checking, which prevents LLVM from auto-vectorizing operations optimally. The bare-metal kernel `aether-kernel` was failing on CI due to duplicate panic handlers and unresolved references.
+📊 Impact: Elides bounds checks on array lookups and allows the compiler to generate vectorized SIMD instructions, improving overall training throughput on CPU architectures. Resolves CI failures for no_std builds.
+🔬 Measurement: Verified by running the core test suite (`cargo test -p aether-core --features std`), confirming correctness.
