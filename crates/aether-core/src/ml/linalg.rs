@@ -101,10 +101,14 @@ pub fn mse(y_true: &Tensor, y_pred: &Tensor) -> f64 {
     let pred_data = y_pred.data.borrow();
     let n = true_data.len();
 
-    let sum: f64 = true_data.iter().zip(pred_data.iter()).map(|(y, p)| {
-        let diff = y - p;
-        diff * diff
-    }).sum();
+    let sum: f64 = true_data
+        .iter()
+        .zip(pred_data.iter())
+        .map(|(y, p)| {
+            let diff = y - p;
+            diff * diff
+        })
+        .sum();
     sum / n as f64
 }
 
@@ -115,7 +119,11 @@ pub fn mae(y_true: &Tensor, y_pred: &Tensor) -> f64 {
     let pred_data = y_pred.data.borrow();
     let n = true_data.len();
 
-    let sum: f64 = true_data.iter().zip(pred_data.iter()).map(|(y, p)| fabs(y - p)).sum();
+    let sum: f64 = true_data
+        .iter()
+        .zip(pred_data.iter())
+        .map(|(y, p)| fabs(y - p))
+        .sum();
     sum / n as f64
 }
 
@@ -131,18 +139,22 @@ pub fn binary_cross_entropy(y_true: &Tensor, y_pred: &Tensor) -> f64 {
     let pred_data = y_pred.data.borrow();
     let n = true_data.len();
 
-    let sum: f64 = true_data.iter().zip(pred_data.iter()).map(|(y, p)| {
-        let p = p.clamp(1e-7, 1.0 - 1e-7);
+    let sum: f64 = true_data
+        .iter()
+        .zip(pred_data.iter())
+        .map(|(y, p)| {
+            let p = p.clamp(1e-7, 1.0 - 1e-7);
 
-        #[cfg(not(feature = "std"))]
-        {
-            -(y * log(p) + (1.0 - y) * log(1.0 - p))
-        }
-        #[cfg(feature = "std")]
-        {
-            -(y * p.ln() + (1.0 - y) * (1.0 - p).ln())
-        }
-    }).sum();
+            #[cfg(not(feature = "std"))]
+            {
+                -(y * log(p) + (1.0 - y) * log(1.0 - p))
+            }
+            #[cfg(feature = "std")]
+            {
+                -(y * p.ln() + (1.0 - y) * (1.0 - p).ln())
+            }
+        })
+        .sum();
     sum / n as f64
 }
 
@@ -153,10 +165,18 @@ pub fn hinge_loss(y_true: &Tensor, y_pred: &Tensor) -> f64 {
     let pred_data = y_pred.data.borrow();
     let n = true_data.len();
 
-    let sum: f64 = true_data.iter().zip(pred_data.iter()).map(|(y, p)| {
-        let margin = 1.0 - y * p;
-        if margin > 0.0 { margin } else { 0.0 }
-    }).sum();
+    let sum: f64 = true_data
+        .iter()
+        .zip(pred_data.iter())
+        .map(|(y, p)| {
+            let margin = 1.0 - y * p;
+            if margin > 0.0 {
+                margin
+            } else {
+                0.0
+            }
+        })
+        .sum();
     sum / n as f64
 }
 

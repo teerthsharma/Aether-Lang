@@ -49,6 +49,7 @@ path = "src/lib.rs"
 [[bin]]
 name = "aether-kernel"
 path = "src/main.rs"
+test = false
 
 # Denied for this package only. See the same table in aether-core for why not
 # RUSTFLAGS: that would apply to every dependency, and a future one emitting a
