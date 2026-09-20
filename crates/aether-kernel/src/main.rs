@@ -14,8 +14,9 @@
 //
 
 #![no_std]
-#![no_main]
+#![cfg_attr(not(test), no_main)]
 
+#[cfg(not(test))]
 use core::panic::PanicInfo;
 
 use aether_core::state::SystemState;
@@ -28,6 +29,7 @@ use aether_kernel::{
 // ═══════════════════════════════════════════════════════════════════════════════
 
 /// The kernel entry point (called by bootloader)
+#[cfg(not(test))]
 #[no_mangle]
 pub extern "C" fn _start(boot_info_addr: u64) -> ! {
     kernel_main(boot_info_addr)
@@ -129,6 +131,7 @@ fn kernel_main(boot_info_addr: u64) -> ! {
 // Panic Handler
 // ═══════════════════════════════════════════════════════════════════════════════
 
+#[cfg(not(test))]
 #[panic_handler]
 fn panic(info: &PanicInfo) -> ! {
     serial_println!("");
