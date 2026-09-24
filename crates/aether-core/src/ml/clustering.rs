@@ -577,7 +577,7 @@ impl<const D: usize> AgglomerativeClustering<D> {
             result.merges[merge_idx] = (
                 cluster_ids[best_i],
                 cluster_ids[best_j],
-                min_dist.sqrt(), // Restore actual distance for the API result
+                sqrt(min_dist), // Restore actual distance for the API result
                 cluster_sizes[best_i] + cluster_sizes[best_j],
             );
             result.n_merges = merge_idx + 1;
