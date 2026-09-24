@@ -558,14 +558,15 @@ impl<const D: usize> AgglomerativeClustering<D> {
                         continue;
                     }
 
-                    let dist = match self.linkage {
-                        Linkage::Single => distance(&data[i], &data[j]),
-                        Linkage::Complete => distance(&data[i], &data[j]),
-                        Linkage::Average => distance(&data[i], &data[j]),
+                    // Optimization: Use squared distance for comparisons to avoid expensive sqrt operations in the inner loop
+                    let dist_sq = match self.linkage {
+                        Linkage::Single => squared_distance(&data[i], &data[j]),
+                        Linkage::Complete => squared_distance(&data[i], &data[j]),
+                        Linkage::Average => squared_distance(&data[i], &data[j]),
                     };
 
-                    if dist < min_dist {
-                        min_dist = dist;
+                    if dist_sq < min_dist {
+                        min_dist = dist_sq;
                         best_i = i;
                         best_j = j;
                     }
@@ -576,7 +577,7 @@ impl<const D: usize> AgglomerativeClustering<D> {
             result.merges[merge_idx] = (
                 cluster_ids[best_i],
                 cluster_ids[best_j],
-                min_dist,
+                min_dist.sqrt(), // Restore actual distance for the API result
                 cluster_sizes[best_i] + cluster_sizes[best_j],
             );
             result.n_merges = merge_idx + 1;
