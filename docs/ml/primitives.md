@@ -21,6 +21,13 @@ a benchmarked replacement for external ML frameworks.
 | `dataloader` | Batch iteration over tensors |
 | `gossip` | Local centroid and consensus propagation |
 
+<div class="ts-viz" data-viz="ml-kmeans" data-title="KMeans: assign, update, stop" data-caption="KMeans::fit with k-means++ seeding from seed 42; stops when no label changes or inertia moves less than 1e-4."></div>
+<div class="ts-viz" data-viz="ml-classify" data-title="Logistic regression and perceptron boundaries" data-caption="LogisticRegression::fit (lr 0.1, tol 1e-4, 100 iterations) and Perceptron::fit (lr 1, stop at zero errors) trained live on two Gaussian classes."></div>
+<div class="ts-viz" data-viz="ml-mlp-xor" data-title="A 2-8-1 MLP learning XOR" data-caption="The test_mlp_xor setup: tanh hidden layer, sigmoid output, MSE loss, SGD with momentum, crate LCG initialisation with seeds 42 and 43."></div>
+<div class="ts-viz" data-viz="ml-conv2d" data-title="Conv2D forward pass" data-caption="One 3×3 kernel slides over a 12×12 input with zero padding and stride, and ReLU gives each output cell."></div>
+<div class="ts-viz" data-viz="ml-gossip" data-title="Gossip consensus on a ring" data-caption="GossipRing::tick: each node averages with its ring predecessor (α = 0.5); converge stops when every estimate is within tolerance of the mean."></div>
+
+
 ## Language Boundary
 
 The DSL exposes a narrower surface than the Rust crate inventory. Constructors

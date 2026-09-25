@@ -2,6 +2,9 @@
 
 Aether source is statement-oriented. Newlines and `~` can terminate statements.
 
+<div class="ts-viz" data-viz="pipe-lexer" data-preset="syntax" data-title="Source to tokens to AST" data-caption="Every snippet on this page, tokenized and parsed by a port of lexer.rs and parser.rs; ~ and newlines both appear as separators."></div>
+
+
 ## Literals And Variables
 
 ```aether

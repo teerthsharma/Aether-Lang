@@ -32,6 +32,12 @@ extra_css:
 extra:
   homepage: https://teerthsharma.vercel.app/
 extra_javascript:
+  - javascripts/viz-core.js
+  - javascripts/viz-topology.js
+  - javascripts/viz-formal.js
+  - javascripts/viz-ml.js
+  - javascripts/viz-kernel.js
+  - javascripts/viz-pipeline.js
   - javascripts/hero.js
   - https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js
 exclude_docs: |

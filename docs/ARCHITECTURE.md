@@ -23,6 +23,9 @@ flowchart TB
   F --> G["aether-kernel sparse-event concepts"]
 ```
 
+<div class="ts-viz" data-viz="pipe-workspace" data-title="Cargo workspace map" data-caption="Select a crate to see its path dependencies, dependents and external crates, read from each crates/*/Cargo.toml."></div>
+
+
 The public architecture claim is the composition of these crates. Hardware,
 security, and speed claims require the evidence gates listed in
 [Evidence Gates](benchmarks/evidence-gates.md).

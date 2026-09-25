@@ -35,6 +35,8 @@ cargo test --workspace --exclude aether-kernel
 | **Topology-derived scheduled attention** | **16 tests in `tests/scheduled_attention.rs`** | `cargo test -p aether-core --test scheduled_attention` |
 | **Scale past 32 points** | **7 tests in `tests/persistence_scale.rs`** | `cargo test -p aether-core --test persistence_scale --release` |
 
+<div class="ts-viz" data-viz="k-ledger" data-title="Test counts behind the Active rows" data-caption="Only rows that state a count are shown. The scheduler row comes from Partial Or Gated: its 4 tests never execute."></div>
+
 ### What the invariant suite asserts
 
 These are the properties that separate a correct persistent homology
@@ -54,10 +56,14 @@ executable assertion.
 | ∂∘∂ = 0 over 𝔽₂ | Every simplex in 5 complexes | exact |
 | Filtration monotonicity | Every face present, and preceding its coface | exact |
 
+<div class="ts-viz" data-viz="k-circle" data-title="Circle ground truth: 2r·sin(π·⌈n/3⌉/n)" data-caption="The long H1 bar's death for n points on a unit circle. The blue points are the n values the suite asserts to 1e-12."></div>
+
 Mutation-tested: three injected defects (a dropped edge in the triangle
 filtration, a hardcoded `+0.001` absolute epsilon, and a reduction terminating
 after one column operation) are caught by 4, 4, and 7 of the 11 tests
 respectively. The six pre-existing example tests caught 0, 0, and 1.
+
+<div class="ts-viz" data-viz="k-mutation" data-title="Mutants killed, per injected defect" data-caption="Each count is copied from the mutation paragraphs. The weak pre-existing tests and the mutant that was never run appear in orange."></div>
 
 Bottleneck distance is computed exactly, by binary search over the candidate cost
 set with Kuhn's augmenting-path matching on the threshold graph, including
@@ -82,6 +88,8 @@ diagonal projection. Essential-class counts must match exactly.
 | Image weighting | A long bar deposits > 5x the mass of a near-diagonal one |
 | Image translation equivariance | Shifting births and the window gives an identical raster |
 | Kernel width | σ = 0.05 concentrates > 3x more than σ = 0.6 |
+
+<div class="ts-viz" data-viz="k-diagram" data-title="Diagram fixtures: bottleneck, Wasserstein, landscapes" data-caption="The bars come from tests/diagram_distance.rs. Distances are recomputed here by exhaustive matching, with projection onto the diagonal."></div>
 
 Mutation-tested, five injected defects:
 
@@ -151,6 +159,8 @@ Placement against the same key-norm spread curve that broke the old selector:
 
 Flat across the range where the old rule went negative.
 
+<div class="ts-viz" data-viz="k-spread" data-title="Placement vs key-norm spread, reproduced live" data-caption="The lines plot the page tables. The rings re-run the test fixture in the browser (seeds 67 to 81, seq 32, budget 6, bit-exact RNG) and land on the same numbers."></div>
+
 **But placement without cost is not a result.** Measured dot products per row
 against dense, 64 keys, budget 8 (`cargo run -p aether-core --example routing_cost
 --release`):
@@ -175,9 +185,13 @@ at key-norm spread 8 where the nearest-neighbour rule was worse than random.
 when the key distribution has H0 structure, and no win at all when it does not.
 `routing_is_sparse_only_when_the_keys_have_h0_structure` asserts both halves.
 
+<div class="ts-viz" data-viz="k-routing-cost" data-title="What routing costs, and when it declines" data-caption="The rows are copied from the routing_cost, Adaptive and gap_ratio tables. Anything that failed the 0.6 threshold or was rejected is shown in orange."></div>
+
 This cost contract did not exist until the routed selector posted a 0.999-of-dense
 "win". Every earlier test measured how good a selection was; none measured what it
 cost to make.
+
+<div class="ts-viz" data-viz="k-router" data-title="select_mask on 64 keys, live" data-caption="Blue cells are the keys the selector picked, and shading is dense softmax weight. The cost ratio, gap ratio and worth_routing flag come from the ported routing_plan."></div>
 
 ### Deciding whether to route, at runtime
 
@@ -239,6 +253,8 @@ At seq 32, head_dim 8, budget 6, uniform random q/k:
 | 73 | 0.4882 | 0.5619 | 0.5742 | +0.857 |
 | 79 | 0.4947 | 0.5795 | 0.5850 | +0.939 |
 
+<div class="ts-viz" data-viz="k-seeds" data-title="Four seeds of the tautological placement" data-caption="With equal key norms, nearest-neighbour ranks keys like the dot product does. These rows must not be quoted as a result."></div>
+
 That placement is **largely tautological and must not be quoted as a result.**
 Since `‖q − k‖² = ‖q‖² + ‖k‖² − 2·q·k`, ranking keys by Euclidean proximity is the
 same as ranking them by dot product whenever key norms are roughly equal — which
@@ -284,11 +300,15 @@ Schedule sources, all clamped causally: **sink blocks**, a **local window** (whi
 always contains the query block, so no row is ever empty), and the
 **top-k 0D-persistence salient blocks**.
 
+<div class="ts-viz" data-viz="k-csr" data-title="CSR block schedule, built by the ported topology_block_schedule" data-caption="The default is the unit-test fixture (16 blocks, seed 13), which yields 56 / 136. The outlined row is the query tile walking its CSR row. Mass uses the ported block_mass_recovered."></div>
+
 Measured block reduction at 16 blocks, `local_radius=1, sink=1, topk=2`:
 **56 / 136 scheduled blocks, 58.8% reduction**. The Triton PR measured 56.6% at
 seq 1024 and 80.9% at seq 4096 on an RTX 4060; this repository asserts the
 direction at a size a unit test can run, and does not restate their wall-clock
 numbers, which were measured on hardware this workspace has no access to.
+
+<div class="ts-viz" data-viz="k-reduction" data-title="Block reduction: this port vs the Triton PR" data-caption="Only 58.8% is measured here. The Triton figures are external and shown in grey."></div>
 
 **Salience is the elder rule.** Each block records the merge distance at which its
 component was absorbed, so its score is an H0 death time of the centroid cloud.
@@ -307,6 +327,8 @@ tie-breaking; both follow union-find order. A caller who reorders their sequence
 gets a different, not a worse, schedule. `the_schedule_depends_on_block_order`
 pins this so it cannot be forgotten, and says what a fix would need: a
 deterministic tie-break on centroid content rather than on index.
+
+<div class="ts-viz" data-viz="k-elder" data-title="Elder-rule salience, and why block order matters" data-caption="Shuffling block order moves the zero-salience block and changes per-block scores, while the sorted multiset (the H0 barcode) stays identical."></div>
 
 ## Partial Or Gated
 
@@ -353,6 +375,8 @@ The point cap is a time budget, not a correctness limit.
 Before indexing the face lookup, `tests/persistence_scale.rs` took **29.07 s** in
 release; after, **1.10 s** — a 26x reduction on identical assertions. The old
 `find_simplex` linear scan made the reduction O(m^2) in the simplex count.
+
+<div class="ts-viz" data-viz="k-scale" data-title="scale_probe timings, log-log" data-caption="All ten rows from the scale_probe table, single core, Windows 11."></div>
 
 Defaults now: `h2_default` 48 points, `h1_dense` 128, `h0_only` 512.
 

@@ -43,6 +43,9 @@ flowchart LR
   D --> E["Execution, convergence, pruning, or rejection decision"]
 ```
 
+<div class="ts-viz" data-viz="pipe-flow" data-title="One example through the flow" data-caption="A list becomes a 3D time-delay embedding, the Rips radius joins its points, and β0 feeds the decision; edit data, τ or radius."></div>
+
+
 ## What Is Active Today
 
 - Lexer, parser, AST, interpreter, and Titan VM scaffolding in `aether-lang`.

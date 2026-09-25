@@ -124,6 +124,8 @@ call frame whose parameter bindings are local to the call. The VM currently
 restores the caller locals after `RET`; the interpreter clones and restores the
 variable environment around user function execution.
 
+<div class="ts-viz" data-viz="formal-lookup" data-title="lookup_bind_same and eval_bound_var" data-caption="Bind a name, watch Env.lookup stop at the head cell, and step through the two Lean proofs in Aether/Core.lean 1096-1104."></div>
+
 Core rules to encode first:
 
 - `let x = e` evaluates `e` and binds `x`.
@@ -149,6 +151,8 @@ Truthiness in the current runtime is:
 - Empty strings and empty lists are false.
 - `Unit` and unsupported values are false.
 - Other booleans, nonzero numbers, non-empty strings, and non-empty lists are true.
+
+<div class="ts-viz" data-viz="formal-truthy" data-title="truthy, arm by arm" data-caption="Pick a Value constructor and size; the matching arm of truthy in Aether/Core.lean 203-209 fires."></div>
 
 The proof-core static checker is stricter for control flow: `if`, `while`, and
 `seal until` conditions must have type `bool` when known. Logical `&&` and
@@ -268,6 +272,8 @@ The checked Lean 4 scaffold lives in:
   call-frame behavior, and evaluator/compiler agreement examples.
 - `Aether/Pipeline.lean`: stage-aware source diagnostics over the executable
   lexer, parser, static checker, checked compiler, and frame VM runner.
+
+<div class="ts-viz" data-viz="formal-deps" data-title="What imports and uses what" data-caption="Module imports from the Lean sources plus the three theorem kinds; hover or tab to a node to trace its dependencies."></div>
 
 Run:
 
@@ -514,6 +520,8 @@ operators, binary operators, list construction, indexed access, field access,
 method calls including `is_empty`, string `first`/`tail`/`last`/`take`/`drop`/`reverse`/`at`/`contains`/`starts_with`/`ends_with`, and list `first`/`tail`/`last`/`at`/`take`/`drop`/`reverse`/`append`/`prepend`/`concat`/`join`/`contains`, explicit-return function calls, and implicit final-expression
 function calls agree with `evalExprWithFns` on concrete examples; full
 inductive correspondence remains future work.
+
+<div class="ts-viz" data-viz="formal-witness" data-group="expr" data-title="Expression witnesses" data-caption="Each theorem is proved by intro _ then native_decide; this replays the bounded evaluator and lets the fuel drop below Lean's."></div>
 Initial statement-level executable witnesses check that selected
 `StepStmtWithFns` facts for `let`, assignment, expression, `fn` declaration,
 `return`, `break`, and `continue` statements agree with projected
@@ -521,13 +529,19 @@ Initial statement-level executable witnesses check that selected
 observable environments and flow, with function declarations checking that a
 function binding is added without requiring equality over the function body
 payload.
+
+<div class="ts-viz" data-viz="formal-witness" data-group="stmt" data-title="Statement witnesses" data-caption="Statement-level witness theorems, replayed step by step against the Lean right-hand side."></div>
 Initial block-level executable witnesses check selected `StepBlockWithFns`
 facts for empty blocks, single-statement blocks, ordinary value sequencing, and
 early `return`/`break`/`continue` propagation against projected
 `execBlockWithFns` results.
+
+<div class="ts-viz" data-viz="formal-witness" data-group="block" data-title="Block witnesses" data-caption="Block-level witnesses: value sequencing continues, return, break and continue stop the block."></div>
 Structured statement executable witnesses now also check selected
 `StepStmtWithFns` `if` facts for true branches, false branches with `else`, and
 false branches without `else` against projected `execStmtWithFns` results.
+
+<div class="ts-viz" data-viz="formal-witness" data-group="if" data-title="If witnesses" data-caption="The three if/else witness theorems and the branch the executor takes."></div>
 Loop statement executable witnesses currently check selected non-recursive
 `while` facts: false conditions exit with `unit`, body `return` propagates, and
 body `break` exits with `unit`.
@@ -545,6 +559,8 @@ Bare `seal` executable witnesses cover ordinary value-body recursion into a
 later `break`, direct body `return` propagation, and body `break` exiting with
 `unit`; they also cover body `continue` advancing to the next bare-seal
 iteration.
+
+<div class="ts-viz" data-viz="formal-witness" data-group="loop" data-title="Loop witnesses" data-caption="while, for and seal witnesses; lower the fuel to see the bounded executor return none."></div>
 
 `evalExprWithFns` and `execBlockWithFns` extend the executable core with a
 bounded function environment. `Stmt.fnDecl` binds a function definition,
@@ -623,6 +639,8 @@ compiler, as do list `.first()`, `.tail()`, `.last()`, `.at(index)`,
 `.first()`, `.tail()`, `.last()`, `.take(count)`, `.drop(count)`, `.reverse()`, `.at(index)`, `.contains(value)`, `.starts_with(prefix)`, and `.ends_with(suffix)` calls.
 General object method calls and full compiler/VM correspondence proofs remain
 future work.
+
+<div class="ts-viz" data-viz="formal-checked" data-title="compileCheckedFrameProgram_static_ok" data-caption="The one VM theorem, Aether/VM.lean 804-814: a successful checked compile implies the static checker accepted the program."></div>
 
 `Aether.Pipeline` wraps the source pipeline in `Except Pipeline.Error` so
 failures keep their phase. The current phases are `lex message SourceSpan`,

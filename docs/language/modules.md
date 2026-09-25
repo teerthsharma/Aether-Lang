@@ -2,6 +2,9 @@
 
 The interpreter exposes modules through `Value::Module` and native functions.
 
+<div class="ts-viz" data-viz="pipe-modules" data-title="Module contracts" data-caption="Pick a module: the import path it takes through the interpreter, its active names, and whether its contract is active or gated."></div>
+
+
 ## `math`
 
 Active names:

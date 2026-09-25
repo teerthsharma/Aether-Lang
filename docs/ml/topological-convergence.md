@@ -13,11 +13,17 @@ The convergence modules use:
 - residual sign-change and oscillation heuristics;
 - fixed windows and thresholds.
 
+<div class="ts-viz" data-viz="ml-seal-detector" data-title="A seal loop that stops when the residual shape stops changing" data-caption="Gradient descent on a cubic; each epoch feeds ResidualAnalyzer β and drift plus RMSE into ConvergenceDetector (ε = 1e-3), and the loop halts on the first epoch where is_converged() returns true."></div>
+
+
 ## Internal Convergence Shape
 
 For a residual sequence \(r_i = y_i - \hat{y_i}\), the interpreter-level
 escalating regressor estimates shape using sign changes and oscillation counts.
 That is a lightweight residual heuristic, not persistent homology.
+
+<div class="ts-viz" data-viz="ml-residual-shape" data-title="The interpreter residual heuristic, epoch by epoch" data-caption="EscalatingRegressor::run_escalating on a demo series: β = (sign_changes/2 + 1, oscillations/4) per model, stopping once the last three β readings match."></div>
+
 
 The persistent-homology path is separate:
 

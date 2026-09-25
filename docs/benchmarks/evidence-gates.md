@@ -16,6 +16,8 @@ This page maps claims to required evidence.
 | Security claim | Corpus, threat model, false-positive and false-negative records |
 | Hardware claim | Hardware logs, environment, repeatable command, failure mode |
 
+<div class="ts-viz" data-viz="k-evidence-gates" data-title="Which claim types have evidence today" data-caption="Each row is filled or open according to this page's Current Gaps list."></div>
+
 ## Current Gaps
 
 - No committed E2E claim artifact.

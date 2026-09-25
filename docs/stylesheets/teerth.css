@@ -111,3 +111,23 @@
 .ts-hero::after { height: 44px; }
 .ts-seal { bottom: 30px; }
 .ts-seal svg { width: 84px; height: 48px; }
+
+/* Visualisation card shared by every viz-*.js file. */
+.ts-viz {
+  margin: 1.6em 0; padding: 1rem 1.1rem .8rem; border-radius: var(--r-card);
+  background: var(--raised); border: 1px solid var(--hair2); box-shadow: var(--e2);
+}
+.ts-viz-title { font-weight: 650; font-size: .8rem; letter-spacing: -.01em; margin-bottom: .6rem; }
+.ts-viz-stage { position: relative; width: 100%; }
+.ts-viz-stage canvas, .ts-viz-stage svg { display: block; width: 100%; }
+.ts-viz-caption { color: var(--md-default-fg-color--light); font-size: .68rem; margin: .6rem 0 0; }
+.ts-viz-controls { display: flex; flex-wrap: wrap; gap: .5rem 1rem; margin-top: .7rem; font-size: .68rem; align-items: center; }
+.ts-viz-controls label { display: inline-flex; gap: .4rem; align-items: center; color: var(--md-default-fg-color--light); }
+.ts-viz-controls input[type=range] { accent-color: var(--blue-500); width: 140px; }
+.ts-viz-controls output { font-family: var(--md-code-font-family); color: var(--md-default-fg-color); min-width: 3ch; }
+.ts-viz-controls button {
+  font: inherit; padding: .3rem .7rem; border-radius: 10px; cursor: pointer;
+  background: var(--raised); color: var(--md-default-fg-color); border: 1px solid var(--hair2); box-shadow: var(--e2);
+}
+.ts-viz-controls button:hover { color: var(--blue-500); }
+.ts-viz-controls button:focus-visible, .ts-viz-controls input:focus-visible { outline: 2px solid var(--blue-500); outline-offset: 2px; }

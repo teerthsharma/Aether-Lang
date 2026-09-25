@@ -2,6 +2,9 @@
 
 Example documentation should distinguish parser examples from runtime examples.
 
+<div class="ts-viz" data-viz="pipe-lexer" data-preset="examples" data-title="Source to tokens to AST" data-caption="The two examples below as the lexer and parser see them; a clean parse is the parser claim, not the runtime claim."></div>
+
+
 ## Runtime Example
 
 ```aether

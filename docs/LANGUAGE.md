@@ -13,3 +13,6 @@ comparison, logical operators, lists, functions, `if`, `while`, `for`,
 
 Parsed syntax and runtime behavior are separate claims. A feature should be
 documented as active only when the interpreter or Titan VM path has evidence.
+
+<div class="ts-viz" data-viz="pipe-lexer" data-preset="pipeline" data-title="Source to tokens to AST" data-caption="Type any snippet to see the token kinds and AST the front end produces before either runtime sees it."></div>
+

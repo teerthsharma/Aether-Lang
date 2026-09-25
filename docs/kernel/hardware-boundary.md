@@ -28,3 +28,5 @@ Do not claim:
 
 Each requires hardware configuration, reproducible boot instructions, logs,
 test artifacts, and failure-mode documentation.
+
+<div class="ts-viz" data-viz="k-hw-gates" data-title="Gated hardware claims against their required artifacts" data-caption="Each gated claim needs all five artifact types, and none are committed yet."></div>

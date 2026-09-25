@@ -11,6 +11,9 @@ Aether is a workspace, not a single binary.
 | Compatibility core | `crates/aegis-core` | Legacy compatibility surface |
 | Compatibility CLI | `crates/aegis-cli` | Legacy compatibility binary |
 
+<div class="ts-viz" data-viz="pipe-workspace" data-title="Cargo workspace map" data-caption="Select a crate to see its path dependencies, dependents and external crates, read from each crates/*/Cargo.toml."></div>
+
+
 ## Runtime Objects
 
 The interpreter stores named variables in a map from identifiers to runtime
@@ -36,3 +39,6 @@ New language-level features should pass through the same path:
 6. documentation status update.
 
 Skipping one stage creates a parsed-only feature or a runtime-only feature.
+
+<div class="ts-viz" data-viz="pipe-extension" data-title="Extension boundary check" data-caption="Untick a stage to see which kind of partial feature it leaves behind."></div>
+

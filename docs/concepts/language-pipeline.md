@@ -12,6 +12,9 @@ flowchart LR
   F --> G["Titan bytecode VM"]
 ```
 
+<div class="ts-viz" data-viz="pipe-lexer" data-preset="pipeline" data-title="Source to tokens to AST" data-caption="Edit the source: a JavaScript port of lexer.rs and parser.rs emits the real TokenKind stream and AST node names."></div>
+
+
 ## Lexer
 
 File: `crates/aether-lang/src/lexer.rs`

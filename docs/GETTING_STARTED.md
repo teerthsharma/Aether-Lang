@@ -17,6 +17,9 @@ cargo run -p aether-cli -- run examples/simple.aegis
 cargo run -p aether-cli -- repl
 ```
 
+<div class="ts-viz" data-viz="pipe-cli" data-title="What each CLI command runs" data-caption="The stages each aether subcommand reaches, from crates/aether-cli/src/main.rs."></div>
+
+
 The standard script extensions are `.aether` and `.ae`. Some repository examples
 use legacy extensions and may print an extension warning.
 
