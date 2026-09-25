@@ -10,6 +10,11 @@
 </p>
 
 <p align="center">
+  <a href="https://teerthsharma.github.io/Aether-Lang/"><strong>Documentation — every theorem, algorithm and result visualised live</strong></a>
+</p>
+
+<p align="center">
+  <a href="https://teerthsharma.github.io/Aether-Lang/"><img src="https://img.shields.io/badge/docs-live-2456dc?style=flat-square" alt="Docs"></a>
   <a href="https://doi.org/10.5281/zenodo.21997728"><img src="https://img.shields.io/badge/DOI-10.5281%2Fzenodo.21997728-1682D4?style=flat-square" alt="DOI 10.5281/zenodo.21997728"></a>
   <a href=".github/workflows/ci.yml"><img src="https://img.shields.io/github/actions/workflow/status/teerthsharma/Aether-Lang/ci.yml?branch=master&label=CI&style=flat-square" alt="CI"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-Custom%20Attribution-00aaff?style=flat-square" alt="License: Custom Attribution"></a>
