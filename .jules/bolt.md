@@ -7,3 +7,6 @@
 ## 2026-07-25 - Tensor metadata cloning in MLP forward passes
 **Learning:** In `aether-core::ml::neural`, cloning the `input` tensor in `MLP::forward` before passing its reference to the first layer's `forward` method triggers an unnecessary heap allocation for tensor metadata and an `Rc` increment.
 **Action:** Extract the first layer using `self.layers.iter_mut()` to pass the initial `input` as a `&Tensor` reference directly, as subsequent layers naturally consume the output of the previous layer.
+## 2026-09-25 - Linalg functional loops
+**Learning:** High-level mathematical operations inside loops can trigger memory overhead due to redundant iterations or shape evaluations in custom struct methods. Utilizing functional chains inside ML cores optimizes the path, eliding bound checks explicitly while allowing auto-vectorization across tensor blocks when arrays guarantee safe alignment natively.
+**Action:** Replace `for i in 0..n` iterating over custom `y_true.data` shapes with straightforward `zip().map().sum()` where iteration safety proves verifiable up-front natively.
