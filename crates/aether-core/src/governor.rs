@@ -6,8 +6,9 @@
 //! (PID-on-Manifold).
 //!
 //! Mathematical Foundation:
-//!   Error Signal: e(t) = R_target - Δ(t)/ε(t)
-//!   Update Law: ε(t+1) = ε(t) + α·e(t) + β·de/dt
+//!   Error Signal: e(t) = clamp(1 - (Δ(t)/ε(t)) / R_target, -1, 1)
+//!   Update Law: ln ε(t+1) = ln ε(t) - α·e(t) - β·(e(t) - e(t-1))
+//!   Fixed point: ε* = Δ / R_target, reached geometrically for a steady Δ
 //!
 //! Intuition:
 //!   - If kernel wakes too often (e < 0): raise ε (decrease sensitivity)
@@ -39,8 +40,9 @@
 const TARGET_TICK_RATE: f64 = 1000.0;
 
 /// Proportional gain (α)
-/// Controls response to instantaneous error
-const ALPHA: f64 = 0.01;
+/// Controls response to instantaneous error (dimensionless: e is a fraction of
+/// the target rate, and ln ε moves by at most α per step)
+const ALPHA: f64 = 0.25;
 
 /// Derivative gain (β)
 /// Controls response to rate of change of error
@@ -68,10 +70,10 @@ const EPSILON_INITIAL: f64 = 0.1;
 ///
 /// # Control Law
 /// ```text
-/// ε(t+1) = ε(t) + α·e(t) + β·de/dt
+/// ln ε(t+1) = ln ε(t) - α·e(t) - β·(e(t) - e(t-1))
 ///
 /// where:
-///   e(t) = R_target - R_actual
+///   e(t) = clamp(1 - R_actual / R_target, -1, 1)
 ///   R_actual = Δ/ε (effective "frame rate")
 /// ```
 ///
@@ -142,9 +144,9 @@ impl GeometricGovernor {
 
     /// Adapt epsilon based on observed deviation
     ///
-    /// Implements the PID-on-Manifold control law:
+    /// Implements the control law on ln ε:
     /// ```text
-    /// ε(t+1) = ε(t) + α·e(t) + β·de/dt
+    /// ln ε(t+1) = ln ε(t) - α·e(t) - β·(e(t) - e(t-1))
     /// ```
     ///
     /// # Arguments
@@ -177,53 +179,32 @@ impl GeometricGovernor {
         // Step 2: Calculate Control Error
         // ═══════════════════════════════════════════════════════════════════
         //
-        // Error = Target - Actual
-        //
         // Positive error: We're too slow (need to lower ε, increase sensitivity)
         // Negative error: We're too fast (need to raise ε, decrease sensitivity)
 
-        let error = TARGET_TICK_RATE - current_rate;
+        // Error is the rate miss as a fraction of the target, clamped to [-1, 1]:
+        //   e = 1 - R_actual / R_target
+        // The raw miss (R_target - R_actual) is in Hz, around 1000, while epsilon
+        // lives in [0.001, 10], so alpha * e moved epsilon across its whole range
+        // in one step and it alternated between the two clamps.
+        let error = (1.0 - current_rate / TARGET_TICK_RATE).clamp(-1.0, 1.0);
 
-        // ═══════════════════════════════════════════════════════════════════
-        // Step 3: Calculate Derivative of Error
-        // ═══════════════════════════════════════════════════════════════════
-        //
-        // de/dt = (e(t) - e(t-1)) / dt
-        //
-        // This term helps dampen oscillations and provides predictive control.
+        // Per-step change in error. Dividing by dt (about 0.001 s) multiplied the
+        // derivative kick by 1000; the step count, not wall time, is what the
+        // discrete update integrates over.
+        let d_error = error - self.last_error;
 
-        let d_error = (error - self.last_error) / dt;
-
-        // ═══════════════════════════════════════════════════════════════════
-        // Step 4: Apply Control Law (PD Controller)
-        // ═══════════════════════════════════════════════════════════════════
-        //
-        // Δε = α·e + β·de/dt
-        //
-        // Note: We could add an integral term (γ·∫e·dt) for PID,
-        // but PD is sufficient for our stability requirements.
-
+        // Update ln(epsilon), not epsilon. Near the fixed point
+        // epsilon* = delta / R_target, e ~ ln(epsilon / epsilon*), so
+        //   u(k+1) = (1 - alpha - beta) u(k) + beta u(k-1),  u = ln(epsilon / epsilon*)
+        // whose roots lie inside the unit circle for the default gains.
         let adjustment = (self.alpha * error) + (self.beta * d_error);
-
-        // ═══════════════════════════════════════════════════════════════════
-        // Step 5: Update State
-        // ═══════════════════════════════════════════════════════════════════
-
-        self.epsilon -= adjustment;
+        self.epsilon *= libm::exp(-adjustment);
         self.last_error = error;
         self.adjustment_count += 1;
-
-        // Update integral for potential future use
         self.integral_error += error * dt;
 
-        // ═══════════════════════════════════════════════════════════════════
-        // Step 6: Safety Clamps
-        // ═══════════════════════════════════════════════════════════════════
-        //
-        // Prevent epsilon from:
-        // - Vanishing (→ system never sleeps, 100% CPU)
-        // - Exploding (→ system never wakes, misses events)
-
+        // Safety clamps: epsilon* outside the band settles on the nearer bound.
         self.epsilon = self.epsilon.clamp(EPSILON_MIN, EPSILON_MAX);
 
         self.epsilon
@@ -318,5 +299,25 @@ mod tests {
         assert!(!gov.should_trigger(0.4));
         assert!(gov.should_trigger(0.5));
         assert!(gov.should_trigger(0.6));
+    }
+    #[test]
+    fn test_steady_deviation_converges_to_equilibrium() {
+        // The fixed point of e = 0 is epsilon* = delta / TARGET_TICK_RATE. A steady
+        // delta must settle there, not alternate between the two clamps.
+        for delta in [5.0, 50.0, 2000.0] {
+            let target = delta / TARGET_TICK_RATE;
+            let mut gov = GeometricGovernor::new();
+            for _ in 0..200 {
+                gov.adapt(delta, 0.001);
+            }
+            let settled = gov.epsilon();
+            assert!(
+                ((settled - target) / target).abs() < 1e-6,
+                "delta {delta}: epsilon {settled}, expected {target}"
+            );
+            // Further steps must not move it: a clamp-to-clamp oscillation would.
+            gov.adapt(delta, 0.001);
+            assert!(((gov.epsilon() - settled) / target).abs() < 1e-6);
+        }
     }
 }

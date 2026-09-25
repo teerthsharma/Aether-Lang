@@ -40,7 +40,7 @@ The governor adapts epsilon from observed deviation and elapsed time. It clamps
 epsilon to a bounded interval so the threshold cannot collapse to zero or grow
 without bound.
 
-<div class="ts-viz" data-viz="k-governor" data-title="GeometricGovernor.adapt() under a constant deviation" data-caption="epsilon -= 0.01*e + 0.05*de/dt with e = 1000 - delta/epsilon, clamped to [0.001, 10]. With the shipped gains it jumps between the two clamps instead of settling."></div>
+<div class="ts-viz" data-viz="k-governor" data-title="GeometricGovernor.adapt() under a constant deviation" data-caption="ln epsilon -= 0.25*e + 0.05*(e - e_prev), e = clamp(1 - (delta/epsilon)/1000, -1, 1), clamped to [0.001, 10]. A steady delta settles at epsilon = delta/1000 (dashed line)."></div>
 
 ## Active Evidence
 

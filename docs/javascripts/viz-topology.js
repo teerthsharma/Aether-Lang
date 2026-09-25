@@ -506,9 +506,9 @@
 
   // GeometricGovernor::adapt, constants from crates/aether-core/src/governor.rs.
   reg("topo-governor", (stage, api) => {
-    const TARGET = 1000, A = 0.01, B = 0.05, EMIN = 0.001, EMAX = 10, E0 = 0.1, STEPS = 40;
+    const TARGET = 1000, A = 0.25, B = 0.05, EMIN = 0.001, EMAX = 10, E0 = 0.1, STEPS = 40;
     let delta = 50, dt = 1;
-    const sim = () => { let e = E0, le = 0; const o = [{ e, rate: delta / e, err: 0 }]; for (let i = 0; i < STEPS; i++) { const rate = delta / e, err = TARGET - rate, de = (err - le) / dt; e = Math.min(EMAX, Math.max(EMIN, e - (A * err + B * de))); le = err; o.push({ e, rate, err }); } return o; };
+    const sim = () => { let e = E0, le = 0; const o = [{ e, rate: delta / e, err: 0 }]; for (let i = 0; i < STEPS; i++) { const rate = delta / e, err = Math.max(-1, Math.min(1, 1 - rate / TARGET)), de = err - le; e = Math.min(EMAX, Math.max(EMIN, e * Math.exp(-(A * err + B * de)))); le = err; o.push({ e, rate, err }); } return o; };
     const out = readout(stage);
     let run = sim();
     const pn = panel(stage, 240, (ctx, w, h) => {

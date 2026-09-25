@@ -327,13 +327,13 @@
   // sparse-events.md
   // ════════════════════════════════════════════════════════════════════════════
   // governor.rs constants, verbatim.
-  const GOV = { TARGET_TICK_RATE: 1000, ALPHA: 0.01, BETA: 0.05, EPSILON_MIN: 0.001, EPSILON_MAX: 10, EPSILON_INITIAL: 0.1 };
+  const GOV = { TARGET_TICK_RATE: 1000, ALPHA: 0.25, BETA: 0.05, EPSILON_MIN: 0.001, EPSILON_MAX: 10, EPSILON_INITIAL: 0.1 };
   function Governor() {
     const g = { eps: GOV.EPSILON_INITIAL, lastErr: 0, n: 0 };
     g.adapt = (dev, dt) => {
       if (dt <= 0 || g.eps <= 0) return g.eps;
-      const rate = dev / g.eps, err = GOV.TARGET_TICK_RATE - rate, dErr = (err - g.lastErr) / dt;
-      g.eps -= GOV.ALPHA * err + GOV.BETA * dErr;
+      const rate = dev / g.eps, err = clamp(1 - rate / GOV.TARGET_TICK_RATE, -1, 1), dErr = err - g.lastErr;
+      g.eps *= Math.exp(-(GOV.ALPHA * err + GOV.BETA * dErr));
       g.lastErr = err; g.n++;
       g.eps = clamp(g.eps, GOV.EPSILON_MIN, GOV.EPSILON_MAX);
       return g.eps;
@@ -410,7 +410,7 @@
   });
 
   R("k-governor", (stage, api) => {
-    let dev = 0.05, dt = 0.001;
+    let dev = 20, dt = 0.001;
     const STEPS = 40;
     const out = readout(stage);
     const c = cvs(stage, api, 210, (ctx, w, h, th) => {
@@ -430,7 +430,7 @@
       const tail = eps.slice(-6), pinned = tail.every((e) => e === GOV.EPSILON_MIN || e === GOV.EPSILON_MAX);
       out.innerHTML = `<span>ε after ${STEPS} calls <b class="${pinned ? "bad" : ""}">${eps[STEPS].toPrecision(3)}</b></span>` +
         `<span>last 6 ${pinned ? '<b class="bad">sit on a clamp</b>' : "<b>interior</b>"}</span>` +
-        `<span>adjustment = α·e + β·de/dt, α=0.01, β=0.05, target 1000</span>`;
+        `<span>ln ε −= α·e + β·Δe, e = clamp(1 − R/R*, ±1), α=0.25, β=0.05, R* = 1000</span>`;
     });
     const ctl = api.controls();
     ctl.slider("log₁₀ Δ", -4, 3, 0.1, Math.log10(dev), (v) => { dev = 10 ** v; c.redraw(); });
