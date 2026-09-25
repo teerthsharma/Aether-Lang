@@ -18,9 +18,8 @@ The convergence modules use:
 
 ## Internal Convergence Shape
 
-For a residual sequence \(r_i = y_i - \hat{y_i}\), the interpreter-level
-escalating regressor estimates shape using sign changes and oscillation counts.
-That is a lightweight residual heuristic, not persistent homology.
+Sign changes and oscillation counts of \(r_i = y_i - \hat{y_i}\): a lightweight heuristic, not persistent homology.
+[Theory →](../theory.md#th-residual-shape)
 
 <div class="ts-viz" data-viz="ml-residual-shape" data-title="The interpreter residual heuristic, epoch by epoch" data-caption="EscalatingRegressor::run_escalating on a demo series: β = (sign_changes/2 + 1, oscillations/4) per model, stopping once the last three β readings match."></div>
 
@@ -33,6 +32,8 @@ let b = topology.betti(diagram, radius=0.5)~
 ```
 
 ## Claim Boundary
+
+[Theory →](../theory.md#th-claim-boundaries)
 
 It is accurate to say:
 

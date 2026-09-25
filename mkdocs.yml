@@ -44,6 +44,7 @@ exclude_docs: |
   superpowers/**
 nav:
   - Home: index.md
+  - Theory: theory.md
   - Concepts:
       - Benefit Emergence: concepts/benefit-emergence.md
       - Language Pipeline: concepts/language-pipeline.md

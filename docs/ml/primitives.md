@@ -37,6 +37,8 @@ the interpreter path is implemented and tested.
 
 ## Claim Boundary
 
+[Theory →](../theory.md#th-claim-boundaries)
+
 The ML module can be described as internal Rust ML primitives. It should not be
 documented as:
 

@@ -31,9 +31,8 @@ let count = 0~
 
 ## What it is
 
-Aether Lang documents the language runtime and core systems as a set of bounded
-contracts. The central idea is that ordinary engineering constraints can expose
-useful behavior when the runtime preserves structure:
+Bounded contracts: the runtime keeps structure, so a cheap invariant can drive the decision.
+[Theory →](theory.md#th-benefit-emergence)
 
 ```mermaid
 flowchart LR
@@ -71,8 +70,7 @@ flowchart LR
 - Framework parity with PyTorch, TensorFlow, CUDA, or Triton.
 - Bare-metal bootability as a user-facing distribution target.
 
-Those surfaces can be implemented, but the docs should not describe them as
-active capabilities until tests and artifacts cover the claim.
+None is described as active until tests and artifacts cover the claim.
 
 ## Learning Path
 
@@ -90,5 +88,4 @@ Every active claim should have one of three forms:
 - a runnable CLI or benchmark artifact;
 - a docs-only theory or roadmap statement clearly labeled as such.
 
-This keeps the project legible without turning planned systems into active
-claims.
+[Theory →](theory.md#th-claim-boundaries)

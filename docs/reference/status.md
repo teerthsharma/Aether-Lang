@@ -39,9 +39,7 @@ cargo test --workspace --exclude aether-kernel
 
 ### What the invariant suite asserts
 
-These are the properties that separate a correct persistent homology
-implementation from a plausible-looking wrong one. Each is a theorem stated as an
-executable assertion.
+Each row is a theorem stated as an executable assertion. [Theory →](../theory.md#ev-invariants)
 
 | Property | Assertion | Constant |
 | --- | --- | --- |
@@ -58,16 +56,16 @@ executable assertion.
 
 <div class="ts-viz" data-viz="k-circle" data-title="Circle ground truth: 2r·sin(π·⌈n/3⌉/n)" data-caption="The long H1 bar's death for n points on a unit circle. The blue points are the n values the suite asserts to 1e-12."></div>
 
-Mutation-tested: three injected defects (a dropped edge in the triangle
-filtration, a hardcoded `+0.001` absolute epsilon, and a reduction terminating
-after one column operation) are caught by 4, 4, and 7 of the 11 tests
-respectively. The six pre-existing example tests caught 0, 0, and 1.
+| Injected defect | Invariant tests catching it (of 11) | Pre-existing example tests (of 6) |
+| --- | --- | --- |
+| Dropped edge in the triangle filtration | 4 | 0 |
+| Hardcoded `+0.001` absolute epsilon | 4 | 0 |
+| Reduction stops after one column operation | 7 | 1 |
 
 <div class="ts-viz" data-viz="k-mutation" data-title="Mutants killed, per injected defect" data-caption="Each count is copied from the mutation paragraphs. The weak pre-existing tests and the mutant that was never run appear in orange."></div>
 
-Bottleneck distance is computed exactly, by binary search over the candidate cost
-set with Kuhn's augmenting-path matching on the threshold graph, including
-diagonal projection. Essential-class counts must match exactly.
+- Bottleneck: exact (binary search over costs, Kuhn matching, diagonal projection).
+- Essential-class counts must match exactly.
 
 ### What the diagram suite asserts
 
@@ -101,16 +99,11 @@ Mutation-tested, five injected defects:
 | Image hardcodes the Gaussian width, ignoring σ | 1 of 17 |
 | Bottleneck forbids diagonal projection | (not run — the ∞ costs make the matching search diverge) |
 
-Two of those five initially survived. The ordering test used *nested* bars, whose
-tent values already arrive sorted, so skipping the sort changed nothing; and no
-test referenced σ at all, so every other image property held for any fixed kernel
-width. Both tests were rewritten until the mutants died. A suite that has not been
-mutated is a suite of unknown strength.
+The sort and σ mutants first survived; both tests were rewritten until they died. [Theory →](../theory.md#ev-diagram-mutation)
 
 ### What the attention suite asserts
 
-`tests/attention_contracts.rs`, 29 tests over `aether_core::attention`. Ordered by
-bug caught per line of test.
+`tests/attention_contracts.rs`, 29 tests over `aether_core::attention`, ordered by bug caught per line of test.
 
 | Contract | Assertion |
 | --- | --- |
@@ -137,18 +130,11 @@ bug caught per line of test.
 | Oracle bound | No same-budget selector recovers more mass than oracle top-k |
 | Fair ablation | Every selector spends the same mean budget before mass is compared |
 
-**No gradient check here.** `aether_core::attention` has no backward pass. The
-scheduled port does: `aether_core::scheduled::scheduled_attention_backward` is
-covered by a finite-difference gradcheck in `tests/attention_backward.rs`.
+**No gradient check here:** `aether_core::attention` has no backward pass. `aether_core::scheduled::scheduled_attention_backward` has one, finite-difference gradchecked in `tests/attention_backward.rs`.
 
 ### The routed selector — the fix, and what it actually costs
 
-`Selector::TopologicalRouted` splits the two jobs the nearest-neighbour rule
-conflated: H0 single-linkage clustering of the **unit-normalised** key directions
-builds a candidate set (norm-invariant by construction), and the exact dot product
-ranks within it (restoring the norm sensitivity the geometry discarded).
-
-Placement against the same key-norm spread curve that broke the old selector:
+`Selector::TopologicalRouted`: H0 clustering of unit-normalised keys picks candidates, the exact dot product ranks them. [Theory →](../theory.md#ev-routed-selector)
 
 | key-norm spread | nearest-neighbour | routed |
 |---|---|---|
@@ -157,13 +143,15 @@ Placement against the same key-norm spread curve that broke the old selector:
 | 4.0 | −0.109 | **+0.874** |
 | 8.0 | −0.285 | **+0.866** |
 
-Flat across the range where the old rule went negative.
+Routed stays flat where nearest-neighbour goes negative.
 
 <div class="ts-viz" data-viz="k-spread" data-title="Placement vs key-norm spread, reproduced live" data-caption="The lines plot the page tables. The rings re-run the test fixture in the browser (seeds 67 to 81, seq 32, budget 6, bit-exact RNG) and land on the same numbers."></div>
 
-**But placement without cost is not a result.** Measured dot products per row
-against dense, 64 keys, budget 8 (`cargo run -p aether-core --example routing_cost
---release`):
+Placement without cost is not a result. Dot products per row vs dense, 64 keys, budget 8:
+
+```bash
+cargo run -p aether-core --example routing_cost --release
+```
 
 | key distribution | H0 component sizes | cost vs dense | placement |
 |---|---|---|---|
@@ -172,34 +160,17 @@ against dense, 64 keys, budget 8 (`cargo run -p aether-core --example routing_co
 | 8 real clusters | `[8, 8, 8, 8]` | 0.528 | +0.995 |
 | 16 real clusters | `[4, 4, 4, 4]` | 0.733 | +0.989 |
 
-On uniform keys the router examines **every key**: it is dense attention with
-clustering overhead, and its +0.94 placement is worth nothing. The cause is not a
-clustering bug — single-linkage chains on a cloud with no density gaps, which is
-H0 correctly reporting that uniform data has no structure to route on.
-
-Give the keys genuine structure and H0 recovers it balanced, and the router buys
-**+0.92 to +0.99 of oracle quality at 0.449x the dense dot-product count**, holding
-at key-norm spread 8 where the nearest-neighbour rule was worse than random.
-
-**The claim, stated precisely:** topological routing is a real sparsity win exactly
-when the key distribution has H0 structure, and no win at all when it does not.
-`routing_is_sparse_only_when_the_keys_have_h0_structure` asserts both halves.
+- Uniform keys: router examines every key; the +0.94 placement is worth nothing.
+- Structured keys: **+0.92 to +0.99 of oracle at 0.449x dense**, holding at key-norm spread 8.
+- Claim: a sparsity win exactly when keys have H0 structure, none otherwise — `routing_is_sparse_only_when_the_keys_have_h0_structure`.
 
 <div class="ts-viz" data-viz="k-routing-cost" data-title="What routing costs, and when it declines" data-caption="The rows are copied from the routing_cost, Adaptive and gap_ratio tables. Anything that failed the 0.6 threshold or was rejected is shown in orange."></div>
-
-This cost contract did not exist until the routed selector posted a 0.999-of-dense
-"win". Every earlier test measured how good a selection was; none measured what it
-cost to make.
 
 <div class="ts-viz" data-viz="k-router" data-title="select_mask on 64 keys, live" data-caption="Blue cells are the keys the selector picked, and shading is dense softmax weight. The cost ratio, gap ratio and worth_routing flag come from the ported routing_plan."></div>
 
 ### Deciding whether to route, at runtime
 
-The conditional result above is only useful if the condition is checked. It now is.
-
-`routing_plan(k, seq, head_dim, clusters, budget, causal)` performs the H0
-clustering once per key tensor — amortised across every query, head and layer that
-reuses it — and reports what routing will cost **before any query runs**:
+`routing_plan(k, seq, head_dim, clusters, budget, causal)` clusters once per key tensor and reports the cost **before any query runs**. [Theory →](../theory.md#ev-routing-plan)
 
 | field | meaning |
 | --- | --- |
@@ -208,14 +179,14 @@ reuses it — and reports what routing will cost **before any query runs**:
 | `gap_ratio` | from the H0 barcode alone: first merge height above the cut ÷ last below it |
 | `worth_routing` | `cost_ratio < 0.6` |
 
-**The barcode alone separates the regimes.** Over 6 trials each at seq 48:
+The barcode alone separates the regimes (6 trials each, seq 48):
 
 | key distribution | `gap_ratio` |
 | --- | --- |
 | 6 real clusters | **min 2.70** |
 | uniform random | **max 1.04** |
 
-No overlap. A runtime can cache that scalar and skip the clustering entirely.
+No overlap.
 
 `Selector::Adaptive { budget, clusters }` acts on the plan:
 
@@ -224,27 +195,16 @@ No overlap. A runtime can cache that scalar and skip the clustering entirely.
 | structured | route | 0.449 | placement **+0.980** |
 | unstructured | decline | 1.000 | recovers **1.000** of attention mass |
 
-**The fallback is dense, not a cheap window.** The first version fell back to a
-budget-6 sliding window and measured placement **+0.014** on unstructured keys —
-indistinguishable from random. That is not a fallback bug: when the keys have no
-H0 structure there is no cheap-and-good option, because finding the top-k without
-computing the scores is exactly what the structure was supposed to make possible.
-So `Adaptive` guarantees *never worse than dense, in cost or in quality*, which is
-the only guarantee safe to enable by default. A caller who would rather trade
-quality for cost asks for `Local` explicitly.
-
-The two regimes are scored on different scales deliberately. Placement is only
-meaningful for budget-limited selectors: dense recovers all the mass, which sits
-*above* the budget-limited oracle and makes the ratio blow up — one run reported
-**+7.6**, which would read as a 700% win over an oracle it never competed with.
-The unstructured case is therefore asserted as recovered mass, not placement.
+- Fallback is dense: never worse than dense in cost or quality. A budget-6 window fallback scored **+0.014**. `Local` is opt-in.
+- Unstructured is scored as recovered mass, not placement (placement vs dense once read **+7.6**).
 
 ### The nearest-neighbour ablation — negative
 
-The same-budget oracle top-k ablation, run for real rather than asserted.
-`cargo test -p aether-core --test attention_contracts -- --nocapture`.
+Same-budget oracle top-k ablation. Seq 32, head_dim 8, budget 6, uniform random q/k:
 
-At seq 32, head_dim 8, budget 6, uniform random q/k:
+```bash
+cargo test -p aether-core --test attention_contracts -- --nocapture
+```
 
 | seed | random | topological | oracle | placement |
 |---|---|---|---|---|
@@ -255,11 +215,7 @@ At seq 32, head_dim 8, budget 6, uniform random q/k:
 
 <div class="ts-viz" data-viz="k-seeds" data-title="Four seeds of the tautological placement" data-caption="With equal key norms, nearest-neighbour ranks keys like the dot product does. These rows must not be quoted as a result."></div>
 
-That placement is **largely tautological and must not be quoted as a result.**
-Since `‖q − k‖² = ‖q‖² + ‖k‖² − 2·q·k`, ranking keys by Euclidean proximity is the
-same as ranking them by dot product whenever key norms are roughly equal — which
-is exactly the case for uniform random data. Vary the key norms and the rankings
-decouple (8 trials each):
+That placement is **largely tautological and must not be quoted.** Vary key norms and it decouples (8 trials each). [Theory →](../theory.md#ev-nn-ablation)
 
 | key-norm spread | random | topological | oracle | placement |
 |---|---|---|---|---|
@@ -270,63 +226,38 @@ decouple (8 trials each):
 | 4.0 | 0.4873 | 0.4577 | 0.7616 | **−0.109** |
 | 8.0 | 0.4848 | 0.3725 | 0.8841 | **−0.285** |
 
-**At high key-norm spread the topological selector is worse than uniform random.**
-The mechanism as currently defined — nearest-neighbour in key space — is a good
-proxy for attention mass only under roughly homogeneous key norms, a condition
-real attention does not guarantee. `the_topological_advantage_collapses_when_key_norms_vary`
-pins both ends of that curve so the claim cannot quietly drift.
-
-The first run of this ablation was worse still: placement −3.6 to −4.2. The cause
-was an **absolute** `epsilon` of 0.6 against a median query-key distance of 2.4,
-so the selector picked 1.0 keys per row while its baselines picked 5.5 — it lost
-on budget, not on mechanism. The radius is now relative and the ablation asserts
-equal mean budget before comparing mass.
+- **At high spread the selector is worse than uniform random.** Pinned by `the_topological_advantage_collapses_when_key_norms_vary`.
+- First run: −3.6 to −4.2, from an absolute `epsilon` 0.6 vs median distance 2.4 (1.0 keys/row vs 5.5). Radius is now relative; equal mean budget is asserted.
 
 ### Scheduled attention — the Rust port of triton-lang/kernels#22
 
-`aether_core::scheduled` is a port of the merged Triton kernel
-[triton-lang/kernels#22](https://github.com/triton-lang/kernels/pull/22),
-"Add topology-derived sparse attention kernel". The Python original runs on CUDA;
-this runs anywhere `aether-core` does, including `no_std`.
-
-The port keeps the original's decomposition, which is what makes it testable:
+`aether_core::scheduled` ports [triton-lang/kernels#22](https://github.com/triton-lang/kernels/pull/22) from CUDA to anywhere `aether-core` runs, including `no_std`. [Theory →](../theory.md#ev-scheduled)
 
 | Half | Nature | Checked against |
 | --- | --- | --- |
 | CSR block schedule | combinatorial | exact set equality; the lower-triangular CSR the Python builder emits, `[0, 1, 3, 6, 10]` / `[0, 0, 1, 0, 1, 2, 0, 1, 2, 3]` for 4 blocks |
 | Kernel | numeric | dense masked attention, to 1e-12 |
 
-Schedule sources, all clamped causally: **sink blocks**, a **local window** (which
-always contains the query block, so no row is ever empty), and the
-**top-k 0D-persistence salient blocks**.
+Schedule sources, all clamped causally:
+
+- **sink blocks**;
+- a **local window**, which always contains the query block, so no row is empty;
+- **top-k 0D-persistence salient blocks**.
 
 <div class="ts-viz" data-viz="k-csr" data-title="CSR block schedule, built by the ported topology_block_schedule" data-caption="The default is the unit-test fixture (16 blocks, seed 13), which yields 56 / 136. The outlined row is the query tile walking its CSR row. Mass uses the ported block_mass_recovered."></div>
 
-Measured block reduction at 16 blocks, `local_radius=1, sink=1, topk=2`:
-**56 / 136 scheduled blocks, 58.8% reduction**. The Triton PR measured 56.6% at
-seq 1024 and 80.9% at seq 4096 on an RTX 4060; this repository asserts the
-direction at a size a unit test can run, and does not restate their wall-clock
-numbers, which were measured on hardware this workspace has no access to.
+| Source | Setting | Block reduction |
+| --- | --- | --- |
+| This port (measured) | 16 blocks, `local_radius=1, sink=1, topk=2` | **56 / 136, 58.8%** |
+| Triton PR (external, RTX 4060) | seq 1024 | 56.6% |
+| Triton PR (external, RTX 4060) | seq 4096 | 80.9% |
 
 <div class="ts-viz" data-viz="k-reduction" data-title="Block reduction: this port vs the Triton PR" data-caption="Only 58.8% is measured here. The Triton figures are external and shown in grey."></div>
 
-**Salience is the elder rule.** Each block records the merge distance at which its
-component was absorbed, so its score is an H0 death time of the centroid cloud.
-`block_salience_is_the_elder_rule_over_centroids` asserts every non-zero salience
-against this crate's persistence engine rather than trusting a second
-implementation of H0, and asserts that **exactly one** block scores 0 — the
-component that is never absorbed. That follows from an invariant the merge
-preserves: every component holds exactly one block that has never been written.
-
-**A caveat the port surfaced.** Per-block salience is *not* permutation-equivariant.
-When two components tie on size, which one is absorbed is decided by index order,
-so the same centroid can score differently depending on where it sits in the
-sequence — and the block that scores 0 moves too. The **multiset** of saliences is
-invariant, because it is the H0 barcode. The Triton original has the same
-tie-breaking; both follow union-find order. A caller who reorders their sequence
-gets a different, not a worse, schedule. `the_schedule_depends_on_block_order`
-pins this so it cannot be forgotten, and says what a fix would need: a
-deterministic tie-break on centroid content rather than on index.
+| Test | Asserts |
+| --- | --- |
+| `block_salience_is_the_elder_rule_over_centroids` | Every non-zero salience equals an H0 death from this crate's engine; **exactly one** block scores 0 |
+| `the_schedule_depends_on_block_order` | Per-block salience is *not* permutation-equivariant (ties break on index); the multiset is invariant |
 
 <div class="ts-viz" data-viz="k-elder" data-title="Elder-rule salience, and why block order matters" data-caption="Shuffling block order moves the zero-salience block and changes per-block scores, while the sorted multiset (the H0 barcode) stays identical."></div>
 
@@ -356,8 +287,11 @@ deterministic tie-break on centroid content rather than on index.
 
 ### Measured scale
 
-`cargo run -p aether-core --example scale_probe --release`, single core, Windows 11.
-The point cap is a time budget, not a correctness limit.
+Single core, Windows 11. The point cap is a time budget, not a correctness limit.
+
+```bash
+cargo run -p aether-core --example scale_probe --release
+```
 
 | dim | n    | pairs | seconds |
 |-----|------|-------|---------|
@@ -372,9 +306,7 @@ The point cap is a time budget, not a correctness limit.
 | 2   | 50   | 19650 | 1.859   |
 | 2   | 70   | 54810 | 15.338  |
 
-Before indexing the face lookup, `tests/persistence_scale.rs` took **29.07 s** in
-release; after, **1.10 s** — a 26x reduction on identical assertions. The old
-`find_simplex` linear scan made the reduction O(m^2) in the simplex count.
+`tests/persistence_scale.rs` (release): **29.07 s → 1.10 s**, 26x, after indexing the face lookup. [Theory →](../theory.md#ev-scale)
 
 <div class="ts-viz" data-viz="k-scale" data-title="scale_probe timings, log-log" data-caption="All ten rows from the scale_probe table, single core, Windows 11."></div>
 

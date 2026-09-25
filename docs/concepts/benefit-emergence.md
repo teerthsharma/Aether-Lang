@@ -1,9 +1,7 @@
 # Benefit Emergence
 
-Aether's benefit model is mechanical. It does not depend on claiming that
-topology replaces ordinary ML, scheduling, or parsing. The benefit appears when
-the runtime carries enough structure for a downstream decision to become local,
-bounded, or auditable.
+A benefit appears only when carried structure makes a downstream decision local, bounded, or auditable.
+[Theory →](../theory.md#th-benefit-emergence)
 
 ## Pattern
 
@@ -33,10 +31,8 @@ The system benefit emerges from the gate:
 
 ## Non-Claim
 
-The repository does not currently prove general model-quality improvement,
-general security detection, hardware acceleration, or asymptotic speedup over
-external libraries. Those require benchmark artifacts, baselines, correctness
-metrics, and environment records.
+Not currently proven: general model-quality improvement, general security detection, hardware acceleration, asymptotic speedup over external libraries.
+Each needs benchmark artifacts, baselines, correctness metrics and environment records.
 
 ## Engineering Rule
 
