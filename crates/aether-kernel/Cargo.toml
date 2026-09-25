@@ -3,7 +3,7 @@ name = "aether-kernel"
 version.workspace = true
 edition.workspace = true
 authors.workspace = true
-license.workspace = true
+license-file.workspace = true
 description = "AETHER Bare-Metal Microkernel for x86_64"
 
 # ═══════════════════════════════════════════════════════════════════════════════

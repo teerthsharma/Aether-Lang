@@ -3,7 +3,7 @@ name = "aether-core"
 version.workspace = true
 edition.workspace = true
 authors.workspace = true
-license.workspace = true
+license-file.workspace = true
 description = "AETHER Core: Platform-agnostic topology, manifold, and ML primitives"
 
 # ═══════════════════════════════════════════════════════════════════════════════
