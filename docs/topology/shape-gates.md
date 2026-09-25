@@ -20,6 +20,9 @@ let diagram = topology.ph(M, max_dim=2, mode="vr", max_points=16)~
 let b = topology.betti(diagram, radius=0.0)~
 ```
 
+<div class="ts-viz" data-viz="topo-dsl" data-title="The DSL example, evaluated" data-caption="Delay-embeds the data with D = 3, builds the Rips diagram, and queries Betti numbers at the given radius; edit the data."></div>
+
+
 ## Binary-Shape Surface
 
 Files:
@@ -35,6 +38,9 @@ Current rejection reasons:
 - invalid density;
 - excessive loops;
 - mismatch from a reference shape.
+
+<div class="ts-viz" data-viz="topo-shape" data-mode="reference" data-title="Shape gate verdicts" data-caption="All three rejection reasons, checked in the order the code checks them, against the function-prologue bytes as reference shape."></div>
+
 
 This is a gatekeeping heuristic. It should not be described as proof of binary
 safety without external validation, corpora, baselines, and false-positive /
