@@ -4,6 +4,14 @@ site_url: https://teerthsharma.github.io/Aether-Lang/
 repo_url: https://github.com/teerthsharma/Aether-Lang
 theme:
   name: material
+  font:
+    text: Instrument Sans
+    code: JetBrains Mono
+  palette:
+    - scheme: default
+      toggle: {icon: material/weather-night, name: Dark mode}
+    - scheme: slate
+      toggle: {icon: material/weather-sunny, name: Light mode}
   features:
     - navigation.sections
     - navigation.tabs
@@ -19,6 +27,10 @@ markdown_extensions:
         - name: mermaid
           class: mermaid
           format: !!python/name:pymdownx.superfences.fence_code_format
+extra_css:
+  - stylesheets/teerth.css
+extra:
+  homepage: https://teerthsharma.vercel.app/
 extra_javascript:
   - https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js
 exclude_docs: |

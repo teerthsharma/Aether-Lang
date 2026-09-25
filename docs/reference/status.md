@@ -21,7 +21,7 @@ cargo test --workspace --exclude aether-kernel
 | `topology.ph` and `topology.betti` | `topology_betti_uses_persistent_homology_engine` | `cargo test -p aether-lang` |
 | Bounded persistent homology H0/H1/H2 | 9 tests in `persistence.rs` | `cargo test -p aether-core --lib persistence` |
 | Lazy witness mode | `witness_mode_uses_landmarks_without_rejecting_full_signal_size` | `cargo test -p aether-core --lib persistence` |
-| **Persistence invariants** | **11 tests in `tests/persistence_invariants.rs`** | **`cargo invariants`** |
+| **Persistence invariants** | **12 tests in `tests/persistence_invariants.rs`** | **`cargo invariants`** |
 | Block metadata and compression selection | 4 tests in `aether.rs` | `cargo test -p aether-core` |
 | Drift detector | `aether.rs` test | `cargo test -p aether-core` |
 | Sparse graph and pipeline | 7 tests in `manifold.rs` | `cargo test -p aether-core` |
@@ -101,7 +101,7 @@ mutated is a suite of unknown strength.
 
 ### What the attention suite asserts
 
-`tests/attention_contracts.rs`, 17 tests over `aether_core::attention`. Ordered by
+`tests/attention_contracts.rs`, 29 tests over `aether_core::attention`. Ordered by
 bug caught per line of test.
 
 | Contract | Assertion |
@@ -129,9 +129,9 @@ bug caught per line of test.
 | Oracle bound | No same-budget selector recovers more mass than oracle top-k |
 | Fair ablation | Every selector spends the same mean budget before mass is compared |
 
-**No gradient check.** There is no backward pass, so there is nothing for
-`gradcheck` to disagree with. When a backward is added, the gradient check against
-the dense path on the same mask is the first test that must come with it.
+**No gradient check here.** `aether_core::attention` has no backward pass. The
+scheduled port does: `aether_core::scheduled::scheduled_attention_backward` is
+covered by a finite-difference gradcheck in `tests/attention_backward.rs`.
 
 ### The routed selector — the fix, and what it actually costs
 
@@ -319,18 +319,18 @@ deterministic tie-break on centroid content rather than on index.
 | `Seal.train` semantic contract | Interpreter test and training artifact |
 | ML model quality | Deterministic datasets and baseline metrics |
 | Cohomology, Mapper, multiparameter persistence | Not implemented. |
-| Sparse-attention **speedup** | No GPU path exists, so there is nothing to measure a speedup against. `aether_core::attention` is a CPU reference for correctness and ablation only. |
-| Attention **backward pass** | Not implemented. A gradient check against the dense path must land in the same change. |
+| Sparse-attention **speedup** | No attention kernel runs on a GPU (`aether-gpu` exists but nothing calls it), so there is nothing to measure a speedup against. `aether_core::attention` is a CPU reference for correctness and ablation only. |
+| Attention **backward pass** | Not implemented for `aether_core::attention`. The scheduled port's backward exists and is gradchecked (`tests/attention_backward.rs`). |
 | Scheduled-attention **wall-clock** speedup | The Triton original measured 1.04x-3.48x sparse-vs-dense-CSR on an RTX 4060. This port is a scalar CPU kernel with no SIMD, no threading and no GPU; it reproduces the *answer* and the *block reduction*, not the timing. |
 | Batched / multi-head scheduling | The Triton kernel shares one CSR schedule across batch and head lanes. This port handles a single `[seq, head_dim]` lane; batching is a loop the caller writes. |
-| Topological **routing** speedup in wall-clock | Cost is counted in dot products, not seconds. A wall-clock claim needs a GPU path, which does not exist. |
+| Topological **routing** speedup in wall-clock | Cost is counted in dot products, not seconds. A wall-clock claim needs a GPU path wired into routing, which does not exist. |
 | Topological routing on real activations | Measured only on synthetic keys. Real attention key distributions are heavy-tailed and may have different H0 structure. |
 | Topological *nearest-neighbour* key selection as an attention-mass proxy | Holds only for roughly homogeneous key norms; **negative at high spread** (see the ablation above). Needs either key normalisation or a dot-product ranking over a topology-derived candidate set, plus a re-run of the ablation. |
 | External TDA parity | Bottleneck ≈ 0 against a pinned `ripser`/`gudhi` on shared fixtures. The invariant suite above is **not** parity: a self-consistently wrong implementation can satisfy every internal property. |
 | Sparse scheduler | 4 tests exist in `scheduler.rs`, but `aether-kernel` is a `no_std` binary with no test harness, so **none of them execute in CI or locally**. Needs a host-testable extraction or a QEMU harness. |
 | Bare-metal boot | The kernel compiles for `x86_64-unknown-none` (Active, above). Booting it is not tested: needs QEMU boot logs and a hardware matrix. |
 | Security detection claim | Threat model, corpus, metrics |
-| GPU acceleration | `wgpu`, `pollster`, and `bytemuck` are declared in `aether-lang`'s default feature set with **zero call sites**. There is no GPU path. |
+| GPU acceleration | A separate `aether-gpu` crate (wgpu compute backend, hardware-gated tests) exists, but nothing in `aether-core` or `aether-lang` calls it. The old `wgpu`/`pollster`/`bytemuck` entries in `aether-lang` were deleted. |
 
 ### Measured scale
 

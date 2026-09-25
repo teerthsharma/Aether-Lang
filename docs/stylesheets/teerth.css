@@ -1,0 +1,70 @@
+/* Tokens lifted from teerthsharma.vercel.app so the docs read as the same site. */
+:root {
+  --ground: #fbfaf7; --ground2: #f3f1eb; --raised: #fff;
+  --hair: #e5e2da; --hair2: #cfcbc1; --ink: #1c1b19; --muted: #5f5b53;
+  --blue-700: #163d9a; --blue-500: #2456dc; --world: #bcd6ee;
+  --r: 10px; --r-card: 14px;
+  --e2: 0 1px 0 #fff inset, 0 2px 4px #1c1b1912, 0 8px 20px #1c1b190f;
+}
+[data-md-color-scheme="default"] {
+  --md-default-bg-color: var(--ground);
+  --md-default-fg-color: var(--ink);
+  --md-default-fg-color--light: var(--muted);
+  --md-primary-fg-color: var(--ground);
+  --md-primary-bg-color: var(--ink);
+  --md-primary-bg-color--light: var(--muted);
+  --md-accent-fg-color: var(--blue-700);
+  --md-typeset-a-color: var(--blue-500);
+  --md-code-bg-color: var(--ground2);
+  --md-footer-bg-color: var(--ground2);
+  --md-footer-fg-color: var(--ink);
+  --md-footer-fg-color--light: var(--muted);
+}
+[data-md-color-scheme="slate"] {
+  --md-hue: 40;
+  --md-default-bg-color: #161513;
+  --md-primary-fg-color: #1c1b19;
+  --md-accent-fg-color: #8fb0ff;
+  --md-typeset-a-color: #8fb0ff;
+  --hair: #2e2c28; --hair2: #3a3833; --raised: #1f1e1b; --e2: none;
+}
+.md-header, .md-tabs { box-shadow: none; border-bottom: 1px solid var(--hair); }
+.md-tabs { background: var(--md-primary-fg-color); color: var(--md-primary-bg-color); }
+.md-header__title { font-weight: 600; letter-spacing: -0.01em; }
+.md-typeset h1, .md-typeset h2 { color: var(--md-default-fg-color); font-weight: 650; letter-spacing: -0.02em; }
+.md-typeset h2 { border-top: 1px solid var(--hair); padding-top: .8em; }
+.md-typeset pre > code, .md-typeset .admonition, .md-typeset details,
+.md-typeset table:not([class]) {
+  border: 1px solid var(--hair2); border-radius: var(--r); box-shadow: var(--e2);
+}
+.md-typeset table:not([class]) { overflow: hidden; }
+.md-typeset table:not([class]) th { background: var(--md-code-bg-color); }
+.md-search__form { border-radius: var(--r); background: var(--md-code-bg-color); }
+.md-footer { border-top: 1px solid var(--hair); }
+
+/* Landing hero: the main site's sky-over-ice feel, a raised card, chip links. */
+.ts-hero {
+  display: grid; grid-template-columns: 1.4fr 1fr; gap: 1.2rem; align-items: center;
+  margin: 0 0 2rem; padding: clamp(1rem, 3vw, 2rem); border-radius: 18px;
+  background: linear-gradient(180deg, var(--world) 0%, #dfeaf5 60%, var(--ground) 100%);
+  border: 1px solid var(--hair);
+}
+[data-md-color-scheme="slate"] .ts-hero { background: linear-gradient(180deg, #1b2a3c, #161513); }
+.ts-hero-card {
+  background: var(--raised); border: 1px solid var(--hair2); border-radius: var(--r-card);
+  box-shadow: var(--e2); padding: 1.4rem 1.6rem;
+}
+.md-typeset .ts-hero-card h1 { font-size: 2rem; line-height: 1.15; margin: .3em 0 .5em; }
+.md-typeset .ts-kicker { font-size: .72rem; color: var(--md-default-fg-color--light); margin: 0; }
+.ts-chips { display: flex; flex-wrap: wrap; gap: .5rem; margin-top: 1rem; }
+.md-typeset a.ts-chip {
+  display: inline-flex; align-items: center; padding: .35rem .8rem; border-radius: 12px;
+  background: var(--raised); border: 1px solid var(--hair2); box-shadow: var(--e2);
+  color: var(--md-default-fg-color); font-weight: 550; font-size: .75rem;
+  transition: transform .18s cubic-bezier(.2,.7,.3,1);
+}
+.md-typeset a.ts-chip:hover { transform: translateY(-1px); color: var(--blue-500); }
+.md-typeset a.ts-chip--primary { background: var(--blue-500); border-color: var(--blue-700); color: #fff; }
+.md-typeset a.ts-chip--primary:hover { color: #fff; background: var(--blue-700); }
+@media (max-width: 760px) { .ts-hero { grid-template-columns: 1fr; } }
+@media (prefers-reduced-motion: reduce) { .md-typeset a.ts-chip { transition: none; } }

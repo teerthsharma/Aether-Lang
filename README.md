@@ -240,7 +240,7 @@ A third status was needed once the GPU backend arrived. 🖥️ **Hardware-gated
 | Lean 4 formalization | ⛔ Ungated | 11,637 lines, 48 theorems, **no `lake build` in CI** |
 | GPU compute backend (`aether-gpu`) | 🖥️ **Hardware-gated** | **102 tests**, RTX 4060 / Vulkan. `cargo test -p aether-gpu --features gpu --release`. In CI they report as **ignored**, not passed |
 | GPU used by `aether-core` | ⛔ **Ungated** | nothing routes through it; cost and precision measured, integration not made |
-| Attention backward pass | ❌ Does not exist | forward only; no gradcheck possible |
+| Attention backward pass | ⚠️ Scheduled port only | `scheduled_attention_backward`, gradchecked in `tests/attention_backward.rs`; `aether_core::attention` is forward only |
 | Wall-clock speedup claims | ❌ Withdrawn | see [What We Got Wrong](#what-we-got-wrong) |
 
 ```

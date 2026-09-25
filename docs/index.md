@@ -1,4 +1,35 @@
-# Aether Lang
+---
+hide: [navigation, toc]
+---
+
+<div class="ts-hero" markdown>
+<div class="ts-hero-card" markdown>
+<p class="ts-kicker">Aether Lang · part of <a href="https://teerthsharma.vercel.app/">Seal's Topology Land</a></p>
+
+# A runtime whose loops stop when their shape does.
+
+A small language where `🦭 until` ends a loop on a condition, persistent homology is a
+built-in call, and every capability on this site is either tested or labelled roadmap.
+
+<div class="ts-chips" markdown>
+[Get started](GETTING_STARTED.md){ .ts-chip .ts-chip--primary }
+[Language](language/syntax.md){ .ts-chip }
+[Topology](topology/persistent-homology.md){ .ts-chip }
+[Status matrix](reference/status.md){ .ts-chip }
+[GitHub](https://github.com/teerthsharma/Aether-Lang){ .ts-chip }
+</div>
+</div>
+
+```text
+let count = 0~
+
+🦭 until count >= 10 {
+    count = count + 1~
+}
+```
+</div>
+
+## What it is
 
 Aether Lang documents the language runtime and core systems as a set of bounded
 contracts. The central idea is that ordinary engineering constraints can expose
