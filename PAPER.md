@@ -120,7 +120,7 @@ A separate status, **Hardware-gated**, was needed once the GPU backend arrived. 
 | Scale past 32 points | **Active** | **7 tests** |
 | `no_std` on a real embedded target | **Active** | builds `thumbv7m-none-eabi` |
 | Kernel compiles bare metal | **Active** | builds `x86_64-unknown-none` |
-| Titan VM language parity | **Partial** | 10 VM unit tests; no per-construct parity suite against the interpreter |
+| Titan VM language parity | **Partial** | reshape in progress (§4.8): fails closed on what it cannot compile; parity goldens and the ≥3× benchmark gate pending |
 | Static type checking | **Partial** | checker exists, diagnostics thin |
 | Seal loop spelled `until convergence(ε)` | **Active** | max-norm tolerance on the body's value; `aether-lang/tests/seal_convergence.rs` (§4.6). Broken until this revision |
 | Seal loop spelled `until stable(expr)` | **Active** | exact-equality stability of any number, list or record; `aether-lang/tests/integrated_modules.rs` |
@@ -1038,7 +1038,7 @@ The caps are a **budget, not a correctness limit**: exceeding one returns `TooMa
 
 ### 4.6 Seal loops
 
-The seal loop has a single form, `seal until expr { body }`, whose condition is an arbitrary expression (`LoopStmt { until: Option<Expr>, body }`). Its operational semantics, from `interpreter.rs` → `fn execute_seal`:
+The seal loop is `seal until <cond> { body }`, where the parser decides the kind of condition (`LoopStmt { until: Option<LoopCond>, body }`, with `LoopCond::{Expr, Stable, Convergence}`): `until stable(e)` and `until convergence(ε)` are fixed at parse time, and any other condition is an ordinary expression. The operational semantics of the expression form, from `interpreter.rs` → `fn execute_seal`:
 
 $$
 \mathtt{seal\ until}\ c\ \lbrace B\rbrace \ :\quad
@@ -1080,7 +1080,7 @@ prints `[5, 1.414213562373095]`: the fourth pass moves $x$ by $2.1\times10^{-6}$
 
 Until this revision the spelling did not run: the example the README previously opened with, `🦭 until convergence(1e-6) { regress { model: "polynomial", escalate: true }~ }`, passed `aether check` and failed at runtime with `condition must be boolean`, because `convergence` was a keyword with no definition and `1e-6` lexed as `1`, `e`, `-`, `6`. Three changes make the loop run as written: the tolerance semantics above, exponent literals (§4.4), and parenthesised grouping, which the expression grammar also lacked — `(x + 2 / x) / 2` was a parse error. That example now reaches its body and stops with `Runtime error: no manifold for regression`, because `regress` needs a manifold in scope. A tolerance loop is a scalar stopping rule; a seal loop terminates on topology only when its condition computes something topological, which is what `stable` over a Betti vector does.
 
-**Stable-invariant seal loops.** The one condition form with its own semantics is `seal until stable(expr)`, unless the program defines a function named `stable`. Writing $v_i$ for the value of `expr` evaluated before iteration $i$, the loop stops at the first $i \ge 1$ with $v_i = v_{i-1}$ — the first pass of the body that left the watched value unchanged — still within 1,000 iterations. Equality is exact and structural over numbers, booleans, strings, lists and records; values of other kinds are refused. `seal until stable(topology.betti(topology.ph(M), radius=r))` therefore stops on the Betti vector of a filtration, which is the construction the language's premise describes; §4.9 shows the same form over a certified face count. Note that exact equality makes $\beta$-stability a one-pass window: a vector that repeats once is accepted, the objection §2.1 raises against topological stopping without a window.
+**Stable-invariant seal loops.** `seal until stable(expr)` is decided by the parser, so a program function named `stable` does not change its meaning; before the Titan reshape it was a run-time name check that such a function overrode. Writing $v_i$ for the value of `expr` evaluated before iteration $i$, the loop stops at the first $i \ge 1$ with $v_i = v_{i-1}$ — the first pass of the body that left the watched value unchanged — still within 1,000 iterations. Equality is exact and structural over numbers, booleans, strings, lists and records; values of other kinds are refused. `seal until stable(topology.betti(topology.ph(M), radius=r))` therefore stops on the Betti vector of a filtration, which is the construction the language's premise describes; §4.9 shows the same form over a certified face count. Note that exact equality makes $\beta$-stability a one-pass window: a vector that repeats once is accepted, the objection §2.1 raises against topological stopping without a window.
 
 ### 4.7 The regress statement and ConvergenceCond
 
@@ -1275,7 +1275,7 @@ print(["lineage sizes, largest (certified argmax)", size0, size1, certified_topk
 ```
 ═══════════════════════════════════════════════════════════════
   🛡️ AEGIS - Running: examples/integrated_mathematics.aegis
-  Mode: bio
+  Mode: interpreter
 ═══════════════════════════════════════════════════════════════
 [frames admitted, divisions, certified, 3, 1, true]
 [forest: pieces, faces, chi, 2, 0, 2]
@@ -2263,7 +2263,7 @@ cargo run -p aether-cli -- run loop.aether
 ```
 ═══════════════════════════════════════════════════════════════
   🛡️ AEGIS - Running: loop.aether
-  Mode: bio
+  Mode: interpreter
 ═══════════════════════════════════════════════════════════════
 [4, 0, 0]
 

@@ -622,6 +622,14 @@ impl Compiler {
 
     fn bind_native(&mut self, module: &str, name: &str, span: Span) -> Result<(), CompileError> {
         self.bind_name(name, span)?;
+        // A constant (`math.pi`) binds as a global value, as the interpreter
+        // binds it; only functions become native call sites.
+        if let Some(Value::Num(v)) = natives::constant(module, name) {
+            self.emit(Op::Num(v));
+            let slot = self.write_slot(name, span)?;
+            self.emit(Op::Store(slot));
+            return Ok(());
+        }
         let Some(id) = natives::lookup(module, name) else {
             return refuse(
                 format!("{module}.{name}, which exports lists but lookup does not"),
@@ -1326,30 +1334,14 @@ fn kind(v: &Value) -> &'static str {
     }
 }
 
+/// `r.field` and `xs[i]` share their implementation, and so their error
+/// text, with the interpreter.
 fn field(v: &Value, name: &str) -> Result<Value, String> {
-    match v {
-        Value::Record(fields) => fields
-            .get(name)
-            .cloned()
-            .ok_or_else(|| format!("record has no field '{name}'")),
-        other => Err(format!("cannot read field '{name}' of a {}", kind(other))),
-    }
+    natives::field(v, name)
 }
 
 fn element(list: &Value, i: &Value) -> Result<Value, String> {
-    let Value::List(xs) = list else {
-        return Err(format!("cannot index a {}", kind(list)));
-    };
-    let i = match i {
-        Value::Num(n) if *n >= 0.0 && libm::trunc(*n) == *n && *n <= usize::MAX as f64 => {
-            *n as usize
-        }
-        Value::Num(n) => return Err(format!("index: expected a non-negative integer, got {n}")),
-        other => return Err(format!("index: expected a number, got {}", kind(other))),
-    };
-    xs.get(i)
-        .cloned()
-        .ok_or_else(|| format!("index {} out of range for a list of {}", i, xs.len()))
+    natives::element(list, i)
 }
 
 #[cfg(test)]
