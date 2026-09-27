@@ -15,6 +15,25 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 
+/// The front page and the paper it links to, read as one document.
+///
+/// The README states the headline figures and PAPER.md carries the full account;
+/// a count stated in either must match the tree, so both are read.
+fn front_documents() -> String {
+    let repo = crate_root().join("../..");
+    ["README.md", "PAPER.md"]
+        .iter()
+        .map(|name| {
+            fs::read_to_string(repo.join(name))
+                .unwrap_or_else(|e| panic!("cannot read {name}: {e}"))
+        })
+        .collect::<Vec<_>>()
+        .join(
+            "
+",
+        )
+}
+
 fn crate_root() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
 }
@@ -264,9 +283,7 @@ fn the_documented_mutant_count_matches_the_harness() {
 /// describes, which is the more expensive failure.
 #[test]
 fn every_kernel_count_in_the_readme_matches_the_shader() {
-    let readme = crate_root().join("../../README.md");
-    let doc = fs::read_to_string(&readme)
-        .unwrap_or_else(|e| panic!("cannot read {}: {e}", readme.display()));
+    let doc = front_documents();
     let actual = actual_kernel_count();
 
     let words: Vec<&str> = doc.split_whitespace().collect();
@@ -317,7 +334,7 @@ fn every_kernel_count_in_the_readme_matches_the_shader() {
 #[test]
 fn the_readme_line_counts_have_not_rotted() {
     let repo = crate_root().join("../../");
-    let doc = fs::read_to_string(repo.join("README.md")).expect("README.md");
+    let doc = front_documents();
 
     for (subject, dir, ext) in [
         ("Rust", repo.join("crates"), "rs"),
@@ -367,9 +384,7 @@ fn the_readme_line_counts_have_not_rotted() {
 /// which ones would be a second implementation of Cargo's feature resolution.
 #[test]
 fn the_readme_ignored_count_matches_the_gated_tests() {
-    let readme = crate_root().join("../../README.md");
-    let doc = fs::read_to_string(&readme)
-        .unwrap_or_else(|e| panic!("cannot read {}: {e}", readme.display()));
+    let doc = front_documents();
 
     let gated = {
         let dir = crate_root();

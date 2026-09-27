@@ -221,7 +221,10 @@ fn no_cpu_crate_depends_on_the_gpu_backend() {
 #[test]
 fn the_readme_suite_counts_match_the_suites() {
     let root = repo_root();
-    let doc = fs::read_to_string(root.join("README.md")).expect("README.md");
+    // The README links to PAPER.md for the test inventory; both are read.
+    let doc = fs::read_to_string(root.join("README.md")).expect("README.md")
+        + "
+" + &fs::read_to_string(root.join("PAPER.md")).expect("PAPER.md");
     let tests_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests");
 
     let mut checked = 0;

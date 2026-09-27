@@ -1,0 +1,22 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1600 360" width="1600" height="360">
+<rect width="1600" height="360" fill="#0d1117"/>
+<text x="56.0" y="44.0" font-size="24" fill="#8b949e" text-anchor="start" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-weight="400">is 1.0 below 1.5, when the score may be off by r?</text>
+<line x1="1059.5" y1="70" x2="1059.5" y2="330" stroke="#e6edf3" stroke-width="2"/>
+<text x="1067.5" y="84.0" font-size="20" fill="#e6edf3" text-anchor="start" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-weight="400">1.5</text>
+<text x="56.0" y="118.0" font-size="24" fill="#e6edf3" text-anchor="start" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-weight="400">r = 2</text>
+<text x="200.0" y="118.0" font-size="24" fill="#f85149" text-anchor="start" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-weight="600">undetermined</text>
+<rect x="411.8" y="96" width="1036.4" height="26" rx="13" fill="#f85149" fill-opacity="0.28" stroke="#f85149" stroke-width="2"/>
+<circle cx="930.0" cy="109" r="7" fill="#e6edf3"/>
+<text x="56.0" y="180.0" font-size="24" fill="#e6edf3" text-anchor="start" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-weight="400">r = 1</text>
+<text x="200.0" y="180.0" font-size="24" fill="#f85149" text-anchor="start" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-weight="600">undetermined</text>
+<rect x="670.9" y="158" width="518.2" height="26" rx="13" fill="#f85149" fill-opacity="0.28" stroke="#f85149" stroke-width="2"/>
+<circle cx="930.0" cy="171" r="7" fill="#e6edf3"/>
+<text x="56.0" y="242.0" font-size="24" fill="#e6edf3" text-anchor="start" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-weight="400">r = 0.5</text>
+<text x="200.0" y="242.0" font-size="24" fill="#f85149" text-anchor="start" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-weight="600">undetermined</text>
+<rect x="800.5" y="220" width="259.1" height="26" rx="13" fill="#f85149" fill-opacity="0.28" stroke="#f85149" stroke-width="2"/>
+<circle cx="930.0" cy="233" r="7" fill="#e6edf3"/>
+<text x="56.0" y="304.0" font-size="24" fill="#e6edf3" text-anchor="start" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-weight="400">r = 0.25</text>
+<text x="200.0" y="304.0" font-size="24" fill="#3fb950" text-anchor="start" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-weight="600">below</text>
+<rect x="865.2" y="282" width="129.5" height="26" rx="13" fill="#3fb950" fill-opacity="0.28" stroke="#3fb950" stroke-width="2"/>
+<circle cx="930.0" cy="295" r="7" fill="#e6edf3"/>
+</svg>
