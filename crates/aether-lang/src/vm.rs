@@ -507,12 +507,8 @@ impl Compiler {
                 self.emit(Op::SetLast);
             }
             StmtKind::Return(r) => {
-                // The interpreter turns a `return` inside a loop into the
-                // loop's value and carries on; that is not a return, so it is
-                // refused until the reference settles it.
-                if !self.loops.is_empty() {
-                    return refuse("return inside a loop", span);
-                }
+                // A return inside a loop leaves the function: `Ret` truncates
+                // the frame's stack and locals, loop slots included.
                 match &r.value {
                     Some(e) => self.expr(e)?,
                     None => {
@@ -758,12 +754,17 @@ impl Compiler {
                 return self.call_native(id, args);
             }
         }
-        if args.iter().any(|a| matches!(a, CallArg::Named { .. })) {
-            return refuse(format!("a named argument to fn '{name}'"), span);
-        }
         let slot = self.slot(name);
         let k = self.text(String::from(name));
         self.emit(Op::Callee(slot, k));
+        if args.iter().any(|a| matches!(a, CallArg::Named { .. })) {
+            // The interpreter resolves the callee, then refuses before
+            // evaluating any argument; so does this.
+            self.fail(&format!(
+                "function '{name}' does not accept named arguments"
+            ));
+            return Ok(());
+        }
         self.args(args)?;
         self.emit(Op::CallValue(args.len()));
         Ok(())
@@ -1515,10 +1516,10 @@ mod tests {
         let mut vm = TitanVM::new();
         vm.load(
             compile(
-                "fn inc(x) { x + 1~ }
+                "fn inc(x) { return x + 1~ }
                  let s = 0~
                  for i in 0..1000 { s~ inc(i)~ s = s + 1~ }
-                 seal { s + 1~ }
+                 seal { let t = s + 1~ }
                  s~",
             )
             .expect("should compile"),
@@ -1531,7 +1532,7 @@ mod tests {
     fn value_is_the_last_statement() {
         assert!(matches!(run(""), Ok(Value::Unit)));
         assert_eq!(num("fn f() { let y = 5~ } f()~"), 5.0);
-        assert_eq!(num("let a = 2~ if a > 1 { a * 3~ }"), 6.0);
+        assert_eq!(num("let a = 2~ if a > 1 { let b = a * 3~ }"), 6.0);
         assert!(matches!(run("let a = 2~ if a < 1 { a~ }"), Ok(Value::Unit)));
         assert!(matches!(run("fn g() {} g()~"), Ok(Value::Unit)));
         assert!(matches!(
@@ -1540,7 +1541,7 @@ mod tests {
         ));
         // A pass cut by `break` does not count; the last whole pass does.
         assert_eq!(
-            num("let i = 0~ while true { i = i + 1~ if i == 3 { break~ } i * 10~ }"),
+            num("let i = 0~ while true { i = i + 1~ if i == 3 { break~ } let t = i * 10~ }"),
             20.0
         );
         assert_eq!(num("print(1)~ let a = 4~ return a + 5~ let b = 6~"), 9.0);
@@ -1590,11 +1591,17 @@ mod tests {
             "titan cannot compile regress at line 1, column 1"
         );
         assert_eq!(compile("class P { x }").unwrap_err().construct, "class");
+    }
+
+    #[test]
+    fn return_inside_a_loop_leaves_the_function() {
         assert_eq!(
-            compile("fn f() { while true { return 1~ } }")
-                .unwrap_err()
-                .construct,
-            "return inside a loop"
+            num("fn f() { for i in 0..10 { if i == 3 { return i~ } } return 99~ } f()~"),
+            3.0
+        );
+        assert_eq!(
+            num("fn g() { let k = 0~ while true { k = k + 1~ if k == 4 { return k~ } } } g()~"),
+            4.0
         );
     }
 
@@ -1625,7 +1632,7 @@ mod tests {
     fn natives_and_host_callbacks_run_on_titan() {
         assert_eq!(num("from math import sin~ sin(0)~"), 0.0);
         let mut vm = TitanVM::new();
-        vm.load(compile("fn double(x) { x * 2~ } double~").expect("should compile"));
+        vm.load(compile("fn double(x) { return x * 2~ } double~").expect("should compile"));
         let f = vm.run().expect("vm should run");
         assert!(matches!(
             vm.call_function(&f, vec![Value::Num(21.0)]),

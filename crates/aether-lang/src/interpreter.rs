@@ -649,9 +649,9 @@ impl Interpreter {
             StmtKind::Class(decl) => self.execute_class(decl).map(RuntimeFlow::Value),
             StmtKind::Import(stmt) => self.execute_import(stmt).map(RuntimeFlow::Value),
             StmtKind::If(stmt) => self.execute_if(stmt),
-            StmtKind::While(stmt) => self.execute_while(stmt).map(RuntimeFlow::Value),
-            StmtKind::Loop(stmt) => self.execute_seal(stmt).map(RuntimeFlow::Value),
-            StmtKind::For(stmt) => self.execute_for(stmt).map(RuntimeFlow::Value),
+            StmtKind::While(stmt) => self.execute_while(stmt),
+            StmtKind::Loop(stmt) => self.execute_seal(stmt),
+            StmtKind::For(stmt) => self.execute_for(stmt),
             StmtKind::Fn(decl) => self.execute_fn_decl(decl).map(RuntimeFlow::Value),
             StmtKind::Return(stmt) => self.execute_return(stmt),
             StmtKind::Break(_) => Ok(RuntimeFlow::Break),
@@ -944,7 +944,7 @@ impl Interpreter {
         }
     }
 
-    fn execute_while(&mut self, stmt: &WhileStmt) -> Result<Value, String> {
+    fn execute_while(&mut self, stmt: &WhileStmt) -> Result<RuntimeFlow, String> {
         let mut last_value = Value::Unit;
         loop {
             let cond_val = self.evaluate_expr(&stmt.condition)?;
@@ -957,15 +957,15 @@ impl Interpreter {
             }
             match self.execute_stmt_block(&stmt.body)? {
                 RuntimeFlow::Value(value) => last_value = value,
-                RuntimeFlow::Return(value) => return Ok(value),
+                RuntimeFlow::Return(value) => return Ok(RuntimeFlow::Return(value)),
                 RuntimeFlow::Break => break,
                 RuntimeFlow::Continue => continue,
             }
         }
-        Ok(last_value)
+        Ok(RuntimeFlow::Value(last_value))
     }
 
-    fn execute_for(&mut self, stmt: &ForStmt) -> Result<Value, String> {
+    fn execute_for(&mut self, stmt: &ForStmt) -> Result<RuntimeFlow, String> {
         let start = stmt.range.start.as_f64() as i64;
         let end = stmt.range.end.as_f64() as i64;
         let step = if start <= end { 1 } else { -1 };
@@ -976,7 +976,7 @@ impl Interpreter {
             self.set_var(stmt.iterator.clone(), Value::Num(current as f64));
             match self.execute_stmt_block(&stmt.body)? {
                 RuntimeFlow::Value(value) => last_value = value,
-                RuntimeFlow::Return(value) => return Ok(value),
+                RuntimeFlow::Return(value) => return Ok(RuntimeFlow::Return(value)),
                 RuntimeFlow::Break => break,
                 RuntimeFlow::Continue => {
                     current += step;
@@ -987,10 +987,10 @@ impl Interpreter {
         }
 
         self.set_var(stmt.iterator.clone(), Value::Num(current as f64));
-        Ok(last_value)
+        Ok(RuntimeFlow::Value(last_value))
     }
 
-    fn execute_seal(&mut self, stmt: &LoopStmt) -> Result<Value, String> {
+    fn execute_seal(&mut self, stmt: &LoopStmt) -> Result<RuntimeFlow, String> {
         // `until convergence(eps)`: seal once a pass of the body changes the
         // body's value by at most `eps` in the max norm. The loop's value is
         // always the last pass's value, so `previous` doubles as it.
@@ -1007,7 +1007,7 @@ impl Interpreter {
             for _ in 0..natives::seal::MAX_PASSES {
                 let value = match self.execute_stmt_block(&stmt.body)? {
                     RuntimeFlow::Value(value) => value,
-                    RuntimeFlow::Return(value) => return Ok(value),
+                    RuntimeFlow::Return(value) => return Ok(RuntimeFlow::Return(value)),
                     RuntimeFlow::Break => break,
                     RuntimeFlow::Continue => continue,
                 };
@@ -1020,7 +1020,7 @@ impl Interpreter {
                     break;
                 }
             }
-            return Ok(previous.unwrap_or(Value::Unit));
+            return Ok(RuntimeFlow::Value(previous.unwrap_or(Value::Unit)));
         }
 
         let mut last_value = Value::Unit;
@@ -1047,12 +1047,12 @@ impl Interpreter {
             }
             match self.execute_stmt_block(&stmt.body)? {
                 RuntimeFlow::Value(value) => last_value = value,
-                RuntimeFlow::Return(value) => return Ok(value),
+                RuntimeFlow::Return(value) => return Ok(RuntimeFlow::Return(value)),
                 RuntimeFlow::Break => break,
                 RuntimeFlow::Continue => continue,
             }
         }
-        Ok(last_value)
+        Ok(RuntimeFlow::Value(last_value))
     }
 
     fn evaluate_condition(&mut self, expr: &Expr) -> Result<bool, String> {

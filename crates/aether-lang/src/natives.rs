@@ -588,15 +588,68 @@ fn model_method(mlp: &mut MLP, name: &str, pos: &[Value]) -> Result<Value, Strin
             Ok(Value::Unit)
         }
         "train" => {
-            let input = tensor_at(pos, 0)?;
-            let target = tensor_at(pos, 1)?;
+            let (fan_in, fan_out) = mlp_widths(mlp)?;
+            let inputs = samples(&tensor_at(pos, 0)?, fan_in, "train input")?;
+            let targets = samples(&tensor_at(pos, 1)?, fan_out, "train target")?;
+            if inputs.len() != targets.len() {
+                return Err(format!(
+                    "train: {} input rows but {} target rows",
+                    inputs.len(),
+                    targets.len()
+                ));
+            }
             let epochs = num_at(pos, 2).unwrap_or(1.0) as usize;
-            let res = mlp.fit(&[input], &[target], epochs);
+            let res = mlp.fit(&inputs, &targets, epochs);
             Ok(Value::Num(res.final_loss))
         }
-        "forward" | "predict" => Ok(Value::Tensor(mlp.forward(&tensor_at(pos, 0)?))),
+        "forward" | "predict" => {
+            let (fan_in, fan_out) = mlp_widths(mlp)?;
+            let rows = samples(&tensor_at(pos, 0)?, fan_in, name)?;
+            let mut out = Vec::with_capacity(rows.len() * fan_out);
+            for row in &rows {
+                out.extend(mlp.forward(row).data.borrow().iter().copied());
+            }
+            Ok(Value::Tensor(Tensor::new(&out, &[rows.len(), fan_out])))
+        }
         _ => Err(format!("Method '{}' not found on MLP", name)),
     }
+}
+
+/// The input width of the first layer and the output width of the last, after
+/// checking that each layer feeds the next. `aether-core` asserts on a shape
+/// mismatch, so a program's shapes are checked here, where they can still be
+/// refused as an error rather than end the process.
+fn mlp_widths(mlp: &MLP) -> Result<(usize, usize), String> {
+    let (Some(first), Some(last)) = (mlp.layers.first(), mlp.layers.last()) else {
+        return Err(String::from("MLP has no layers; call add_layer first"));
+    };
+    for pair in mlp.layers.windows(2) {
+        if pair[0].output_size != pair[1].input_size {
+            return Err(format!(
+                "MLP layers do not chain: a layer of {} outputs feeds a layer of {} inputs",
+                pair[0].output_size, pair[1].input_size
+            ));
+        }
+    }
+    Ok((first.input_size, last.output_size))
+}
+
+/// One `[width, 1]` column per sample: a `[n, width]` tensor is `n` rows, and a
+/// flat `[width]` or column `[width, 1]` tensor is one sample.
+fn samples(t: &Tensor, width: usize, what: &str) -> Result<Vec<Tensor>, String> {
+    let data = t.data.borrow();
+    let rows = match t.shape.as_slice() {
+        [w] | [w, 1] if *w == width => 1,
+        [n, w] if *w == width => *n,
+        shape => {
+            return Err(format!(
+                "{what}: expected rows of {width} values, got a tensor of shape {shape:?}"
+            ))
+        }
+    };
+    Ok((0..rows)
+        .map(|r| Tensor::new(&data[r * width..(r + 1) * width], &[width, 1]))
+        .collect())
 }
 
 /// A tensor from a tensor, a list of numbers, or a list of equal-length rows.
