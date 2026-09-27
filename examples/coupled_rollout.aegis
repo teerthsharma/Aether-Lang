@@ -1,0 +1,29 @@
+// Coupling operator z -> T z + c (import coupling): rollout, Banach fixed
+// point with its contraction certificate, and Rips islands.
+// T = 0.5 I, c = [1, 1]: z* = (I - T)^-1 c = [2, 2], rho = 0.5 < 1, and the
+// rollout from 0 is [1, 1], [1.5, 1.5], [1.75, 1.75], exact in binary.
+
+import coupling~
+
+let T = [[0.5, 0], [0, 0.5]]~
+let c = [1, 1]~
+print(["rollout", coupling_rollout(T, c, [0, 0], 3)])~
+
+let fp = coupling_fixed_point(T, c)~
+print(["fixed point, converged, rho, contractive", fp.point, fp.converged, fp.rho, fp.contractive])~
+
+// A seal loop on the state itself: step until one step leaves it unchanged
+// in binary64. The error halves each step, so it seals at exactly [2, 2].
+let z = [0, 0]~
+let steps = 0~
+🦭 until stable(z) {
+    z = coupling_rollout(T, c, z, 1)[0]~
+    steps = steps + 1~
+}
+print(["sealed state, steps", z, steps])~
+
+// Islands at radius 1.5: 0 and 1 chain together, 5 stands alone.
+print(["islands at r = 1.5", rips_islands([[0, 0], [1, 0], [5, 0]], 1.5)])~
+
+// T = I has no fixed point: uncomment for "coupling refused: NoFixedPoint ..".
+// coupling_fixed_point([[1, 0], [0, 1]], c)~

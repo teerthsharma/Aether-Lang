@@ -1,0 +1,21 @@
+// Runtime planning (import planner): arena offsets, transitive reduction and
+// constraint islands.
+
+import planner~
+
+// XNNPACK#10801 ReusesLeadingGap, tensors as [size, first_use, last_use].
+// Tensor 2 reuses the leading gap [0, 100) that tensor 0 frees, so the arena
+// is 180, which equals the live peak at node 1: optimal on this input.
+let plan = plan_memory([[100, 0, 1], [80, 1, 2], [60, 2, 3]])~
+print(["offsets, arena, peak", plan.offsets, plan.arena, plan.peak])~
+
+// A DAG with the shortcut 0 -> 3 beside the path 0 -> 1 -> 2 -> 3 reduces to the path.
+print(["reduction", transitive_reduction(4, [[0, 1], [1, 2], [2, 3], [0, 3]])])~
+
+// Incidences 0-1, 1-2, 4-5: islands {0, 1, 2} and {4, 5}; node 3 is in none (-1).
+let isl = islands(6, [[0, 1], [1, 2], [4, 5]])~
+print(["island count, labels", isl.count, isl.labels])~
+
+// An edge against the topological order is refused, not a panic: uncomment for
+// "planner refused: NotTopological { edge: 0, u: 2, v: 1, node_count: 4 }".
+// transitive_reduction(4, [[2, 1]])~

@@ -159,7 +159,7 @@ fn execute_line(interpreter: &mut Interpreter, source: &str) -> Result<String, S
     let value = interpreter
         .execute(&ast)
         .map_err(|e| format!("Runtime error: {}", e))?;
-    Ok(format!("{:?}", value))
+    Ok(format!("{}", value))
 }
 
 /// Run an AEGIS script file
@@ -180,9 +180,9 @@ fn run_file(path: &PathBuf, mode: &str) {
     // Extension check
     if let Some(ext) = path.extension() {
         let s = ext.to_string_lossy();
-        if s != "aether" && s != "ae" {
+        if s != "aether" && s != "ae" && s != "aegis" {
             println!(
-                "Warning: File extension '.{}' is not standard (.aether or .ae)",
+                "Warning: File extension '.{}' is not standard (.aether, .ae or .aegis)",
                 s
             );
         }
@@ -223,9 +223,11 @@ fn run_file(path: &PathBuf, mode: &str) {
         let mut interpreter = Interpreter::new();
         match interpreter.execute(&ast) {
             Ok(result) => {
-                println!("{:?}", result);
+                if !matches!(result, aether_lang::interpreter::Value::Unit) {
+                    println!("{}", result);
+                }
                 println!();
-                println!("Bio-Script Execution complete. 🦭");
+                println!("Execution complete. 🦭");
             }
             Err(e) => {
                 eprintln!("Runtime error: {}", e);

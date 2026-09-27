@@ -21,6 +21,8 @@
 #[cfg(not(feature = "std"))]
 extern crate alloc;
 
+mod integrated;
+
 #[cfg(not(feature = "std"))]
 use alloc::boxed::Box;
 #[cfg(not(feature = "std"))]
@@ -98,6 +100,8 @@ pub enum Value {
     Function(FnDecl),
     /// Dynamic List (Python-like)
     List(Vec<Value>),
+    /// Named fields returned by a native function, read with `r.field`
+    Record(BTreeMap<String, Value>),
     /// ML Types
     Mlp(Box<MLP>),
     KMeans(Box<KMeans<DIM>>),
@@ -111,6 +115,84 @@ pub enum Value {
     /// Llama Model (Wrapped)
     #[cfg(feature = "ml")]
     LlamaModel(Arc<LlamaContext>),
+}
+
+/// Max-norm change between two passes of a `seal until convergence(eps)` body.
+///
+/// Numbers compare by absolute difference, lists and records elementwise (a
+/// change of shape is an infinite change), and a regression by its final error.
+/// Anything else has no distance and is refused rather than read as zero.
+fn max_change(a: &Value, b: &Value) -> Result<f64, String> {
+    Ok(match (a, b) {
+        (Value::Num(x), Value::Num(y)) => (x - y).abs(),
+        (Value::RegressionResult(x), Value::RegressionResult(y)) => {
+            (x.final_error - y.final_error).abs()
+        }
+        (Value::List(x), Value::List(y)) if x.len() == y.len() => {
+            x.iter().zip(y).try_fold(0.0_f64, |m, (p, q)| {
+                Ok::<_, String>(m.max(max_change(p, q)?))
+            })?
+        }
+        (Value::Record(x), Value::Record(y)) if x.keys().eq(y.keys()) => {
+            x.values().zip(y.values()).try_fold(0.0_f64, |m, (p, q)| {
+                Ok::<_, String>(m.max(max_change(p, q)?))
+            })?
+        }
+        (Value::List(_), Value::List(_)) | (Value::Record(_), Value::Record(_)) => f64::INFINITY,
+        (x, _) => {
+            return Err(format!(
+                "convergence() needs a numeric body value; the body produced {x}"
+            ))
+        }
+    })
+}
+
+/// How `print` and the REPL show a value: the value itself, not its Rust
+/// representation. Numbers use the shortest round-trip form (`1`, `0.25`), and
+/// switch to exponent form outside `[1e-4, 1e16)` so an error bound prints as
+/// `7.072564457345712e-14` rather than fourteen zeros. Handles and models fall
+/// back to `Debug`, since they have no literal syntax to print back.
+impl core::fmt::Display for Value {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        fn seq<'a>(
+            f: &mut core::fmt::Formatter<'_>,
+            items: impl Iterator<Item = &'a Value>,
+        ) -> core::fmt::Result {
+            for (i, v) in items.enumerate() {
+                if i > 0 {
+                    f.write_str(", ")?;
+                }
+                write!(f, "{v}")?;
+            }
+            Ok(())
+        }
+        match self {
+            Value::Num(n) if *n != 0.0 && n.is_finite() && !(1e-4..1e16).contains(&n.abs()) => {
+                write!(f, "{n:e}")
+            }
+            Value::Num(n) => write!(f, "{n}"),
+            Value::Bool(b) => write!(f, "{b}"),
+            Value::Str(s) => f.write_str(s),
+            Value::Point(p) => write!(f, "({}, {}, {})", p[0], p[1], p[2]),
+            Value::List(items) => {
+                f.write_str("[")?;
+                seq(f, items.iter())?;
+                f.write_str("]")
+            }
+            Value::Record(fields) => {
+                f.write_str("{")?;
+                for (i, (k, v)) in fields.iter().enumerate() {
+                    if i > 0 {
+                        f.write_str(", ")?;
+                    }
+                    write!(f, "{k}: {v}")?;
+                }
+                f.write_str("}")
+            }
+            Value::Unit => f.write_str("()"),
+            other => write!(f, "{other:?}"),
+        }
+    }
 }
 
 #[cfg(feature = "ml")]
@@ -152,6 +234,9 @@ pub enum NativeFunction {
     MlUpdate,
     MlLoadLlama,
     MlGenerate,
+    /// A function of an imported mathematics module (`import linking`, ...),
+    /// dispatched by name in `interpreter/integrated.rs`.
+    Integrated(&'static str),
 }
 
 /// Handle to a manifold workspace
@@ -668,7 +753,10 @@ impl Interpreter {
             "topology" => self.import_topology(stmt),
             "ml" | "Ml" => self.import_ml(stmt),
             "Seal" => self.import_seal(stmt),
-            _ => Err(format!("Module '{}' not found", mod_name)),
+            _ => match integrated::exports(mod_name) {
+                Some(names) => self.import_integrated(mod_name, stmt.symbol.as_deref(), names),
+                None => Err(format!("Module '{}' not found", mod_name)),
+            },
         }
     }
 
@@ -1114,8 +1202,66 @@ impl Interpreter {
     fn execute_seal(&mut self, stmt: &LoopStmt) -> Result<Value, String> {
         let max_iters = 1000;
         let mut last_value = Value::Unit;
+        // `until stable(expr)`: seal once `expr` reads the same before two
+        // consecutive iterations, i.e. a pass of the body left the invariant
+        // unchanged. A user function named `stable` takes precedence.
+        let watched = match stmt.until.as_ref().map(|e| &e.node) {
+            Some(ExprKind::Call { name, args })
+                if name == "stable" && !self.variables.contains_key("stable") =>
+            {
+                match args.as_slice() {
+                    [CallArg::Positional(expr)] => Some(expr),
+                    _ => return Err(String::from("stable() takes one positional expression")),
+                }
+            }
+            _ => None,
+        };
+        // `until convergence(eps)`: seal once a pass of the body changes the
+        // body's value by at most `eps` in the max norm. `convergence` is a
+        // keyword, so no user function can shadow it.
+        let tolerance = match stmt.until.as_ref().map(|e| &e.node) {
+            Some(ExprKind::Call { name, args }) if name == "convergence" => match args.as_slice() {
+                [CallArg::Positional(expr)] => match self.evaluate_expr(expr)? {
+                    Value::Num(eps) if eps >= 0.0 => Some(eps),
+                    other => {
+                        return Err(format!(
+                            "convergence() takes a non-negative tolerance, got {other}"
+                        ))
+                    }
+                },
+                _ => return Err(String::from("convergence() takes one tolerance")),
+            },
+            _ => None,
+        };
+        let mut previous: Option<Value> = None;
         for _ in 0..max_iters {
-            if let Some(condition) = &stmt.until {
+            if let Some(eps) = tolerance {
+                let value = match self.execute_stmt_block(&stmt.body)? {
+                    RuntimeFlow::Value(value) => value,
+                    RuntimeFlow::Return(value) => return Ok(value),
+                    RuntimeFlow::Break => break,
+                    RuntimeFlow::Continue => continue,
+                };
+                let settled = match &previous {
+                    Some(prev) => max_change(prev, &value)? <= eps,
+                    None => false,
+                };
+                last_value = value.clone();
+                previous = Some(value);
+                if settled {
+                    break;
+                }
+                continue;
+            }
+            if let Some(expr) = watched {
+                let now = self.evaluate_expr(expr)?;
+                if let Some(prev) = &previous {
+                    if integrated::same(prev, &now)? {
+                        break;
+                    }
+                }
+                previous = Some(now);
+            } else if let Some(condition) = &stmt.until {
                 if self.evaluate_condition(condition)? {
                     break;
                 }
@@ -1190,6 +1336,15 @@ impl Interpreter {
             ExprKind::Config(_) => Err(String::from(
                 "Raw config blocks cannot be evaluated as expressions",
             )),
+            ExprKind::Member { object, field } => {
+                let value = self.evaluate_expr(object)?;
+                integrated::field(&value, field)
+            }
+            ExprKind::Element { object, index } => {
+                let list = self.evaluate_expr(object)?;
+                let index = self.evaluate_expr(index)?;
+                integrated::element(&list, &index)
+            }
         }
     }
 
@@ -1245,6 +1400,22 @@ impl Interpreter {
     }
 
     fn execute_user_fn(&mut self, func: &FnDecl, args: &[CallArg]) -> Result<Value, String> {
+        let mut values = Vec::with_capacity(args.len());
+        for arg in args {
+            let CallArg::Positional(expr) = arg else {
+                return Err(format!(
+                    "function '{}' does not accept named arguments",
+                    func.name
+                ));
+            };
+            values.push(self.evaluate_expr(expr)?);
+        }
+        self.call_user_fn(func, values)
+    }
+
+    /// Call a user function on already-evaluated arguments. Native functions
+    /// that take a program's function (a sampler, a map) call back through here.
+    fn call_user_fn(&mut self, func: &FnDecl, args: Vec<Value>) -> Result<Value, String> {
         if args.len() != func.params.len() {
             return Err(format!(
                 "function '{}' expected {} arguments, got {}",
@@ -1255,14 +1426,7 @@ impl Interpreter {
         }
 
         let mut frame = self.variables.clone();
-        for (param, arg) in func.params.iter().zip(args.iter()) {
-            let CallArg::Positional(expr) = arg else {
-                return Err(format!(
-                    "function '{}' does not accept named arguments",
-                    func.name
-                ));
-            };
-            let value = self.evaluate_expr(expr)?;
+        for (param, value) in func.params.iter().zip(args) {
             frame.insert(param.clone(), value);
         }
 
@@ -1303,6 +1467,7 @@ impl Interpreter {
             NativeFunction::TopoPh => self.execute_topology_ph(args),
             NativeFunction::TopoBetti => self.execute_topology_betti(args),
             NativeFunction::TopoIntervals => self.execute_topology_intervals(args),
+            NativeFunction::Integrated(name) => self.call_integrated(name, args),
             NativeFunction::Print => {
                 for arg in args {
                     if let CallArg::Positional(expr) = arg {
@@ -1313,7 +1478,7 @@ impl Interpreter {
                         // binding would discard those too.
                         let _val = self.evaluate_expr(expr)?;
                         #[cfg(feature = "std")]
-                        println!("{:?}", _val);
+                        println!("{_val}");
                     }
                 }
                 Ok(Value::Unit)
@@ -1519,10 +1684,13 @@ impl Interpreter {
                 ("topology", "intervals") => {
                     self.execute_native_fn(NativeFunction::TopoIntervals, args)
                 }
-                _ => Err(format!(
-                    "Method '{}' not found in module '{}'",
-                    method, mod_name
-                )),
+                _ => match integrated::lookup(&mod_name, method) {
+                    Some(name) => self.call_integrated(name, args),
+                    None => Err(format!(
+                        "Method '{}' not found in module '{}'",
+                        method, mod_name
+                    )),
+                },
             },
             _ => Ok(Value::Unit),
         }
@@ -1555,6 +1723,9 @@ impl Interpreter {
     }
 
     fn evaluate_field_access(&self, object: &String, field: &String) -> Result<Value, String> {
+        if let Some(record @ Value::Record(_)) = self.variables.get(object) {
+            return integrated::field(record, field);
+        }
         if let Some(Value::Object(handle)) = self.variables.get(object) {
             if let Some(obj) = self.objects.get(handle.0) {
                 if let Some(val) = obj.fields.get(field) {
@@ -1571,7 +1742,9 @@ impl Interpreter {
                     Ok(Value::NativeFn(NativeFunction::TopoBetti))
                 }
                 ("topology", "intervals") => Ok(Value::NativeFn(NativeFunction::TopoIntervals)),
-                _ => Ok(Value::Unit),
+                (module, field) => Ok(integrated::lookup(module, field).map_or(Value::Unit, |f| {
+                    Value::NativeFn(NativeFunction::Integrated(f))
+                })),
             }
         } else {
             Ok(Value::Unit)
