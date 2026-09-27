@@ -60,6 +60,11 @@ flowchart LR
   classification, neural layers, autograd scaffolding, convolution, data
   loading, and gossip consensus.
 - Sparse-event scheduler and geometric governor tests in the kernel/core stack.
+- Ten integrated modules in `aether-core`, each a certificate or a typed refusal:
+  linking numbers, rounding certificates, segment arrangements, the resolvent
+  operator, orbit bounds, monodromy deciders, cell tracking, coupling operators,
+  segment witnesses and runtime planning. See
+  [Integrated Mathematics](integrated/index.md).
 
 ## What Is Roadmap Or Gated
 

@@ -485,7 +485,9 @@
   R("k-ledger", (stage, api) => {
     // Active table rows that state an explicit test count, plus the Partial "Sparse scheduler" row.
     const rows = [
-      ["attention_contracts.rs", 29], ["diagram_distance.rs", 17], ["scheduled_attention.rs", 16],
+      ["attention_contracts.rs", 29], ["linking.rs", 18], ["arrangement.rs", 18], ["monodromy.rs", 18],
+      ["coupling.rs", 18], ["diagram_distance.rs", 17], ["certify.rs", 17], ["resolvent.rs", 17],
+      ["scheduled_attention.rs", 16], ["orbit.rs", 15], ["track.rs", 15], ["kvwitness.rs", 15], ["planner.rs", 15],
       ["persistence_invariants.rs", 12], ["interpreter.rs", 11], ["persistence.rs", 9], ["parser.rs", 7],
       ["manifold.rs", 7], ["persistence_scale.rs", 7], ["governor.rs", 5], ["lexer.rs", 4], ["aether.rs (blocks)", 4],
       ["scheduler.rs — never runs", 4, 1]];

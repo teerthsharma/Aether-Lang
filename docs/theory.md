@@ -72,6 +72,8 @@ Implementation: `crates/aether-core/src/topology.rs`. The gate computes \(densit
 
 The engine in `crates/aether-core/src/persistence.rs` consumes a point cloud \(X = \{x_1, \ldots, x_n\}\) of `ManifoldPoint<D>` values, builds a Vietoris-Rips (or lazy witness) filtration up to homology dimension 2, reduces it, and returns a `PersistenceDiagram`.
 
+See also: the \(H_0\) barcode is reused by the island count of the [coupling operator](integrated/coupling.md#islands) and by the persistent-homology dimension estimator in [monodromy](integrated/monodromy.md#3-dimension-schweinharts-persistent-homology-dimension).
+
 ### Lazy witness mode {#th-lazy-witness}
 
 For lower-load DSL runs, Aether can select landmarks and use all points as witnesses. A simplex filtration value is
@@ -101,6 +103,8 @@ Aether's benefit model is mechanical. It does not depend on claiming that topolo
 ### Claim boundaries {#th-claim-boundaries}
 
 Every active claim takes one of three forms: a unit or integration test; a runnable CLI or benchmark artifact; or a docs-only theory or roadmap statement clearly labeled as such. This keeps the project legible without turning planned systems into active claims. Roadmap surfaces (hardware acceleration, production binary-authentication security, end-to-end speedups, full type checking, framework parity, bare-metal bootability) can be implemented, but are not described as active until tests and artifacts cover them. The same rule governs the ML primitives (no claims of beating PyTorch, TensorFlow, sklearn, GUDHI or ripser, production readiness, framework-equivalent semantics, or hardware acceleration without benchmark artifacts and parity tests) and topological convergence (no claim that every training loop terminates by persistent homology, that topology improves model quality on external datasets, that it replaces validation metrics, or that it is benchmarked across model classes).
+
+See also [Integrated Mathematics](integrated/index.md), where each of ten ported modules states what it certifies, what it only estimates, and the typed refusal it returns otherwise.
 
 
 ## Evidence and kernel {#ev}
@@ -155,9 +159,9 @@ The first run of the ablation was worse: placement −3.6 to −4.2. The cause w
 
 The Triton PR measured 56.6% block reduction at seq 1024 and 80.9% at seq 4096 on an RTX 4060, and 1.04×–3.48× sparse-vs-dense-CSR wall-clock. This repository asserts the direction of the reduction at a size a unit test can run. It does not restate the wall-clock numbers, which were measured on hardware this workspace cannot access. The port is a scalar CPU kernel with no SIMD, no threading and no GPU. It reproduces the *answer* and the *block reduction*, not the timing.
 
-**Salience is the elder rule.** Each block records the merge distance at which its component was absorbed, so its score is an H0 death time of the centroid cloud. Exactly one block scores 0, and that follows from an invariant the merge preserves: every component holds exactly one block that has never been written.
+**Salience follows the elder rule, with overwrites.** Each block records the merge distance at which its component was last absorbed. When a component with more than one member is absorbed, the deaths written earlier to its members are overwritten. So a block's score is an H0 death time of the centroid cloud only while its component is a singleton. Exactly one block scores 0, and that follows from an invariant the merge preserves: every component holds exactly one block that has never been written.
 
-**Per-block salience is not permutation-equivariant.** When two components tie on size, index order decides which one is absorbed. So the same centroid can score differently depending on where it sits in the sequence, and the zero-salience block moves too. The **multiset** of saliences is invariant, because it is the H0 barcode. The Triton original has the same tie-breaking, since both follow union-find order. A caller who reorders the sequence gets a different schedule, not a worse one. A fix would need a deterministic tie-break on centroid content instead of on index.
+**Per-block salience is not permutation-equivariant.** When two components tie on size, index order decides which one is absorbed. So the same centroid can score differently depending on where it sits in the sequence, and the zero-salience block moves too. An earlier version of this page claimed the **multiset** of saliences was invariant because it was the H0 barcode. It is neither. On one-dimensional centroids $0, 1, 10, 12$ (block size 1), `block_salience` returns $(9, 9, 2, 0)$ against finite H0 deaths $\{1, 2, 9\}$, and $(9, 9, 1, 0)$ for the reversed input. The Triton original has the same tie-breaking, since both follow union-find order. A caller who reorders the sequence gets a different schedule, not a worse one. A fix would need a deterministic tie-break on centroid content instead of on index.
 
 ### Why the face lookup mattered {#ev-scale}
 
