@@ -1,0 +1,5 @@
+// render on a manifold, with and without a config block
+manifold M = embed([1, 2, 3, 4, 5, 6], tau=1)~
+render M~
+render M { color: by_density, axis: 2 }~
+print("rendered")~

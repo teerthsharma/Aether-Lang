@@ -1,0 +1,6 @@
+// calling `f` before `fn f` appears
+print(f(2))~
+fn f(x) {
+    return x * 2~
+}
+print(f(2))~

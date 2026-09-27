@@ -1,0 +1,10 @@
+[n, m, error floor, 6, 3, 3]
+[precision floor, recovery ceiling, 0.6, 0.3333333333333333]
+[m*, recall floor, 3, 0.5]
+[injective map: m, error floor, 3, 0]
+
+Execution complete. 🦭
+--- stderr ---
+
+--- exit ---
+0

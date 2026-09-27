@@ -1,0 +1,7 @@
+linked
+1
+linked
+--- stderr ---
+Runtime error: record has no field 'nope'
+--- exit ---
+1

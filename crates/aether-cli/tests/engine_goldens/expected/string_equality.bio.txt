@@ -1,0 +1,8 @@
+true
+true
+false
+matched
+--- stderr ---
+Runtime error: Invalid binary operation
+--- exit ---
+1

@@ -1,0 +1,36 @@
+// Certified planar arrangement invariants (import arrangement).
+// A square alone: V = 4, E = 4, 1 piece, 1 face, chi = 0.
+// With four half-diagonals meeting at a written centre: V = 5, E = 8,
+// 1 piece, 4 enclosed faces, chi = V - E = -3.
+
+import arrangement~
+
+let square = [[[0, 0], [2, 0]], [[2, 0], [2, 2]], [[2, 2], [0, 2]], [[0, 2], [0, 0]]]~
+let s = euler(square)~
+print(["square: pieces, faces, chi", s.pieces, s.faces, s.chi])~
+
+let spokes = [[[0, 0], [1, 1]], [[2, 0], [1, 1]], [[2, 2], [1, 1]], [[0, 2], [1, 1]]]~
+let figure = [[[0, 0], [2, 0]], [[2, 0], [2, 2]], [[2, 2], [0, 2]], [[0, 2], [0, 0]]]~
+for i in 0..4 {
+    figure.push(spokes[i])~
+}
+let f = euler(figure)~
+print(["with half-diagonals: pieces, faces, chi, snap radius", f.pieces, f.faces, f.chi, f.radius])~
+
+// A seal loop on a topological invariant: starting from the square and one
+// (dangling) spoke, add a spoke per pass while any remain, and seal once a
+// pass leaves the face count unchanged. Faces go 1, 2, 3, 4, 4: it seals with
+// all four spokes in and 4 faces.
+let growing = [[[0, 0], [2, 0]], [[2, 0], [2, 2]], [[2, 2], [0, 2]], [[0, 2], [0, 0]], [[0, 0], [1, 1]]]~
+let k = 1~
+🦭 until stable(euler(growing).faces) {
+    if k < 4 {
+        growing.push(spokes[k])~
+        k = k + 1~
+    }
+}
+print(["spokes in when faces sealed, faces", k, euler(growing).faces])~
+
+// Two full diagonals cross at a point the input does not contain: refused.
+// Uncomment for "arrangement refused: EdgesCross { first: 0, second: 1, count: 1 }":
+// euler([[[0, 0], [2, 2]], [[2, 0], [0, 2]]])~

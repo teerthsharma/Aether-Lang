@@ -1,0 +1,5 @@
+
+--- stderr ---
+Runtime error: undefined function 'f'
+--- exit ---
+1

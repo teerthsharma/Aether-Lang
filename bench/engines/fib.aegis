@@ -1,0 +1,9 @@
+// Recursive fib(25) = 75025. Numbers, comparison and user calls only, so
+// TitanVM compiles all of it; the result is the program's final value.
+fn fib(n) {
+    if n < 2 {
+        return n~
+    }
+    return fib(n - 1) + fib(n - 2)~
+}
+fib(25)~

@@ -1,0 +1,8 @@
+print("seal" == "seal")~
+print("seal" != "walrus")~
+print("seal" == "walrus")~
+let s = "abc"~
+if s == "abc" {
+    print("matched")~
+}
+print("a" == 1)~

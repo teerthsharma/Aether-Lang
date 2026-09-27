@@ -1,0 +1,10 @@
+3
+10
+2
+[10, 20, [1, 2]]
+[1, 2]
+[10, 20]
+--- stderr ---
+Runtime error: index 5 out of range for a list of 2
+--- exit ---
+1

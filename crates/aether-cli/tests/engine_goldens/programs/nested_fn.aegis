@@ -1,0 +1,9 @@
+// a function declared inside another, then called from outside it
+fn outer(x) {
+    fn inner(y) {
+        return y + 1~
+    }
+    return inner(x) * 2~
+}
+print(outer(3))~
+print(inner(1))~

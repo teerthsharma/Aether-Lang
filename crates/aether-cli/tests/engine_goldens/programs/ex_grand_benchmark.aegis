@@ -1,0 +1,82 @@
+// ═══════════════════════════════════════════════════════════════════════════════
+// GRAND BENCHMARK: AEGIS TOPOLOGICAL CONVERGENCE
+// ═══════════════════════════════════════════════════════════════════════════════
+// This script demonstrates the "Python-grade" capabilities of AEGIS:
+// 1. Dynamic Modules (import math, topology)
+// 2. User-Defined Types (class Point3D)
+// 3. The "Seal Loop" (Topological Convergence)
+// 4. Escalating Regression (Linear -> Poly -> RBF)
+// ═══════════════════════════════════════════════════════════════════════════════
+
+import math
+import topology
+
+// User-Defined Class for 3D Point
+class Point3D {
+    x = 0.0
+    y = 0.0
+    z = 0.0
+
+    fn init(self, x, y, z) {
+        self.x = x
+        self.y = y
+        self.z = z
+    }
+
+    fn norm(self) {
+        return math.sqrt(self.x*self.x + self.y*self.y + self.z*self.z)
+    }
+}
+
+// Manifold Configuration
+// ----------------------
+let MAX_EPOCHS = 100
+let EPSILON = 0.001
+let TAU = 5
+
+// 1. Data Ingestion & Embedding
+// -----------------------------
+// Embed 10k points into 3D manifold M
+// Using 'sin' from math module to generate synthetic chaos
+let raw_data = []
+for i in 0..100 {
+    let t = i * 0.1
+    let val = math.sin(t) + math.sin(t * math.pi)
+    raw_data.push(val)
+}
+
+manifold M = embed(raw_data, dim=3, tau=TAU)
+
+// 2. Geometric Segmentation
+// -------------------------
+// Extract a block B from the manifold using sliding window
+block B = M.cluster(0:64)
+
+// 3. The Seal Loop (Topological Convergence)
+// ------------------------------------------
+// This loop runs until the Betti numbers (holes) of the residual manifold stabilize.
+// It effectively "seals" the learning process when no new topology is discovered.
+
+regress B {
+    model: "escalating", // Linear -> Poly -> RBF
+    escalate: true,
+    until: convergence(epsilon=EPSILON)
+}
+
+// 4. Verification
+// ---------------
+// Check the properties of the converged block
+let center = B.center
+let spread = B.spread
+
+// Output results (simulated print)
+if spread < 0.5 {
+    // "Tight" cluster found
+    render B {
+        axis: true,
+        color: "heatmap"
+    }
+}
+
+// End of Script (~ operator test)
+~

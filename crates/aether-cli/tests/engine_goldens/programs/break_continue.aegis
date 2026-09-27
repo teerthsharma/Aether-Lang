@@ -1,0 +1,22 @@
+let i = 0~
+let sum = 0~
+while i < 10 {
+    i = i + 1~
+    if i == 3 {
+        continue~
+    }
+    if i == 6 {
+        break~
+    }
+    sum = sum + i~
+}
+print(i)~
+print(sum)~
+let odd = 0~
+for k in 0..8 {
+    if k % 2 == 0 {
+        continue~
+    }
+    odd = odd + k~
+}
+print(odd)~

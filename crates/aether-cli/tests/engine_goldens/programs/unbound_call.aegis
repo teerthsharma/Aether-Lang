@@ -1,0 +1,4 @@
+// calling a name that is never bound
+print(nosuch(1))~
+nosuch(1)~
+print("still running")~

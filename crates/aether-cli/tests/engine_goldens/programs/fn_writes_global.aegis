@@ -1,0 +1,9 @@
+// a function assigns to a global, which is read after the call
+let counter = 0~
+fn bump() {
+    counter = counter + 1~
+    print(counter)~
+}
+bump()~
+bump()~
+print(counter)~

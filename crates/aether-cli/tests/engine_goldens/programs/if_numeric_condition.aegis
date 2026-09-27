@@ -1,0 +1,6 @@
+// an `if` whose condition is a number, not a boolean
+print("before")~
+if 1 {
+    print("then")~
+}
+print("after")~

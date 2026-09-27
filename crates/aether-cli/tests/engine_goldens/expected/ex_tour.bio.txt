@@ -1,0 +1,12 @@
+[one piece at radius, 1, betti, [1, 1, 0]]
+[linked?, linked, lk, 1, error bound, 7.072564457345712e-14]
+[radius, 2, verdict, undetermined]
+[radius, 1, verdict, undetermined]
+[radius, 0.5, verdict, undetermined]
+[proven at radius, 0.25]
+
+Execution complete. 🦭
+--- stderr ---
+
+--- exit ---
+0

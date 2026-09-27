@@ -51,6 +51,7 @@ pub mod ascii_render;
 pub mod ast;
 pub mod interpreter;
 pub mod lexer;
+pub mod natives;
 pub mod parser;
 pub mod vm;
 pub mod webgl_export;

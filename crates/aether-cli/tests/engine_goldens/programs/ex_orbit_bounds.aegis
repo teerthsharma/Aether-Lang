@@ -1,0 +1,22 @@
+// Orbit partition of a many-to-one map and its proved bounds (import orbit).
+// f = [1, 1, 2, 3, 3, 3] on six elements has m = 3 orbits of sizes 2, 1, 3.
+// Under any injective ground truth: at least n - m = 3 errors, precision of
+// the collided set at least 3/5, and no decoder beats 1/3 on the largest orbit.
+// With the correct-value set G = {1..6}: m* = 3 and recall floor (n - m*)/n = 1/2.
+
+import orbit~
+
+let o = orbit_partition([1, 1, 2, 3, 3, 3], gold=[1, 2, 3, 4, 5, 6])~
+print(["n, m, error floor", o.n, o.m, o.error_floor])~
+print(["precision floor, recovery ceiling", o.precision_floor, o.recovery_ceiling])~
+print(["m*, recall floor", o.m_star, o.recall_floor])~
+
+// An injective map has no collisions: error floor 0. Its precision floor is
+// undefined (the precision of an empty set), so the field is absent and
+// reading it is an error, not a 0 or a 1.
+let id = orbit_partition(["a", "b", "c"])~
+print(["injective map: m, error floor", id.m, id.error_floor])~
+
+// An empty map is refused: uncomment for
+// "orbit refused: orbit_error_bound undefined at n = 0, m = 0 ..."
+// orbit_partition([])~

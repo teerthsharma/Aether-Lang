@@ -1,0 +1,7 @@
+rendered
+
+Execution complete. 🦭
+--- stderr ---
+
+--- exit ---
+0

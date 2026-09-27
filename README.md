@@ -12,7 +12,7 @@ cargo run -p aether-cli -- run examples/tour.aegis
   <a href="https://teerthsharma.github.io/Aether-Lang/"><img src="https://img.shields.io/badge/docs-live-2456dc?style=flat-square" alt="Docs"></a>
   <a href="https://doi.org/10.5281/zenodo.21997728"><img src="https://img.shields.io/badge/DOI-10.5281%2Fzenodo.21997728-1682D4?style=flat-square" alt="DOI 10.5281/zenodo.21997728"></a>
   <a href=".github/workflows/ci.yml"><img src="https://img.shields.io/github/actions/workflow/status/teerthsharma/Aether-Lang/ci.yml?branch=master&label=CI&style=flat-square" alt="CI"></a>
-  <a href="PAPER.md#15-status"><img src="https://img.shields.io/badge/tests-428%20passing%2C%2080%20ignored-3fb950?style=flat-square" alt="428 passing, 80 ignored"></a>
+  <a href="PAPER.md#15-status"><img src="https://img.shields.io/badge/tests-448%20passing%2C%2080%20ignored-3fb950?style=flat-square" alt="448 passing, 80 ignored"></a>
   <a href="PAPER.md#73-mutation-testing"><img src="https://img.shields.io/badge/mutants-52%20of%2052%20caught-3fb950?style=flat-square" alt="52 of 52 mutants caught"></a>
   <a href="PAPER.md#74-the-lean-formalization"><img src="https://img.shields.io/badge/Lean-48%20theorems%2C%200%20sorry-1f6feb?style=flat-square" alt="48 Lean theorems, 0 sorry"></a>
   <a href="PAPER.md#requirements"><img src="https://img.shields.io/badge/no__std-Cortex--M3%20%C2%B7%20bare%20x86__64-8b949e?style=flat-square" alt="no_std on Cortex-M3 and bare x86_64"></a>
@@ -239,7 +239,7 @@ cd Aether-Lang
 cargo run -p aether-cli -- run examples/tour.aegis     # the program above
 cargo run -p aether-cli -- run examples/hopf_link.aegis
 cargo run -p aether-cli -- repl                        # statements end with ~
-cargo test --workspace --exclude aether-kernel         # 428 pass, 80 ignored
+cargo test --workspace --exclude aether-kernel         # 448 pass, 80 ignored
 ```
 
 The toolchain is nightly Rust, pinned in [`rust-toolchain.toml`](rust-toolchain.toml). Every example program is listed in [PAPER.md](PAPER.md#example-programs).
@@ -251,7 +251,7 @@ The toolchain is nightly Rust, pinned in [`rust-toolchain.toml`](rust-toolchain.
 **Working:**
 
 - **Persistence engine.** An exact engine computes pieces, loops and voids ($H_0$–$H_2$).
-- **Evidence.** 428 tests pass, including 12 property invariants such as the stability theorem. All 52 of 52 injected mutants were caught.
+- **Evidence.** 448 tests pass, including 12 property invariants such as the stability theorem. All 52 of 52 injected mutants were caught.
 - **Formal core.** 48 Lean theorems, with no `sorry`.
 - **Targets.** The core builds for a Cortex-M3 and for bare x86_64.
 

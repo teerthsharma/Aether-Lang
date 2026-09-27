@@ -1,0 +1,5 @@
+// a range whose start exceeds its end counts down
+for i in 5..0 {
+    print(i)~
+}
+print(i)~
