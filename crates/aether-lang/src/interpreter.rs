@@ -1200,42 +1200,21 @@ impl Interpreter {
     }
 
     fn execute_seal(&mut self, stmt: &LoopStmt) -> Result<Value, String> {
-        let max_iters = 1000;
-        let mut last_value = Value::Unit;
-        // `until stable(expr)`: seal once `expr` reads the same before two
-        // consecutive iterations, i.e. a pass of the body left the invariant
-        // unchanged. A user function named `stable` takes precedence.
-        let watched = match stmt.until.as_ref().map(|e| &e.node) {
-            Some(ExprKind::Call { name, args })
-                if name == "stable" && !self.variables.contains_key("stable") =>
-            {
-                match args.as_slice() {
-                    [CallArg::Positional(expr)] => Some(expr),
-                    _ => return Err(String::from("stable() takes one positional expression")),
-                }
-            }
-            _ => None,
-        };
+        const MAX_PASSES: usize = 1000;
         // `until convergence(eps)`: seal once a pass of the body changes the
-        // body's value by at most `eps` in the max norm. `convergence` is a
-        // keyword, so no user function can shadow it.
-        let tolerance = match stmt.until.as_ref().map(|e| &e.node) {
-            Some(ExprKind::Call { name, args }) if name == "convergence" => match args.as_slice() {
-                [CallArg::Positional(expr)] => match self.evaluate_expr(expr)? {
-                    Value::Num(eps) if eps >= 0.0 => Some(eps),
-                    other => {
-                        return Err(format!(
-                            "convergence() takes a non-negative tolerance, got {other}"
-                        ))
-                    }
-                },
-                _ => return Err(String::from("convergence() takes one tolerance")),
-            },
-            _ => None,
-        };
-        let mut previous: Option<Value> = None;
-        for _ in 0..max_iters {
-            if let Some(eps) = tolerance {
+        // body's value by at most `eps` in the max norm. The loop's value is
+        // always the last pass's value, so `previous` doubles as it.
+        if let Some(LoopCond::Convergence(tolerance)) = &stmt.until {
+            let eps = match self.evaluate_expr(tolerance)? {
+                Value::Num(eps) if eps >= 0.0 => eps,
+                other => {
+                    return Err(format!(
+                        "convergence() takes a non-negative tolerance, got {other}"
+                    ))
+                }
+            };
+            let mut previous: Option<Value> = None;
+            for _ in 0..MAX_PASSES {
                 let value = match self.execute_stmt_block(&stmt.body)? {
                     RuntimeFlow::Value(value) => value,
                     RuntimeFlow::Return(value) => return Ok(value),
@@ -1246,25 +1225,35 @@ impl Interpreter {
                     Some(prev) => max_change(prev, &value)? <= eps,
                     None => false,
                 };
-                last_value = value.clone();
                 previous = Some(value);
                 if settled {
                     break;
                 }
-                continue;
             }
-            if let Some(expr) = watched {
-                let now = self.evaluate_expr(expr)?;
-                if let Some(prev) = &previous {
-                    if integrated::same(prev, &now)? {
+            return Ok(previous.unwrap_or(Value::Unit));
+        }
+
+        let mut last_value = Value::Unit;
+        let mut previous: Option<Value> = None;
+        for _ in 0..MAX_PASSES {
+            match &stmt.until {
+                // `until stable(expr)`: seal once `expr` reads the same before
+                // two consecutive passes, i.e. a pass left the invariant unchanged.
+                Some(LoopCond::Stable(expr)) => {
+                    let now = self.evaluate_expr(expr)?;
+                    if let Some(prev) = &previous {
+                        if integrated::same(prev, &now)? {
+                            break;
+                        }
+                    }
+                    previous = Some(now);
+                }
+                Some(LoopCond::Expr(condition)) => {
+                    if self.evaluate_condition(condition)? {
                         break;
                     }
                 }
-                previous = Some(now);
-            } else if let Some(condition) = &stmt.until {
-                if self.evaluate_condition(condition)? {
-                    break;
-                }
+                Some(LoopCond::Convergence(_)) | None => {}
             }
             match self.execute_stmt_block(&stmt.body)? {
                 RuntimeFlow::Value(value) => last_value = value,

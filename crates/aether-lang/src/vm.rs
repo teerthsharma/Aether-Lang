@@ -585,7 +585,7 @@ impl Compiler {
                 let start_ip = self.code.len();
                 let mut jmp_until_idx = None;
 
-                if let Some(condition) = &stmt.until {
+                if let Some(crate::ast::LoopCond::Expr(condition)) = &stmt.until {
                     self.compile_expr(condition);
                     self.code.push(OpCode::NOT);
                     jmp_until_idx = Some(self.code.len());
