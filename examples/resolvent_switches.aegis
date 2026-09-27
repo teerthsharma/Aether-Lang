@@ -1,0 +1,28 @@
+// One causal attention operator with three switches (import resolvent):
+//   "softmax"  beta = 1, qk = 1, g = 0
+//   "kernel"   beta = 0, qk = 1, g = 0   (unnormalised exponential kernel)
+//   "path"     beta = 0, qk = 0, g = 1   (exact path product of the gates)
+// With q = k = 0 every logit is 0, so each corner has a closed form.
+
+import resolvent~
+
+let q = [[0], [0], [0]]~
+let k = [[0], [0], [0]]~
+let ones = [1, 1, 1]~
+let gates = [1, 0.5, 0.5]~
+
+// Softmax rows sum to 1, so reading out v = 1 gives 1 at every position.
+print(["softmax, v = 1", resolvent_attend(q, k, ones, gates, "softmax")])~
+
+// The unnormalised kernel at zero logits: row i sums to i + 1.
+print(["kernel, v = 1", resolvent_attend(q, k, ones, gates, "kernel")])~
+
+// The path product is the chain y_i = a_i y_(i-1) + b_i; b = [0, 1, 1]
+// gives y = [0, 1, 1.5].
+print(["path, b = [0, 1, 1]", resolvent_attend(q, k, [0, 1, 1], gates, "path")])~
+
+// A closed gate (magnitude 0) cuts every path through it: [1, 1, 1].
+print(["path, gate 1 closed", resolvent_attend(q, k, ones, [1, 0, 1], "path")])~
+
+// A NaN query is refused: uncomment for "resolvent refused: NonFinite".
+// resolvent_attend([[0 / 0], [0], [0]], k, ones, gates, "softmax")~

@@ -317,9 +317,70 @@ impl<'a> Lexer<'a> {
                 frac_digits += 1;
             }
 
-            TokenKind::Float(int_part, frac_part)
+            self.read_exponent(int_part, frac_part, true)
         } else {
-            TokenKind::Number(int_part)
+            self.read_exponent(int_part, 0, false)
+        }
+    }
+
+    /// Apply an optional `e±k` suffix to a literal already read as
+    /// `int_part + frac_part·10⁻⁶`.
+    ///
+    /// Literals are fixed-point with six decimals, so the scaling is done in
+    /// integer micro-units and a value the representation cannot hold exactly
+    /// (`1e-7`, or an overflow) is a lexer error rather than a silent rounding:
+    /// `1e-7` rounding to `0` would turn a tolerance into "never converge".
+    fn read_exponent(&mut self, int_part: i64, frac_part: i64, is_float: bool) -> TokenKind {
+        let plain = || {
+            if is_float {
+                TokenKind::Float(int_part, frac_part)
+            } else {
+                TokenKind::Number(int_part)
+            }
+        };
+        if !matches!(self.peek(), Some('e') | Some('E')) {
+            return plain();
+        }
+        // `2e` followed by anything but a (signed) digit is a number and an
+        // identifier, as it always was.
+        let mut ahead = self.chars.clone();
+        ahead.next();
+        let negative = matches!(ahead.peek(), Some('-'));
+        if matches!(ahead.peek(), Some('-') | Some('+')) {
+            ahead.next();
+        }
+        if !ahead.peek().is_some_and(|c| c.is_ascii_digit()) {
+            return plain();
+        }
+        self.advance();
+        if matches!(self.peek(), Some('-') | Some('+')) {
+            self.advance();
+        }
+        let mut exp: u32 = 0;
+        while let Some(&c) = self.peek() {
+            if !c.is_ascii_digit() {
+                break;
+            }
+            exp = exp.saturating_mul(10).saturating_add(c as u32 - '0' as u32);
+            self.advance();
+        }
+
+        let micro = int_part.checked_mul(1_000_000).map(|m| m + frac_part);
+        let scale = 10i64.checked_pow(exp);
+        let scaled = match (micro, scale, negative) {
+            (Some(m), Some(s), false) => m.checked_mul(s),
+            (Some(m), Some(s), true) if m % s == 0 => Some(m / s),
+            (Some(0), None, true) => Some(0),
+            _ => None,
+        };
+        match scaled {
+            Some(m) if m % 1_000_000 == 0 => TokenKind::Number(m / 1_000_000),
+            Some(m) => TokenKind::Float(m / 1_000_000, m % 1_000_000),
+            None => TokenKind::Error(alloc::format!(
+                "numeric literal with exponent {}{} is not representable in six decimals",
+                if negative { "-" } else { "+" },
+                exp
+            )),
         }
     }
 

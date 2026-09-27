@@ -1,0 +1,22 @@
+// Segment witnesses for a learned sparse top-k (import kvwitness).
+// Context L = 16 in S = 4 segments [0,4) [4,8) [8,12) [12,16), whose rounded-up
+// left edges are the witnesses 0, 4, 8, 12. A learned row of width 6 that only
+// attends to the last segment has its last S slots overwritten by the
+// witnesses of the segments it misses (0, 4, 8); slot 5 keeps its padding.
+
+import kvwitness~
+
+let learned = [13, 14, 15, 12, -1, -1]~
+let merged = witness_topk(learned, 6, 16, 4)~
+print(["merged row", merged])~
+
+// Coverage goes from 1 of 4 segments to all 4.
+print(["coverage learned, merged", segment_coverage(learned, 16, 4), segment_coverage(merged, 16, 4)])~
+
+// Under uniform attention recall is (distinct in-range tokens) / 16: 4/16, 5/16.
+let uniform = [1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1]~
+print(["recall learned, merged", attention_mass_recall(learned, uniform), attention_mass_recall(merged, uniform)])~
+
+// 65 segments exceed the kernel's 64-bit occupancy mask: uncomment for
+// "kvwitness refused: SegmentsOutOfRange { num_segments: 65 }".
+// witness_topk(learned, 6, 16, 65)~

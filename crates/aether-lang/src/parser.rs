@@ -692,6 +692,18 @@ impl<'a> Parser<'a> {
             // List
             TokenKind::LBracket => self.parse_list_literal_cont()?,
 
+            // Grouping: `(a + b) / 2`. The parentheses leave no AST node; the
+            // span widens to cover them so errors point at the whole group.
+            TokenKind::LParen => {
+                let inner = self.parse_expr()?;
+                self.expect(TokenKind::RParen)?;
+                let span = self.make_span(&token, self.previous());
+                return Ok(Expr {
+                    node: inner.node,
+                    span,
+                });
+            }
+
             // Embed/Convergence keywords used as functions
             TokenKind::Embed => {
                 return self.parse_call_expr_cont(String::from("embed"), &token);
@@ -739,49 +751,75 @@ impl<'a> Parser<'a> {
     fn parse_ident_expr_cont(
         &mut self,
         name: String,
-        _start_token: &Token,
+        start_token: &Token,
     ) -> Result<ExprKind, ParseError> {
-        // Method call: M.cluster(...)
-        if self.check(TokenKind::Dot) {
+        let kind = if self.check(TokenKind::Dot) {
+            // Method call M.cluster(...) or field access M.center
             self.advance();
             let method = self.expect_flexible_ident()?;
-
             if self.check(TokenKind::LParen) {
                 let args = self.parse_call_args()?;
-                return Ok(ExprKind::MethodCall {
+                ExprKind::MethodCall {
                     object: name,
                     method,
                     args,
-                });
+                }
             } else {
-                return Ok(ExprKind::FieldAccess {
+                ExprKind::FieldAccess {
                     object: name,
                     field: method,
-                });
+                }
+            }
+        } else if self.check(TokenKind::LParen) {
+            // Call: embed(...)
+            let args = self.parse_call_args()?;
+            ExprKind::Call { name, args }
+        } else if self.check(TokenKind::LBracket) {
+            // M[0:64] slices a manifold; xs[i] reads one list element.
+            self.advance();
+            let index = self.parse_expr()?;
+            self.expect(TokenKind::RBracket)?;
+            match index.node {
+                ExprKind::Range(range) => ExprKind::Index {
+                    object: name,
+                    range,
+                },
+                _ => ExprKind::Element {
+                    object: Box::new(Expr {
+                        node: ExprKind::Ident(name),
+                        span: self.make_span(start_token, start_token),
+                    }),
+                    index: Box::new(index),
+                },
+            }
+        } else {
+            return Ok(ExprKind::Ident(name));
+        };
+        self.parse_postfix(kind, start_token)
+    }
+
+    /// `.field` and `[i]` chained after a call, field or element, so a
+    /// certified quantity can sit directly in a condition:
+    /// `seal until stable(euler(segs).faces)`, `lyapunov(js)[0] > 0`.
+    fn parse_postfix(
+        &mut self,
+        mut kind: ExprKind,
+        start_token: &Token,
+    ) -> Result<ExprKind, ParseError> {
+        loop {
+            if !self.check(TokenKind::Dot) && !self.check(TokenKind::LBracket) {
+                return Ok(kind);
+            }
+            let object = Box::new(self.wrap_expr(kind, start_token));
+            if self.advance().kind == TokenKind::Dot {
+                let field = self.expect_flexible_ident()?;
+                kind = ExprKind::Member { object, field };
+            } else {
+                let index = Box::new(self.parse_expr()?);
+                self.expect(TokenKind::RBracket)?;
+                kind = ExprKind::Element { object, index };
             }
         }
-
-        // Call: embed(...)
-        if self.check(TokenKind::LParen) {
-            let args = self.parse_call_args()?;
-            return Ok(ExprKind::Call { name, args });
-        }
-
-        // Index: M[0:64]
-        if self.check(TokenKind::LBracket) {
-            self.advance();
-            let start = self.parse_number()?;
-            self.expect(TokenKind::Colon)?;
-            let end = self.parse_number()?;
-            self.expect(TokenKind::RBracket)?;
-
-            return Ok(ExprKind::Index {
-                object: name,
-                range: Range { start, end },
-            });
-        }
-
-        Ok(ExprKind::Ident(name))
     }
 
     fn parse_call_expr_cont(

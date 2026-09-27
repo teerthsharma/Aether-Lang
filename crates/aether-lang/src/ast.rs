@@ -157,6 +157,12 @@ pub enum ExprKind {
 
     /// List literal: [1, 2, 3]
     List(Vec<Expr>),
+
+    /// Field of any expression's value: euler(segs).faces
+    Member { object: Box<Expr>, field: Ident },
+
+    /// One list element: xs[0], lyapunov(js)[0]
+    Element { object: Box<Expr>, index: Box<Expr> },
 }
 
 /// Literals

@@ -1,0 +1,25 @@
+// Frame-to-frame linking and min-cost-flow tracking with divisions
+// (import track). One cell at the origin splits into two daughters 2 units
+// away. Attaching the second daughter costs c_div + d = 5 + 2 < c_app = 10,
+// so the circulation reports exactly one division, and the certificate
+// (no division where no cell exists) holds, so the relaxation is exact.
+
+import track~
+
+let frames = [
+    [[0, 0, 0]],
+    [[2, 0, 0], [-2, 0, 0]],
+    [[2, 1, 0], [-2, 1, 0]]
+]~
+let t = track(frames, 12)~
+print(["nodes, divisions, certified", t.nodes, t.divisions, t.certified])~
+print(["dividing node [frame, index]", t.dividing[0]])~
+print(["edges [frame, index, frame, index]", t.edges])~
+
+// One-to-one linking cannot divide: 3 links, no division.
+let l = track(frames, 12, divide=false)~
+let links = l.edges~
+print(["one-to-one: links, divisions", links.len(), l.divisions])~
+
+// A gate of 0 is refused: uncomment for "track refused: InvalidGate".
+// track(frames, 0)~
