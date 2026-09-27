@@ -38,6 +38,7 @@ extra_javascript:
   - javascripts/viz-ml.js
   - javascripts/viz-kernel.js
   - javascripts/viz-pipeline.js
+  - javascripts/viz-integrated.js
   - javascripts/hero.js
   - https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js
 exclude_docs: |
@@ -63,6 +64,19 @@ nav:
   - Kernel:
       - Sparse Events: kernel/sparse-events.md
       - Hardware Boundary: kernel/hardware-boundary.md
+  - Integrated Mathematics:
+      - Overview: integrated/index.md
+      - Linking Number: integrated/linking.md
+      - Rounding Certificates: integrated/certify.md
+      - Segment Arrangements: integrated/arrangement.md
+      - Resolvent Operator: integrated/resolvent.md
+      - Orbit Partitions: integrated/orbit.md
+      - Monodromy Deciders: integrated/monodromy.md
+      - Cell Tracking: integrated/track.md
+      - Coupling Operator: integrated/coupling.md
+      - Segment Witnesses: integrated/kvwitness.md
+      - Runtime Planner: integrated/planner.md
+      - Upstream Contributions: integrated/upstream.md
   - Benchmarks:
       - Benchmark Policy: benchmarks/index.md
       - Evidence Gates: benchmarks/evidence-gates.md

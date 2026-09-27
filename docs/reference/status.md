@@ -34,6 +34,16 @@ cargo test --workspace --exclude aether-kernel
 | **Attention correctness contracts** | **29 tests in `tests/attention_contracts.rs`** | `cargo test -p aether-core --test attention_contracts` |
 | **Topology-derived scheduled attention** | **16 tests in `tests/scheduled_attention.rs`** | `cargo test -p aether-core --test scheduled_attention` |
 | **Scale past 32 points** | **7 tests in `tests/persistence_scale.rs`** | `cargo test -p aether-core --test persistence_scale --release` |
+| [**Gauss linking number** (certified rounding, writhe, knot determinant)](../integrated/linking.md) | **18 tests in `tests/linking.rs`** | `cargo test -p aether-core --test linking` |
+| [**Rounding certificates** (top-k, argmin, threshold)](../integrated/certify.md) | **17 tests in `tests/certify.rs`** | `cargo test -p aether-core --test certify` |
+| [**Segment arrangement** (pieces, faces, Euler characteristic)](../integrated/arrangement.md) | **18 tests in `tests/arrangement.rs`** | `cargo test -p aether-core --test arrangement` |
+| [**Resolvent operator** (softmax, kernel and path-product corners)](../integrated/resolvent.md) | **17 tests in `tests/resolvent.rs`** | `cargo test -p aether-core --test resolvent` |
+| [**Orbit-partition bounds** (error, recovery, precision, recall)](../integrated/orbit.md) | **15 tests in `tests/orbit.rs`** | `cargo test -p aether-core --test orbit` |
+| [**Monodromy deciders** (collision, symmetry, PH dimension, Lyapunov)](../integrated/monodromy.md) | **18 tests in `tests/monodromy.rs`** | `cargo test -p aether-core --test monodromy` |
+| [**Cell tracking** (gated assignment, division circulation)](../integrated/track.md) | **15 tests in `tests/track.rs`** | `cargo test -p aether-core --test track` |
+| [**Coupling operator** (fixed point, rollout bound, islands)](../integrated/coupling.md) | **18 tests in `tests/coupling.rs`** | `cargo test -p aether-core --test coupling` |
+| [**Segment witnesses** (vllm#47942 top-k policy)](../integrated/kvwitness.md) | **15 tests in `tests/kvwitness.rs`** | `cargo test -p aether-core --test kvwitness` |
+| [**Runtime planner** (arena offsets, transitive reduction, islands)](../integrated/planner.md) | **15 tests in `tests/planner.rs`** | `cargo test -p aether-core --test planner` |
 
 <div class="ts-viz" data-viz="k-ledger" data-title="Test counts behind the Active rows" data-caption="Only rows that state a count are shown. The scheduler row comes from Partial Or Gated: its 4 tests never execute."></div>
 
@@ -278,6 +288,7 @@ Schedule sources, all clamped causally:
 | Batched / multi-head scheduling | The Triton kernel shares one CSR schedule across batch and head lanes. This port handles a single `[seq, head_dim]` lane; batching is a loop the caller writes. |
 | Topological **routing** speedup in wall-clock | Cost is counted in dot products, not seconds. A wall-clock claim needs a GPU path wired into routing, which does not exist. |
 | Topological routing on real activations | Measured only on synthetic keys. Real attention key distributions are heavy-tailed and may have different H0 structure. |
+| Segment-witness quality on a model | `aether_core::kvwitness` ports the policy of vllm-project/vllm#47942, which ran no model-level evaluation, and this port measures none. `segment_coverage` and `attention_mass_recall` exist so that an experiment can. [Segment Witnesses →](../integrated/kvwitness.md) |
 | Topological *nearest-neighbour* key selection as an attention-mass proxy | Holds only for roughly homogeneous key norms; **negative at high spread** (see the ablation above). Needs either key normalisation or a dot-product ranking over a topology-derived candidate set, plus a re-run of the ablation. |
 | External TDA parity | Bottleneck ≈ 0 against a pinned `ripser`/`gudhi` on shared fixtures. The invariant suite above is **not** parity: a self-consistently wrong implementation can satisfy every internal property. |
 | Sparse scheduler | 4 tests exist in `scheduler.rs`, but `aether-kernel` is a `no_std` binary with no test harness, so **none of them execute in CI or locally**. Needs a host-testable extraction or a QEMU harness. |
