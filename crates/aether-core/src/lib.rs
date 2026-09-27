@@ -46,6 +46,7 @@ pub mod orbit;
 pub mod monodromy;
 pub mod persistence;
 pub mod resolvent;
+pub mod planner;
 pub mod scheduled;
 pub mod state;
 pub mod topology;
