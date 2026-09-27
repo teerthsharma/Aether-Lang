@@ -30,6 +30,7 @@ extern crate alloc;
 // ═══════════════════════════════════════════════════════════════════════════════
 
 pub mod aether;
+pub mod arrangement;
 pub mod attention;
 pub mod diagram;
 pub mod governor;
