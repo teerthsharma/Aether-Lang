@@ -33,6 +33,7 @@ pub mod aether;
 pub mod attention;
 pub mod diagram;
 pub mod governor;
+pub mod linking;
 pub mod manifold;
 pub mod memory;
 pub mod ml;
