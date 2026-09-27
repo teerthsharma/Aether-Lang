@@ -1,0 +1,82 @@
+// Injectivity, symmetry, dimension and sensitivity from sampled geometry
+// (import monodromy). Maps and samplers are ordinary Aether functions that the
+// core calls back into.
+// Closed-form truths: x^2 identifies x and -x (a collision), 2x + 1 does not;
+// a square outline has the dihedral group D4; a segment has PH dimension 1 and
+// a filled square 2; Jacobian diag(2, 1/2) has exponents ln 2 and -ln 2, and
+// the logistic map at r = 4 has exponent ln 2 = 0.693.
+
+import monodromy~
+import math~
+
+// Deterministic quasi-random samplers: golden-ratio (Kronecker) sequences.
+fn line(n, seed) {
+    let xs = []~
+    let i = 0~
+    while i < n {
+        let u = i + 1 + seed * 7919~
+        let frac = u * 0.618034 % 1~
+        xs.push(2 * frac - 1)~
+        i = i + 1~
+    }
+    return xs~
+}
+
+fn plane(n, seed) {
+    let ps = []~
+    let i = 0~
+    while i < n {
+        let j = i + 1 + seed * 7919~
+        ps.push([j * 0.754878 % 1, j * 0.569840 % 1])~
+        i = i + 1~
+    }
+    return ps~
+}
+
+fn fold(x) { return x * x~ }
+fn affine(x) { return 2 * x + 1~ }
+
+// 1. Collisions, decided from pairs of points, no derivative anywhere.
+let c = collision_certificate(fold, line)~
+print(["x^2: verdict, witness p, q", c.verdict, c.p, c.q])~
+let a = collision_certificate(affine, line)~
+print(["2x+1: verdict, lambda", a.verdict, a.lambda])~
+
+// 2. Symmetry: a square outline, 8 samples per edge.
+let outline = []~
+for e in 0..4 {
+    let e1 = e + 1~
+    let x0 = cos(pi * e / 2)~
+    let y0 = sin(pi * e / 2)~
+    let dx = cos(pi * e1 / 2) - x0~
+    let dy = sin(pi * e1 / 2) - y0~
+    for s in 0..8 {
+        outline.push([x0 + dx * s / 8, y0 + dy * s / 8])~
+    }
+}
+let g = symmetry_group(outline)~
+print(["square outline: order, dihedral", g.order, g.dihedral])~
+
+// 3. Persistent-homology dimension (Schweinhart, alpha = 1).
+let d1 = ph_dimension(line)~
+let d2 = ph_dimension(plane)~
+print(["PH dimension: segment, square", d1.dimension, d2.dimension])~
+
+// 4. Lyapunov spectrum by QR.
+print(["diag(2, 1/2) exponents", lyapunov([[[2, 0], [0, 0.5]], [[2, 0], [0, 0.5]]])])~
+let js = []~
+let x = 0.1234~
+for t in 0..3000 {
+    js.push(4 - 8 * x)~
+    let y = 1 - x~
+    x = 4 * x * y~
+}
+let lam = lyapunov(js)[0]~
+print(["logistic r = 4 exponent", lam])~
+if lam > 0 {
+    print("positive exponent: sensitive dependence")~
+}
+
+// Too few points are refused: uncomment for
+// "monodromy refused: TooFewPoints { actual: 1, min: 2 }".
+// symmetry_group([[0, 0]])~

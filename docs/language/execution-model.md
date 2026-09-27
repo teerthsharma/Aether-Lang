@@ -118,4 +118,19 @@ interpreter with its per-call environment clone removed, on both `fib(25)` and
 a 10^6-iteration numeric loop. If it does not, `vm.rs` and `--mode titan` are
 deleted and the language has one engine.
 
-<!-- numbers: pending benchmark -->
+Measured on an Intel Core i7-14700HX, release builds, median of 7 whole-process
+runs (6.5 ms of each is startup):
+
+| Engine | `fib(25)` ms | 10^6 loop ms |
+|---|---:|---:|
+| interpreter before the reshape | 443.8 | 201.9 |
+| interpreter, one frame per call | 237.4 | 205.9 |
+| TitanVM, rewritten | **30.7** | 195.7 |
+
+Titan is 7.74x faster on calls and 1.05x on the loop: the gate passes on
+`fib(25)` and fails on the loop. The loop's cost is per-statement bookkeeping
+(a bound check per assignment, a `Dup` per store, the last-statement register).
+If one pass over it does not reach 3x, Titan is deleted.
+
+Parity over 69 programs: 66 matched, 3 refused (`class`/`new`, `regress`,
+`block`), 0 diverged.

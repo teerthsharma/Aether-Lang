@@ -1,0 +1,26 @@
+import Ml
+import Seal
+
+// 1. Define Model
+let network = Ml.MLP(0.1)
+network.add_layer(2, 4, "relu")
+network.add_layer(4, 1, "sigmoid")
+
+// 2. Define Data (XOR Problem)
+let data = [
+    [0, 0], 
+    [0, 1], 
+    [1, 0], 
+    [1, 1]
+]
+let targets = [[0], [1], [1], [0]]
+
+// 3. Seal Training (One-Line)
+let loss = Seal.train(network, data, targets)
+// print("Final Loss: " + loss) // concat not yet supported for num+str
+
+print(loss)
+
+// 4. Inference
+let result = network.predict([1, 1])
+print(result) // Should be close to 0

@@ -1,0 +1,5 @@
+// fractional range bounds
+for i in 0.5..3.7 {
+    print(i)~
+}
+print(i)~

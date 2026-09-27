@@ -1,0 +1,49 @@
+import Ml
+
+fn main() {
+    print("Running ML Test...")
+
+    // 1. Tensor Creation
+    print("1. Creating Tensors...")
+    let t1 = Ml.load_weights([[1.0, 2.0], [3.0, 4.0]])
+    let t2 = Ml.load_weights([[0.5, 0.5], [0.5, 0.5]])
+    
+    // 2. Math Ops
+    print("2. Testing Math...")
+    let sum = Ml.add(t1, t2)
+    // Expected: [[1.5, 2.5], [3.5, 4.5]]
+    // print(sum) -- Tensor printing not fully implemented in verify script? 
+    // But interpreter print uses Debug, which should work for Tensor(Tensor) because aether-core Tensor has Debug.
+
+    let prod = Ml.matmul(t1, t2)
+    // [[1*0.5+2*0.5, 1*0.5+2*0.5], [3*0.5+4*0.5, ...]]
+    // [[1.5, 1.5], [3.5, 3.5]]
+    
+    let relu_test = Ml.load_weights([[0.0-1.0, 1.0], [0.0, 0.0-5.0]])
+    let relu_res = Ml.relu(relu_test)
+    // [[0.0, 1.0], [0.0, 0.0]]
+    
+    print("Math Ops Done.")
+
+    // 3. MLP Test
+    print("3. Testing MLP...")
+    let mlp = Ml.MLP(0.1) // lr=0.1
+    mlp.add_layer(2, 4, "relu")
+    mlp.add_layer(4, 1, "sigmoid")
+    
+    let x = Ml.load_weights([[0.0, 0.0], [1.0, 1.0]]) // 2 samples, 2 features
+    let y = Ml.load_weights([[0.0], [1.0]])           // 2 targets
+    
+    print("Training...")
+    let loss = mlp.train(x, y, 10.0)
+    print("Final Loss:")
+    print(loss)
+    
+    print("Prediction...")
+    let pred = mlp.forward(x)
+    print(pred)
+    
+    print("Success!")
+}
+
+main()

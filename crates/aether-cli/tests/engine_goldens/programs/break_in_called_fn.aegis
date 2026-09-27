@@ -1,0 +1,9 @@
+// `break` in a function body, called from inside a loop
+fn stop() {
+    break~
+}
+for i in 0..3 {
+    print(i)~
+    stop()~
+}
+print("after")~

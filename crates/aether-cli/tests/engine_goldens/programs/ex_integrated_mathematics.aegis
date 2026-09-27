@@ -1,0 +1,90 @@
+// Integrated mathematics: one pipeline across five certified modules.
+//
+//   track        cells over frames, divisions by min-cost circulation
+//   arrangement  the lineage forest drawn in the (x, frame) plane: a forest
+//                encloses no face, so faces = 0 and chi = number of lineages
+//   planner      the same lineages as islands of the link graph
+//   orbit        cell -> lineage as a many-to-one map, with its proved bounds
+//   certify      a rounding-certified decision on the result
+//
+// and a seal loop whose termination condition is a certified quantity.
+
+import track~
+import arrangement~
+import planner~
+import orbit~
+import certify~
+
+// A cell at the origin divides; a second cell at x = 10 drifts right.
+let frames = [
+    [[0, 0, 0], [10, 0, 0]],
+    [[2, 0, 0], [-2, 0, 0], [10.5, 0, 0]],
+    [[2, 1, 0], [-2, 1, 0], [11, 0, 0]]
+]~
+
+// Seal loop: admit one frame per pass until a pass leaves the certified
+// division count unchanged. Divisions go 0, 1, 1: sealed with all 3 frames.
+let seen = [frames[0]]~
+let k = 1~
+🦭 until stable(track(seen, 12).divisions) {
+    if k < 3 {
+        seen.push(frames[k])~
+        k = k + 1~
+    }
+}
+let t = track(seen, 12)~
+print(["frames admitted, divisions, certified", k, t.divisions, t.certified])~
+
+// Every link [f, i, f', i'] becomes a planar segment (x, f) -> (x', f') and an
+// incidence between node ids 3f + i and 3f' + i'.
+let edges = t.edges~
+let drawing = []~
+let links = []~
+let e = 0~
+while e < edges.len() {
+    let ed = edges[e]~
+    let p = frames[ed[0]][ed[1]]~
+    let c = frames[ed[2]][ed[3]]~
+    drawing.push([[p[0], ed[0]], [c[0], ed[2]]])~
+    links.push([ed[0] * 3 + ed[1], ed[2] * 3 + ed[3]])~
+    e = e + 1~
+}
+
+let forest = euler(drawing)~
+print(["forest: pieces, faces, chi", forest.pieces, forest.faces, forest.chi])~
+
+let isl = islands(9, links)~
+print(["lineages as islands", isl.count])~
+
+// cell -> lineage over the 8 detected cells (node 2 is an unused id).
+let lineage = []~
+let v = 0~
+while v < 9 {
+    let label = isl.labels[v]~
+    if label != -1 {
+        lineage.push(label)~
+    }
+    v = v + 1~
+}
+let o = orbit_partition(lineage)~
+print(["cells, lineages, identification error floor, recovery ceiling", o.n, o.m, o.error_floor, o.recovery_ceiling])~
+
+// Three independent counts of the same thing must agree before we certify.
+if forest.pieces == isl.count && isl.count == o.m && forest.faces == 0 {
+    print("agreement: arrangement pieces = planner islands = orbit count")~
+}
+
+// Certified: which lineage holds the most cells? The counts are exact, so a
+// radius of 0.25 still separates them and the argmax is certified.
+let size0 = 0~
+let size1 = 0~
+let w = 0~
+while w < lineage.len() {
+    if lineage[w] == 0 {
+        size0 = size0 + 1~
+    } else {
+        size1 = size1 + 1~
+    }
+    w = w + 1~
+}
+print(["lineage sizes, largest (certified argmax)", size0, size1, certified_topk([size0, size1], 0.25, 1, largest=true)[0]])~

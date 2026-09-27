@@ -1,0 +1,4 @@
+// assignment without `let` to a name never bound
+print("before")~
+y = 3~
+print(y)~

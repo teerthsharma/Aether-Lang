@@ -1,0 +1,5 @@
+
+--- stderr ---
+Parse error at line 24, column 5: expected argument name, found until
+--- exit ---
+1

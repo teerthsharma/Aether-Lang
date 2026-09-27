@@ -1,0 +1,12 @@
+[argmin, 1]
+[top-2 set, [1, 2]]
+[top-2 ordered, [1, 2]]
+[argmax, [3]]
+[against 2.05, [above, below, undetermined, above]]
+[radius at which 1.0 < 1.5 is certified, 0.25]
+
+Execution complete. 🦭
+--- stderr ---
+
+--- exit ---
+0

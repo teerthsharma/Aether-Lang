@@ -1,0 +1,21 @@
+// `return` from inside a loop inside a function
+fn find() {
+    for i in 0..10 {
+        if i == 3 {
+            return i~
+        }
+    }
+    return 99~
+}
+print(find())~
+fn spin() {
+    let k = 0~
+    while k < 10 {
+        k = k + 1~
+        if k == 4 {
+            return k~
+        }
+    }
+    return -1~
+}
+print(spin())~

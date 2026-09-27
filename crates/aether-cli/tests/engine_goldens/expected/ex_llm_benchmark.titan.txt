@@ -1,0 +1,5 @@
+
+--- stderr ---
+Parse error at line 17, column 5: expected identifier, found model
+--- exit ---
+1

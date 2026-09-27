@@ -1,0 +1,9 @@
+// seal until convergence(eps): stops once a pass changes the body's value by at most eps
+let x = 1~
+let passes = 0~
+seal until convergence(1e-6) {
+    passes = passes + 1~
+    x = x / 2~
+}
+print(passes)~
+print(x)~

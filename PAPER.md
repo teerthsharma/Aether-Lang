@@ -65,7 +65,7 @@ The premise is therefore a narrow one: *some loops should terminate when the sha
 
 ### 1.3 Scope of the claims
 
-The repository contains 53,228 lines of Rust across 105 files in `crates/` and 11,637 lines of Lean in `Aether/`. Both are raw line counts including tests, comments and blank lines, each reproduced by the command in [Reproducing every number](#reproducing-every-number). An earlier revision stated 21,262 and 11,652; neither was reproducible, and the Rust figure was subsequently re-measured at 36,305 before this revision re-measured it again. A document that insists every number carries a command has to survive that rule being applied to itself.
+The repository contains 54,287 lines of Rust across 108 files in `crates/` and 11,637 lines of Lean in `Aether/`. Both are raw line counts including tests, comments and blank lines, each reproduced by the command in [Reproducing every number](#reproducing-every-number). An earlier revision stated 21,262 and 11,652; neither was reproducible, and the Rust figure was subsequently re-measured at 36,305 before this revision re-measured it again. A document that insists every number carries a command has to survive that rule being applied to itself.
 
 What is claimed: a bounded, exact $\mathbb{F}_2$ persistence engine for $H_0$, $H_1$ and $H_2$; exact diagram metrics and standard vectorisations; a language whose grammar carries topology as statement kinds; a `no_std` build for an embedded target; a kernel that compiles for `x86_64-unknown-none`; a Rust port of a Triton sparse-attention kernel whose schedules reproduce the original exactly; and a certified library of ten modules, each of which states what it certifies, what it only estimates, and when it refuses.
 
@@ -139,18 +139,18 @@ A separate status, **Hardware-gated**, was needed once the GPU backend arrived. 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
   cargo fmt --all -- --check                                   clean
   cargo clippy -D correctness -D suspicious                     clean
-  cargo test --workspace --exclude aether-kernel   428 passed 80 ignored
+  cargo test --workspace --exclude aether-kernel   448 passed 80 ignored
   cargo build -p aether-kernel --target x86_64-unknown-none        ok
   cargo build -p aether-core  --target thumbv7m-none-eabi          ok
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-  Rust lines (crates/)                                        53,228
+  Rust lines (crates/)                                        54,287
   Lean lines (Aether/)              11,637   theorems 48   sorry 0
   Test suites gated in CI                                          7
   Claims withdrawn during audit                                    6
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 ```
 
-The 428 passing tests divide as: `aether-core` 330 (56 unit, 274 integration, of which 166 belong to the certified library), `aether-lang` 64 (32 unit, 23 for the module bindings, 8 for the tolerance seal loop, literals and grouping, 1 running the opening program), `aether-gpu` 31 that need no adapter, `aegis-core` 2, `aether-cli` 1.
+The 448 passing tests divide as: `aether-core` 330 (56 unit, 274 integration, of which 166 belong to the certified library), `aether-lang` 83 (43 unit, including 20 for TitanVM; 23 for the module bindings; 8 for the tolerance seal loop, literals and grouping; 5 for scoping and loop forms; 3 for model batches; 1 running the opening program), `aether-gpu` 31 that need no adapter, `aegis-core` 2, `aether-cli` 2 (one of them the 69-program engine-parity golden suite).
 
 ### 1.6 Reading guide
 
@@ -1102,30 +1102,30 @@ What `regress` does run is the interpreter's own `EscalatingRegressor`, whose st
 
 The tree-walking interpreter (`interpreter.rs`) is the reference: where the engines disagree, the interpreter's behaviour is the language's. `TitanVM` (`vm.rs`) compiles the AST to bytecode and fails closed. `Compiler::compile` returns `Result<Chunk, CompileError>`, and a construct it cannot compile is refused as `titan cannot compile CONSTRUCT at line L, column C`. `aether run --mode titan` prints that message after `titan: ` on stderr and exits 1. It never falls back to the interpreter, because a fallback would make every Titan measurement a measurement of the interpreter reported under Titan's name. Both CLIs run both engines through one `run_program`, so final-value printing (`Display`, with `()` hidden) and the footer are shared, and any difference in output is a difference between the engines. Titan's parity row is Partial while the reshape described here is in progress.
 
-**Construct coverage.** The Titan column is filled from the parity report below.
+**Construct coverage.** The Titan column is taken from the parity run below.
 
 | Construct | Interpreter | Titan |
 |---|---|---|
-| number, boolean and string literals | runs | see parity report |
-| arithmetic, comparison and boolean operators | runs; `x / 0` is `inf` | see parity report |
-| `let` and assignment | runs; assigning an unbound name is refused | see parity report |
-| `if`, `while` | runs; a numeric condition is refused | see parity report |
-| `for` over a range | runs; bounds truncated to integers, step ±1, iterator left bound | see parity report |
-| `break`, `continue`, `return` | runs | see parity report |
-| `fn` declaration and call | runs; late binding, lexical scope (below) | see parity report |
-| named arguments | runs on natives; a user function refuses them | see parity report |
-| `print` | runs; each argument evaluated, then printed | see parity report |
-| lists, indexing and element access | runs | see parity report |
-| records and field access | runs | see parity report |
-| methods on values | runs | see parity report |
-| `import` and module calls, including §4.9 | runs | see parity report |
-| seal loop, `until expr` or no `until` | runs; at most 1,000 passes | see parity report |
-| seal loop, `until stable(e)` | runs; §4.6 | see parity report |
-| seal loop, `until convergence(eps)` | runs; §4.6 | see parity report |
-| `manifold` and `block` declarations | runs | see parity report |
-| `regress` | runs; §4.7 | see parity report |
-| `render` | no-op | see parity report |
-| `class` and `new` | partial | see parity report |
+| number, boolean and string literals | runs | runs |
+| arithmetic, comparison and boolean operators | runs; `x / 0` is `inf` | runs |
+| `let` and assignment | runs; assigning an unbound name is refused | runs |
+| `if`, `while` | runs; a numeric condition is refused | runs |
+| `for` over a range | runs; bounds truncated to integers, step ±1, iterator left bound | runs |
+| `break`, `continue`, `return` | runs | runs |
+| `fn` declaration and call | runs; late binding, lexical scope (below) | runs |
+| named arguments | runs on natives; a user function refuses them | runs on natives; a user function refuses them at run time, as the interpreter does |
+| `print` | runs; each argument evaluated, then printed | runs |
+| lists, indexing and element access | runs | runs |
+| records and field access | runs | runs |
+| methods on values | runs | runs |
+| `import` and module calls, including §4.9 | runs | runs |
+| seal loop, `until expr` or no `until` | runs; at most 1,000 passes | runs |
+| seal loop, `until stable(e)` | runs; §4.6 | runs |
+| seal loop, `until convergence(eps)` | runs; §4.6 | runs |
+| `manifold` and `block` declarations | runs | `manifold` runs; `block` refused |
+| `regress` | runs; §4.7 | refused |
+| `render` | no-op | no-op |
+| `class` and `new` | partial | refused |
 
 **The language change.** Holding two engines to one behaviour required writing the behaviour down, and three rules change what programs do. They are changes to the language, not engine details, and both engines implement them.
 
@@ -1141,19 +1141,31 @@ Before, every call cloned the caller's whole variable map (`interpreter.rs` → 
 
 | Corpus | Programs | Matched | Refused | Diverged |
 |---|---:|---:|---:|---:|
-| `engine_goldens` | see parity report | see parity report | see parity report | see parity report |
+| `engine_goldens` | 69 (27 examples, 42 constructs) | 66 | 3 (`class`/`new`, `regress`, `block`) | 0 |
+
+The corpus also found a defect in the reference: a `return` inside a loop ended only the loop, so `fn find() { for i in 0..10 { if i == 3 { return i~ } } return 99~ }` returned 99. Loops now propagate the return in both engines, and the golden records 3.
 
 **The benchmark gate.** Titan is kept only if it is at least 3× faster, by median, than the interpreter without its per-call clone, on both `fib(25)` and a $10^6$-iteration numeric loop. Each program also runs with `import monodromy~` above it, which exposes the old clone's dependence on scope size. The control is that fixed interpreter, not the one above, so the comparison credits Titan only with what an engine change buys. If the gate fails, `vm.rs` and `--mode titan` are deleted, and this section records the measurement that deleted them. The 3× threshold is a judgement, not a derivation: below it, a second engine doubles the cost of every language feature for too little gain.
 
-<!-- numbers: pending benchmark -->
+Measured on an Intel Core i7-14700HX (Windows 11, release builds, whole-process wall clock including a 6.5 ms startup, median of 7 runs; `python bench/engines/time_engines.py MASTER_EXE BRANCH_EXE 7`). *Master* is the commit before the reshape; *branch* is the reshape.
+
+| Engine | `fib(25)` ms | $10^6$ loop ms | `fib(25)` with `import monodromy~` ms |
+|---|---:|---:|---:|
+| interpreter, master (clones its variable map per call) | 443.8 | 201.9 | 540.8 |
+| TitanVM, master | 576.2 | 117.0 | — |
+| interpreter, branch (one frame per call over read-only globals) | 237.4 | 205.9 | 243.1 |
+| TitanVM, branch | **30.7** | 195.7 | — |
+
+Removing the per-call clone made the interpreter 1.87× faster on `fib(25)` and erased its dependence on scope size (537 → 243 ms with `monodromy` imported). Against that fixed interpreter the rewritten Titan is **7.74×** faster on calls and **1.05×** on the loop, so the gate passes on `fib(25)` and fails on the loop. The old Titan ran the same loop in 117.0 ms. The new one pays per statement for what makes it correct: a bound check on every assignment, a `Dup` before every `Store`, and a write to the last-statement register. That overhead is the remaining work. If one pass over it does not bring the loop to 3×, the gate's rule applies and Titan is deleted.
 
 | File | Lines | Role |
 |---|---:|---|
-| `interpreter.rs` | 1,971 | tree-walking evaluator; topology builtins, seal loops, `regress`, manifold primitives |
-| `parser.rs` | 1,269 | recursive descent, positioned AST |
-| `vm.rs` | 911 | `TitanVM` bytecode VM |
-| `lexer.rs` | 507 | tokeniser, including the four-byte `🦭` codepoint |
-| `ast.rs` | 408 | node definitions above |
+| `interpreter.rs` | 1,571 | tree-walking evaluator; topology builtins, seal loops, `regress`, manifold primitives |
+| `parser.rs` | 1,344 | recursive descent, positioned AST |
+| `vm.rs` | 1,640 | `TitanVM` bytecode VM, fails closed |
+| `natives.rs` | 1,552 | every native, called by both engines with evaluated values |
+| `lexer.rs` | 568 | tokeniser, including the four-byte `🦭` codepoint |
+| `ast.rs` | 425 | node definitions above |
 | `ascii_render.rs` | 179 | terminal rendering for `render` |
 | `webgl_export.rs` | 117 | WebGL export path for `render` |
 | `python.rs` | 81 | `pyo3` surface; the bindings package is empty |
@@ -1790,7 +1802,7 @@ Placement (§3.21) is the share of the achievable gain the selector captures, an
 
 ### 7.1 Test inventory
 
-A count is not evidence, so the suites that carry the correctness argument are listed with what they assert. `aether-core` runs 330 tests (56 unit, 274 integration), `aether-lang` 64, and `aether-gpu` 107 integration tests of which 80 are hardware-gated. The per-suite figures below are bound to the files by `readme_claims.rs`: the test count exactly, the line count to 5%.
+A count is not evidence, so the suites that carry the correctness argument are listed with what they assert. `aether-core` runs 330 tests (56 unit, 274 integration), `aether-lang` 83, and `aether-gpu` 107 integration tests of which 80 are hardware-gated. The per-suite figures below are bound to the files by `readme_claims.rs`: the test count exactly, the line count to 5%.
 
 | Suite | Tests | Lines | Asserts |
 |---|---:|---:|---|
@@ -2366,7 +2378,7 @@ The evidence policy in one rule: **a number without a reproduction command does 
 
 | Claim | Where | Command |
 |---|---|---|
-| 428 passed, 80 ignored (guarded: ignored) | [Status](#15-status) | `cargo test --workspace --exclude aether-kernel` |
+| 448 passed, 80 ignored (guarded: ignored) | [Status](#15-status) | `cargo test --workspace --exclude aether-kernel` |
 | Per-suite test and line counts (guarded) | [§7.1](#71-test-inventory) | `cargo test -p aether-core --test readme_claims` |
 | 12 persistence invariants | [§7.1](#persistence_invariantsrs--12-tests-740-lines) | `cargo test -p aether-core --test persistence_invariants` |
 | 17 diagram-metric tests | [§7.1](#diagram_distancers--17-tests-422-lines) | `cargo test -p aether-core --test diagram_distance` |
@@ -2387,7 +2399,7 @@ The evidence policy in one rule: **a number without a reproduction command does 
 | `no_std` on Cortex-M3 | [Status](#15-status) | `cargo build -p aether-core --no-default-features --features no_std -Z build-std=core,alloc --target thumbv7m-none-eabi` |
 | Formatting clean | [Status](#15-status) | `cargo fmt --all -- --check` |
 | Clippy clean | [Status](#15-status) | `cargo clippy --workspace --exclude aether-kernel --all-targets -- -D warnings -D clippy::correctness -D clippy::suspicious -A clippy::style -A clippy::complexity -A clippy::perf` |
-| 53,228 Rust lines, 105 files (guarded: lines) | [§1.3](#13-scope-of-the-claims) | `(Get-ChildItem crates -Recurse -Filter *.rs \| Get-Content).Count`, or `find crates -name '*.rs' \| xargs cat \| wc -l` |
+| 54,287 Rust lines, 108 files (guarded: lines) | [§1.3](#13-scope-of-the-claims) | `(Get-ChildItem crates -Recurse -Filter *.rs \| Get-Content).Count`, or `find crates -name '*.rs' \| xargs cat \| wc -l` |
 | `nalgebra` has zero call sites | [§8.6](#86-nalgebra-a-phantom-dependency) | `grep -rn nalgebra crates/ --include=*.rs` |
 | 107 GPU tests, 80 hardware-gated | [§5.11](#511-aether-gpu) | `cargo test -p aether-gpu --features gpu --release` |
 | 20 WGSL kernels (guarded) | [§5.11](#511-aether-gpu) | `grep -c '^@compute' crates/aether-gpu/src/shaders.wgsl` |

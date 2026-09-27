@@ -1,0 +1,5 @@
+()
+--- stderr ---
+Runtime error: Invalid binary operation
+--- exit ---
+1
