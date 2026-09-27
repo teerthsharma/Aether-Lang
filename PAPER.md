@@ -1100,7 +1100,52 @@ What `regress` does run is the interpreter's own `EscalatingRegressor`, whose st
 
 ### 4.8 Two execution engines
 
-The tree-walking interpreter (`interpreter.rs`) is the reference. `TitanVM` (`vm.rs`) is a bytecode VM that is behind it on construct coverage; it has 10 unit tests of its own and no per-construct differential suite against the interpreter, which is why its parity is listed as Partial. Two execution engines with no differential test between them are a standing invitation to divergence.
+The tree-walking interpreter (`interpreter.rs`) is the reference: where the engines disagree, the interpreter's behaviour is the language's. `TitanVM` (`vm.rs`) compiles the AST to bytecode and fails closed. `Compiler::compile` returns `Result<Chunk, CompileError>`, and a construct it cannot compile is refused as `titan cannot compile CONSTRUCT at line L, column C`. `aether run --mode titan` prints that message after `titan: ` on stderr and exits 1. It never falls back to the interpreter, because a fallback would make every Titan measurement a measurement of the interpreter reported under Titan's name. Both CLIs run both engines through one `run_program`, so final-value printing (`Display`, with `()` hidden) and the footer are shared, and any difference in output is a difference between the engines. Titan's parity row is Partial while the reshape described here is in progress.
+
+**Construct coverage.** The Titan column is filled from the parity report below.
+
+| Construct | Interpreter | Titan |
+|---|---|---|
+| number, boolean and string literals | runs | see parity report |
+| arithmetic, comparison and boolean operators | runs; `x / 0` is `inf` | see parity report |
+| `let` and assignment | runs; assigning an unbound name is refused | see parity report |
+| `if`, `while` | runs; a numeric condition is refused | see parity report |
+| `for` over a range | runs; bounds truncated to integers, step ±1, iterator left bound | see parity report |
+| `break`, `continue`, `return` | runs | see parity report |
+| `fn` declaration and call | runs; late binding, lexical scope (below) | see parity report |
+| named arguments | runs on natives; a user function refuses them | see parity report |
+| `print` | runs; each argument evaluated, then printed | see parity report |
+| lists, indexing and element access | runs | see parity report |
+| records and field access | runs | see parity report |
+| methods on values | runs | see parity report |
+| `import` and module calls, including §4.9 | runs | see parity report |
+| seal loop, `until expr` or no `until` | runs; at most 1,000 passes | see parity report |
+| seal loop, `until stable(e)` | runs; §4.6 | see parity report |
+| seal loop, `until convergence(eps)` | runs; §4.6 | see parity report |
+| `manifold` and `block` declarations | runs | see parity report |
+| `regress` | runs; §4.7 | see parity report |
+| `render` | no-op | see parity report |
+| `class` and `new` | partial | see parity report |
+
+**The language change.** Holding two engines to one behaviour required writing the behaviour down, and three rules change what programs do. They are changes to the language, not engine details, and both engines implement them.
+
+| Rule | Program | Before | After |
+|---|---|---|---|
+| lexical scope | `fn g() { y~ } fn f(y) { g()~ } f(3)~` | value `3`: `g` reads `f`'s `y` | value `()`: `y` is unbound in `g`, and an unbound read gives `()` |
+| unbound call | `print(nosuch(1))~` | prints `()` and continues | `Runtime error: undefined function 'nosuch'`, exit 1 |
+| loop form | `fn stable(v) { return v >= 2~ }`, then `seal until stable(n)` over a body that raises `n` to 3 | calls the program's `stable`; stops at `n = 2` | the parser's `Stable(n)`; stops when a pass leaves `n` unchanged, at `n = 3` |
+
+Before, every call cloned the caller's whole variable map (`interpreter.rs` → `call_user_fn`). A function therefore read whatever its caller had bound, which is dynamic scope, at a cost proportional to the number of bound names; a bare `import` binds every export of a module. After, a function sees the globals read-only, plus its own parameters and locals. Its writes, including a write to a global's name, stay local and are discarded on return, and no call copies the environment. For a call made at top level the two rules agree, because there the caller's variables are the globals. They differ only when a function reads a name bound in its caller's frame. A write to a global inside a function was already discarded on return, so that is unchanged. The seal loop's condition is decided at parse time (`LoopCond::{Expr, Stable, Convergence}`), so a program function named `stable` no longer changes a loop's meaning at run time. Functions are still bound when their `fn` statement executes, reading an unbound variable still gives `()`, and a program's value is still the value of its last statement.
+
+**Parity method.** `crates/aether-cli/tests/engine_goldens/` pins the reference. For every program in `examples/`, and for one small program per construct written from `interpreter.rs`, a golden records the interpreter CLI's stdout, stderr error line and exit code. The interpreter must reproduce every golden. The same corpus then runs under `--mode titan`, and each program is *matched* (all three equal), *refused* (a compile error) or *diverged* (it ran and something differs). A refusal is never counted as parity. Refused and diverged are separate ratchets that may only shrink, and the parity row moves to Active only when both are zero on the full corpus.
+
+| Corpus | Programs | Matched | Refused | Diverged |
+|---|---:|---:|---:|---:|
+| `engine_goldens` | see parity report | see parity report | see parity report | see parity report |
+
+**The benchmark gate.** Titan is kept only if it is at least 3× faster, by median, than the interpreter without its per-call clone, on both `fib(25)` and a $10^6$-iteration numeric loop. Each program also runs with `import monodromy~` above it, which exposes the old clone's dependence on scope size. The control is that fixed interpreter, not the one above, so the comparison credits Titan only with what an engine change buys. If the gate fails, `vm.rs` and `--mode titan` are deleted, and this section records the measurement that deleted them. The 3× threshold is a judgement, not a derivation: below it, a second engine doubles the cost of every language feature for too little gain.
+
+<!-- numbers: pending benchmark -->
 
 | File | Lines | Role |
 |---|---:|---|
