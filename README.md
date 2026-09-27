@@ -1,13 +1,11 @@
 <!-- Aether-Lang README -->
 
-<h1 align="center">Aether-Lang: Persistent Homology as a Language Primitive</h1>
+<h1 align="center">Aether</h1>
 
 <p align="center">
-  <strong>A research language in which persistent homology is a builtin, loops terminate on a predicate that may be topological, and the mathematical runtime compiles <code>no_std</code> down to bare metal.</strong>
-</p>
-
-<p align="center">
-  <a href="https://teerthsharma.github.io/Aether-Lang/"><strong>Documentation — every theorem, algorithm and result visualised live</strong></a>
+  <strong>A programming language that computes with shape.</strong><br>
+  Programs are point clouds. Loops end when the shape stops changing.<br>
+  Every answer arrives with its proof, or does not arrive at all.
 </p>
 
 <p align="center">
@@ -16,32 +14,144 @@
   <a href=".github/workflows/ci.yml"><img src="https://img.shields.io/github/actions/workflow/status/teerthsharma/Aether-Lang/ci.yml?branch=master&label=CI&style=flat-square" alt="CI"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-Custom%20Attribution-00aaff?style=flat-square" alt="License: Custom Attribution"></a>
   <a href="rust-toolchain.toml"><img src="https://img.shields.io/badge/rust-nightly-orange?style=flat-square&logo=rust" alt="Rust nightly"></a>
-  <a href="#15-status"><img src="https://img.shields.io/badge/tests-427%20passing%2C%2080%20ignored-brightgreen?style=flat-square" alt="427 passing, 80 ignored"></a>
+  <a href="#15-status"><img src="https://img.shields.io/badge/tests-428%20passing%2C%2080%20ignored-brightgreen?style=flat-square" alt="428 passing, 80 ignored"></a>
   <a href="#73-mutation-testing"><img src="https://img.shields.io/badge/mutants-52%20injected-purple?style=flat-square" alt="52 mutants"></a>
-  <a href="#8-negative-results-what-we-got-wrong"><img src="https://img.shields.io/badge/claims%20withdrawn-6-red?style=flat-square" alt="6 claims withdrawn"></a>
-  <a href="docs/reference/status.md"><img src="https://img.shields.io/badge/claim%20ledger-live-blue?style=flat-square" alt="Claim ledger"></a>
 </p>
 
 <p align="center">
-  <strong>Invented by <a href="https://teerthsharma.vercel.app/">Teerth Sharma</a> · <a href="https://github.com/teerthsharma/Aether-Lang">github.com/teerthsharma/Aether-Lang</a></strong><br>
-  <code>teerthsharma@outlook.com</code>
-</p>
-
-<p align="center">
-  <a href="#quick-start">Quick start</a> ·
-  <a href="#15-status">Status</a> ·
-  <a href="#3-theoretical-foundation">Theory</a> ·
-  <a href="#6-evaluation">Evaluation</a> ·
-  <a href="#8-negative-results-what-we-got-wrong">Negative results</a> ·
-  <a href="#9-limitations">Limitations</a> ·
-  <a href="#faq">FAQ</a>
+  <strong>Invented by <a href="https://teerthsharma.vercel.app/">Teerth Sharma</a></strong> · <a href="https://github.com/teerthsharma/Aether-Lang">github.com/teerthsharma/Aether-Lang</a> · <code>teerthsharma@outlook.com</code><br>
+  <a href="#quick-start">Quick start</a> · <a href="https://teerthsharma.github.io/Aether-Lang/">Documentation</a> · <a href="#the-paper">The paper</a> · <a href="#8-negative-results-what-we-got-wrong">What we got wrong</a>
 </p>
 
 ---
 
+```aether
+import topology~
+import linking~
+import certify~
+import math~
+
+// Shape. A periodic signal, sampled eighteen times and delay-embedded into a
+// cloud in three dimensions. Nothing below asks whether it is periodic.
+let signal = []~
+let t = 0~
+while t < 18 {
+    signal.push(sin(t * 0.7))~
+    t = t + 1~
+}
+manifold M = embed(signal, dim=3, tau=2)~
+let shape = topology.ph(M, max_dim=1, mode="vr")~
+
+// Widen the lens until the cloud is one piece, then read its Betti numbers.
+let r = 0~
+🦭 until topology.betti(shape, radius=r)[0] == 1 {
+    r = r + 0.25~
+}
+print(["one piece at radius", r, "betti", topology.betti(shape, radius=r)])~
+
+// Certainty. A square, and a hoop threaded through it.
+let square = [[0, 0, 0], [1, 0, 0], [1, 1, 0], [0, 1, 0]]~
+let hoop = [[0.5, 0.5, -1], [0.5, 0.5, 1], [0.5, -0.5, 1], [0.5, -0.5, -1]]~
+let link = linking_number(square, hoop)~
+print(["linked?", link.verdict, "lk", link.lk, "error bound", link.error_bound])~
+
+// Proof as a stopping rule. Is 1.0 below 1.5 when every score may be off by
+// the radius? Halve it until the answer is proven.
+let radius = 2~
+🦭 until certified_threshold([1.0], radius, 1.5)[0] == "below" {
+    print(["radius", radius, "verdict", certified_threshold([1.0], radius, 1.5)[0]])~
+    radius = radius / 2~
+}
+print(["proven at radius", radius])~
+```
+
+```text
+[one piece at radius, 1, betti, [1, 1, 0]]
+[linked?, linked, lk, 1, error bound, 7.072564457345712e-14]
+[radius, 2, verdict, undetermined]
+[radius, 1, verdict, undetermined]
+[radius, 0.5, verdict, undetermined]
+[proven at radius, 0.25]
+```
+
+<p align="center"><sub><code>examples/tour.aegis</code> · <code>cargo run -p aether-cli -- run examples/tour.aegis</code></sub></p>
+
+The program never asks whether the signal is periodic. It asks for the shape, and the shape answers: one piece, one hole. It never asks whether the hoop is through the square either. It computes a linking number, and the number arrives with the error bound that proves it is the integer 1. And for three passes it refuses to say that 1.0 is below 1.5, because with scores that uncertain it is not yet true.
+
+---
+
+## The idea
+
+**Decide with integers, not decimals.** Most programs make their decisions on floating-point numbers. They iterate while a loss exceeds $10^{-6}$, take the largest score, or call two curves apart because a distance came out positive. A float moves in its last digits for reasons unrelated to the data, and the program cannot tell a real change from rounding. Aether puts a different kind of number into control flow. Persistent homology is a builtin, and its output — the Betti numbers of a point cloud, counting pieces, loops and voids — is a vector of integers. A loss of 0.0341 against 0.0339 is noise. $\beta_1$ falling from 3 to 1 is an event.
+
+**Loops that end on an invariant.** The seal loop, spelled `seal` or `🦭`, is the language's own control structure. It has three stopping rules:
+
+- **A condition.** The loop runs until a boolean holds.
+- **A tolerance.** With `convergence(ε)`, it stops once a pass moves the body's value by at most $\varepsilon$.
+- **An invariant.** With `stable(expr)`, it stops once a watched value survives a pass unchanged — a Betti vector, a certified face count, a count of cell divisions.
+
+The first loop above does not stop because a number became small. It stops because the cloud became one piece.
+
+**Proof, or refusal.** Aether does not guess at a decision. A decision is reported only when it is proven. Otherwise the call refuses and names what stood in the way:
+
+- **Linking numbers** are reported as integers only when an error bound proves the rounding.
+- **An argmin** is returned only when no rounding error inside the stated radii could reorder the scores.
+- **A face count** is given only at a snap radius where the answer is stable.
+
+A refusal names the frontier indices, the intersecting segments, or the unstable window. The third act of the program above is this principle written as a loop: *undetermined* three times, then proven.
+
+**One core, down to the metal.** The mathematics is `no_std` Rust against `libm`. The engine that answers `topology.ph` in the CLI also builds for a Cortex-M3 with no operating system, and links into a bare-metal x86_64 kernel. The aim is topology that makes execution decisions inside a runtime, rather than describing data after the fact in a notebook.
+
+## What Aether can answer
+
+| Question | What comes back | In a program |
+|---|---|---|
+| What shape is this data? | Betti numbers of its filtration: pieces, loops, voids | `topology.betti(topology.ph(M), radius=r)` |
+| Are these two closed curves linked? | an integer linking number proven by its error bound — never a claim of "unlinked" | `linking_number(a, b).verdict` |
+| Which score is smallest, really? | an argmin, top-k or threshold that no rounding within the radii could overturn | `certified_argmin(scores, radii)` |
+| How many regions does this drawing enclose? | pieces, faces and Euler characteristic, with the snap radius that decided them | `euler(segments).faces` |
+| Is this map one-to-one? | a collision witness, or "none at this sampling" — never "injective" | `collision_certificate(f, sampler)` |
+| What symmetry does this shape have? How many dimensions does it really have? | a recovered cyclic or dihedral group; a persistent-homology dimension | `symmetry_group(points)`, `ph_dimension(sampler)` |
+| Is this system chaotic? | its Lyapunov spectrum | `lyapunov(jacobians)` |
+| Where does this system settle? | a fixed point, with a contraction certificate and a rollout error bound | `coupling_fixed_point(T, c)` |
+| Which cell divided, and when? | a lineage forest with certified divisions | `track(frames, gate)` |
+| How many true answers can a many-to-one map recover? | proved floors on error, precision and recall from its orbit partition | `orbit_partition(values)` |
+| Softmax, kernel, or path product? | one causal attention operator, with the three as settings of its switches | `resolvent_attend(q, k, v, gates, "path")` |
+| What did sparse attention skip? | witness tokens that cover every segment of the context | `witness_topk(learned, topk, L, segments)` |
+| How little memory does this graph need? | offsets that never overlap live tensors, and the exact transitive reduction of its dependencies | `plan_memory(tensors)`, `transitive_reduction(n, edges)` |
+
+Each decision comes with the bound that proves it or a typed refusal. Estimates — a dimension, a Lyapunov spectrum — are returned as estimates and labelled as such. Definitions, theorems, proofs and test evidence for each are in the [documentation](https://teerthsharma.github.io/Aether-Lang/integrated/), and each module has an example program under [`examples/`](examples/).
+
+## Where it stands
+
+**Works:**
+
+- **Persistence engine.** An exact $\mathbb{F}_2$ persistence engine computes $H_0$–$H_2$ over Vietoris–Rips and witness filtrations.
+- **Verification.** Correctness is guarded by 12 property invariants, including the stability theorem. 52 injected mutants were all caught.
+- **Tests.** 428 tests pass.
+- **Formal core.** 48 Lean theorems, with no `sorry`.
+- **Targets.** Builds for `thumbv7m-none-eabi` and `x86_64-unknown-none`.
+
+**Not yet known or not yet done:**
+
+- **The premise is unmeasured.** Whether stopping on topological stability beats a tuned scalar criterion on real problems has not been tested.
+- **No external parity.** Agreement with ripser or GUDHI has not been checked.
+- **GPU not wired in.** The GPU backend is not connected to the language.
+- **Kernel not booted.** The kernel compiles; it has not been booted.
+
+The full ledger is in [§1.5 Status](#15-status) and [§9 Limitations](#9-limitations).
+
+---
+
+<a id="the-paper"></a>
+
+## The paper
+
+The rest of this document is the technical account. It covers the mathematics the code implements, the language definition, the implementation, measurements with their controls, verification, and the claims that did not survive.
+
 ## Abstract
 
-Aether-Lang is a research language in which persistent homology is a language primitive: `topology.ph`, `topology.betti` and `topology.intervals` are builtins, and `seal until` loops terminate on an arbitrary predicate, including the stability of a Betti vector. The premise is that Betti numbers are integers, so a stopping rule defined on them cannot jitter the way a scalar residual does; whether it beats a tuned scalar criterion is unmeasured. The core is a bounded, exact $\mathbb{F}_2$ persistence engine for $H_0$–$H_2$ over Vietoris–Rips and lazy-witness filtrations, written in `no_std` Rust against `libm`, which builds for a Cortex-M3 and a bare-metal x86_64 kernel. Exact diagram metrics and vectorisations sit on top, beside ten modules ported from sibling work that certify linking numbers, top-k decisions and arrangement invariants or refuse. Correctness rests on 12 property tests including the Cohen-Steiner–Edelsbrunner–Harer bound, a closed-form circle ground truth reproduced to 1e-12, and 52 injected mutants of which none escape; parity against ripser or GUDHI has not been run. Indexing the face lookup cut the scale suite from 29.07 s to 1.10 s. A port of `triton-lang/kernels#22` reproduces its block schedules exactly, and a same-budget ablation finds its topological selection recovers less attention mass than random selection.
+Aether-Lang is a research language in which persistent homology is a language primitive: `topology.ph`, `topology.betti` and `topology.intervals` are builtins, and `seal until` loops terminate on an arbitrary predicate, including the stability of a Betti vector. The premise is that Betti numbers are integers, so a stopping rule defined on them cannot jitter the way a scalar residual does; whether it beats a tuned scalar criterion is unmeasured. The core is a bounded, exact $\mathbb{F}_2$ persistence engine for $H_0$–$H_2$ over Vietoris–Rips and lazy-witness filtrations, written in `no_std` Rust against `libm`, which builds for a Cortex-M3 and a bare-metal x86_64 kernel. Exact diagram metrics and vectorisations sit on top, beside a certified library that decides linking numbers, top-$k$ selections and arrangement invariants, or refuses. Correctness rests on 12 property tests including the Cohen-Steiner–Edelsbrunner–Harer bound, a closed-form circle ground truth reproduced to 1e-12, and 52 injected mutants of which none escape; parity against ripser or GUDHI has not been run. Indexing the face lookup cut the scale suite from 29.07 s to 1.10 s. The Rust rebuild of the author's Triton sparse-attention kernel reproduces its block schedules exactly, and a same-budget ablation finds its topological selection recovers less attention mass than random selection.
 
 **Keywords:** persistent homology · Vietoris–Rips filtration · topological data analysis · certified computation · domain-specific languages · `no_std` Rust · sparse attention · mutation testing
 
@@ -60,9 +170,9 @@ Aether-Lang is a research language in which persistent homology is a language pr
   - Metrics and vectorisations: [3.10 Stability](#310-the-stability-theorem) · [3.11 Bottleneck and Wasserstein](#311-bottleneck-and-wasserstein-distances) · [3.12 Landscapes](#312-persistence-landscapes) · [3.13 Entropy](#313-total-persistence-and-persistent-entropy) · [3.14 Images](#314-persistence-images) · [3.15 Polygon chord](#315-the-regular-polygon-chord) · [3.16 Delay embedding](#316-delay-embedding) · [3.17 Graph Betti numbers](#317-graph-betti-numbers-on-the-streaming-path)
   - Attention: [3.18 Softmax and the online recurrence](#318-numerically-stable-softmax-and-the-online-recurrence) · [3.19 Backward pass](#319-the-scheduled-attention-backward-pass) · [3.20 Block salience and the oracle](#320-block-salience-recovered-mass-and-the-oracle) · [3.21 Placement](#321-the-placement-statistic) · [3.22 Gap ratio](#322-the-routing-gap-ratio)
   - Runtime substrate: [3.23 Admissible pruning](#323-admissible-bounds-for-hierarchical-pruning) · [3.24 Drift](#324-drift-as-a-second-difference) · [3.25 Chebyshev guard](#325-the-chebyshev-guard) · [3.26 Governor](#326-the-governor-control-law) · [3.27 Gossip](#327-ring-gossip-consensus) · [3.28 Learning primitives](#328-learning-primitives) · [3.29 Convergence predicates](#329-the-convergence-predicates) · [3.30 References](#330-references)
-- [Integrated mathematics from sibling work](#integrated-mathematics-from-sibling-work) — [I.1 Linking](#i1-gauss-linking-number-writhe-and-knot-determinant) · [I.2 Rounding certificates](#i2-rounding-certificates-for-top-k-argmin-and-threshold-decisions) · [I.3 Arrangements](#i3-certified-integer-invariants-of-a-planar-arrangement) · [I.4 Resolvent](#i4-the-resolvent-operator-three-attention-corners-of-one-head) · [I.5 Orbits](#i5-orbit-partitions-and-the-five-bounds-they-certify) · [I.6 Monodromy](#i6-injectivity-symmetry-dimension-and-sensitivity-from-sampled-geometry) · [I.7 Tracking](#i7-cell-tracking-by-assignment-and-min-cost-circulation) · [I.8 Coupling](#i8-coupling-operators-fixed-points-and-islands) · [I.9 Segment witnesses](#i9-segment-witnesses-for-a-learned-sparse-top-k) · [I.10 Planning](#i10-runtime-planning-offsets-transitive-reduction-islands) · [I.11 Upstream contributions](#i11-merged-upstream-contributions) · [I.12 Language surface](#i12-language-surface)
-- [4. The language](#4-the-language) — [4.1 Lexical conventions](#41-lexical-conventions) · [4.2 Statements](#42-statement-grammar) · [4.3 Expressions](#43-expression-grammar) · [4.4 Numeric literals](#44-numeric-literals) · [4.5 The topology module](#45-the-topology-module) · [4.6 Seal loops](#46-seal-loops) · [4.7 The regress statement](#47-the-regress-statement-and-convergencecond) · [4.8 Execution engines](#48-two-execution-engines) · [4.9 Integrated modules](#49-the-integrated-modules)
-- [5. Implementation](#5-implementation) — [5.1 Workspace](#51-workspace) · [5.2 Persistence engine](#52-the-persistence-engine) · [5.3 Diagram module](#53-the-diagram-module) · [5.4 Attention](#54-the-attention-subsystem) · [5.5 Scheduled attention](#55-the-scheduled-attention-port) · [5.6 ML subsystem](#56-the-ml-subsystem) · [5.7 Runtime substrate](#57-the-runtime-substrate) · [5.8 aether-lang](#58-aether-lang) · [5.9 aether-kernel](#59-aether-kernel) · [5.10 aether-cli](#510-aether-cli) · [5.11 aether-gpu](#511-aether-gpu) · [5.12 Duplicate crates](#512-duplicate-crates) · [5.13 Complexity](#513-complexity-reference) · [5.14 Design decisions](#514-design-decisions)
+- [The certified library](#49-the-certified-library) — ten modules that return a certificate or a typed refusal; full derivations in the [documentation](https://teerthsharma.github.io/Aether-Lang/integrated/)
+- [4. The language](#4-the-language) — [4.1 Lexical conventions](#41-lexical-conventions) · [4.2 Statements](#42-statement-grammar) · [4.3 Expressions](#43-expression-grammar) · [4.4 Numeric literals](#44-numeric-literals) · [4.5 The topology module](#45-the-topology-module) · [4.6 Seal loops](#46-seal-loops) · [4.7 The regress statement](#47-the-regress-statement-and-convergencecond) · [4.8 Execution engines](#48-two-execution-engines) · [4.9 The certified library](#49-the-certified-library)
+- [5. Implementation](#5-implementation) — [5.1 Workspace](#51-workspace) · [5.2 Persistence engine](#52-the-persistence-engine) · [5.3 Diagram module](#53-the-diagram-module) · [5.4 Attention](#54-the-attention-subsystem) · [5.5 Scheduled attention](#55-scheduled-attention) · [5.6 ML subsystem](#56-the-ml-subsystem) · [5.7 Runtime substrate](#57-the-runtime-substrate) · [5.8 aether-lang](#58-aether-lang) · [5.9 aether-kernel](#59-aether-kernel) · [5.10 aether-cli](#510-aether-cli) · [5.11 aether-gpu](#511-aether-gpu) · [5.12 Duplicate crates](#512-duplicate-crates) · [5.13 Complexity](#513-complexity-reference) · [5.14 Design decisions](#514-design-decisions)
 - [6. Evaluation](#6-evaluation) — [6.1 Substrate](#61-measurement-substrate) · [6.2 Face index](#62-the-face-index-refactor) · [6.3 Scale ceiling](#63-measured-scale-ceiling) · [6.4 Closed form](#64-exactness-against-closed-form) · [6.5 Scheduled attention](#65-scheduled-attention)
 - [7. Verification](#7-verification) — [7.1 Test inventory](#71-test-inventory) · [7.2 Coverage gaps](#72-what-the-suite-does-not-cover) · [7.3 Mutation testing](#73-mutation-testing) · [7.4 Lean](#74-the-lean-formalization) · [7.5 CI](#75-continuous-integration)
 - [8. Negative results: what we got wrong](#8-negative-results-what-we-got-wrong)
@@ -93,9 +203,9 @@ The premise is therefore a narrow one: *some loops should terminate when the sha
 
 ### 1.3 Scope of the claims
 
-The repository contains 53,163 lines of Rust across 104 files in `crates/` and 11,637 lines of Lean in `Aether/`. Both are raw line counts including tests, comments and blank lines, each reproduced by the command in [Reproducing every number](#reproducing-every-number). An earlier revision stated 21,262 and 11,652; neither was reproducible, and the Rust figure was subsequently re-measured at 36,305 before this revision re-measured it again. A document that insists every number carries a command has to survive that rule being applied to itself.
+The repository contains 53,228 lines of Rust across 105 files in `crates/` and 11,637 lines of Lean in `Aether/`. Both are raw line counts including tests, comments and blank lines, each reproduced by the command in [Reproducing every number](#reproducing-every-number). An earlier revision stated 21,262 and 11,652; neither was reproducible, and the Rust figure was subsequently re-measured at 36,305 before this revision re-measured it again. A document that insists every number carries a command has to survive that rule being applied to itself.
 
-What is claimed: a bounded, exact $\mathbb{F}_2$ persistence engine for $H_0$, $H_1$ and $H_2$; exact diagram metrics and standard vectorisations; a language whose grammar carries topology as statement kinds; a `no_std` build for an embedded target; a kernel that compiles for `x86_64-unknown-none`; a Rust port of a Triton sparse-attention kernel whose schedules reproduce the original exactly; and ten modules ported from sibling work and merged upstream changes, each of which states what it certifies, what it only estimates, and when it refuses.
+What is claimed: a bounded, exact $\mathbb{F}_2$ persistence engine for $H_0$, $H_1$ and $H_2$; exact diagram metrics and standard vectorisations; a language whose grammar carries topology as statement kinds; a `no_std` build for an embedded target; a kernel that compiles for `x86_64-unknown-none`; a Rust port of a Triton sparse-attention kernel whose schedules reproduce the original exactly; and a certified library of ten modules, each of which states what it certifies, what it only estimates, and when it refuses.
 
 What is not claimed:
 
@@ -131,20 +241,20 @@ A separate status, **Hardware-gated**, was needed once the GPU backend arrived. 
 | Lazy witness complex | **Active** | `persistence.rs` test |
 | Bottleneck / Wasserstein / landscapes / images | **Active** | **17 tests** |
 | Sparse attention reference kernel | **Active** | **29 contracts** |
-| Scheduled attention (Triton port) | **Active** | **16 tests** |
+| Scheduled attention (Rust rebuild of the Triton kernel) | **Active** | **16 tests** |
 | Same-budget random and oracle schedules | **Active** | 9 tests, `ablation_baselines.rs` |
 | Scheduled-attention backward pass | **Active** | 5 tests, central finite differences, `attention_backward.rs`; `aether_core::attention` itself is forward only |
 | Activation derivatives, softmax-layer gradient | **Active** | 7 tests, `activation_contracts.rs` |
-| Linking number, writhe, knot determinant (`linking`, §I.1) | **Active** | 18 tests |
-| Rounding certificates (`certify`, §I.2) | **Active** | 17 tests, checked against exact `i128` arithmetic |
-| Planar arrangement invariants (`arrangement`, §I.3) | **Active** | 18 tests |
-| Resolvent attention operator (`resolvent`, §I.4) | **Active** | 17 tests mirroring 18 Lean statements proved in the source repository |
-| Orbit-partition bounds (`orbit`, §I.5) | **Active** | 15 tests |
-| Injectivity, symmetry, dimension, Lyapunov (`monodromy`, §I.6) | **Active** | 18 tests against closed-form answers |
-| Cell tracking with division certificate (`track`, §I.7) | **Active** | 15 tests |
-| Coupling operator, fixed point, islands (`coupling`, §I.8) | **Active** | 18 tests |
-| Segment witnesses for sparse top-k (`kvwitness`, §I.9) | **Active** | 15 tests; no quality evaluation |
-| Offset planning, transitive reduction, islands (`planner`, §I.10) | **Active** | 15 tests |
+| Linking number, writhe, knot determinant (`linking`, [`linking` docs](https://teerthsharma.github.io/Aether-Lang/integrated/linking/)) | **Active** | 18 tests |
+| Rounding certificates (`certify`, [`certify` docs](https://teerthsharma.github.io/Aether-Lang/integrated/certify/)) | **Active** | 17 tests, checked against exact `i128` arithmetic |
+| Planar arrangement invariants (`arrangement`, [`arrangement` docs](https://teerthsharma.github.io/Aether-Lang/integrated/arrangement/)) | **Active** | 18 tests |
+| Resolvent attention operator (`resolvent`, [`resolvent` docs](https://teerthsharma.github.io/Aether-Lang/integrated/resolvent/)) | **Active** | 17 tests, each mirroring a Lean-proved identity |
+| Orbit-partition bounds (`orbit`, [`orbit` docs](https://teerthsharma.github.io/Aether-Lang/integrated/orbit/)) | **Active** | 15 tests |
+| Injectivity, symmetry, dimension, Lyapunov (`monodromy`, [`monodromy` docs](https://teerthsharma.github.io/Aether-Lang/integrated/monodromy/)) | **Active** | 18 tests against closed-form answers |
+| Cell tracking with division certificate (`track`, [`track` docs](https://teerthsharma.github.io/Aether-Lang/integrated/track/)) | **Active** | 15 tests |
+| Coupling operator, fixed point, islands (`coupling`, [`coupling` docs](https://teerthsharma.github.io/Aether-Lang/integrated/coupling/)) | **Active** | 18 tests |
+| Segment witnesses for sparse top-k (`kvwitness`, [`kvwitness` docs](https://teerthsharma.github.io/Aether-Lang/integrated/kvwitness/)) | **Active** | 15 tests; no quality evaluation |
+| Offset planning, transitive reduction, islands (`planner`, [`planner` docs](https://teerthsharma.github.io/Aether-Lang/integrated/planner/)) | **Active** | 15 tests |
 | Scale past 32 points | **Active** | **7 tests** |
 | `no_std` on a real embedded target | **Active** | builds `thumbv7m-none-eabi` |
 | Kernel compiles bare metal | **Active** | builds `x86_64-unknown-none` |
@@ -167,18 +277,18 @@ A separate status, **Hardware-gated**, was needed once the GPU backend arrived. 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
   cargo fmt --all -- --check                                   clean
   cargo clippy -D correctness -D suspicious                     clean
-  cargo test --workspace --exclude aether-kernel   427 passed 80 ignored
+  cargo test --workspace --exclude aether-kernel   428 passed 80 ignored
   cargo build -p aether-kernel --target x86_64-unknown-none        ok
   cargo build -p aether-core  --target thumbv7m-none-eabi          ok
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-  Rust lines (crates/)                                        53,163
+  Rust lines (crates/)                                        53,228
   Lean lines (Aether/)              11,637   theorems 48   sorry 0
   Test suites gated in CI                                          7
   Claims withdrawn during audit                                    6
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 ```
 
-The 427 passing tests divide as: `aether-core` 330 (56 unit, 274 integration, of which 166 belong to the ten ported modules), `aether-lang` 63 (32 unit, 23 for the module bindings, 8 for the tolerance seal loop, literals and grouping), `aether-gpu` 31 that need no adapter, `aegis-core` 2, `aether-cli` 1.
+The 428 passing tests divide as: `aether-core` 330 (56 unit, 274 integration, of which 166 belong to the certified library), `aether-lang` 64 (32 unit, 23 for the module bindings, 8 for the tolerance seal loop, literals and grouping, 1 running the opening program), `aether-gpu` 31 that need no adapter, `aegis-core` 2, `aether-cli` 1.
 
 ### 1.6 Reading guide
 
@@ -962,427 +1072,6 @@ where $d$ is the recorded drift and the middle condition ranges over consecutive
 
 The derivations in this section are also rendered with figures on the [documentation site](https://teerthsharma.github.io/Aether-Lang/), whose [`docs/theory.md`](docs/theory.md) collects the theory in one page.
 
-## Integrated mathematics from sibling work
-
-Ten modules in `aether-core` are ports: of the author's sibling research repositories (nerve, tangle, separatrix, planimeter, resolvent, caustic, branchcut, monodromy, cleave, sigmoid) and of changes the author contributed upstream to vLLM, XNNPACK, TensorFlow and MuJoCo. Each subsection below gives the definitions and results the module implements, separates what it **certifies** from what it only **estimates**, lists the conditions under which it **refuses**, and names the implementing functions. The source of truth is each module's own doc comment, which also names the upstream file every item was ported from. The modules are rendered with figures at [teerthsharma.github.io/Aether-Lang/integrated/](https://teerthsharma.github.io/Aether-Lang/integrated/).
-
-| § | Module | Object | Certified or decided | Estimated only | Source | Tests |
-|---|---|---|---|---|---|---:|
-| I.1 | `linking` | two closed polygons in $\mathbb{R}^3$ | the integer linking number, under a first-order error bound | writhe | nerve, tangle | 18 |
-| I.2 | `certify` | scores with forward-error radii | top-$k$ set, argmin, threshold side | — | separatrix | 17 |
-| I.3 | `arrangement` | planar segment arrangement | pieces, enclosed faces, $\chi$ at a stable snap window | that the window is the intended one | planimeter | 18 |
-| I.4 | `resolvent` | one causal attention head with three switches | three corners, each exact | behaviour strictly between corners | resolvent (Lean) | 17 |
-| I.5 | `orbit` | fibres of a many-to-one map | five one-sided bounds | — | caustic, branchcut | 15 |
-| I.6 | `monodromy` | sampled maps and point clouds | collision exhibited; rotation order; fractal predicate on an interval | the ratio, the dimension, the Lyapunov spectrum | monodromy | 18 |
-| I.7 | `track` | point detections per frame | optimal linking; zero-violation division certificate | whether a fork is a mitosis | cleave | 15 |
-| I.8 | `coupling` | action-conditioned affine dynamics | contraction, fixed point, rollout bound for the autonomous map | the fitted residual level; the directional estimate | sigmoid | 18 |
-| I.9 | `kvwitness` | a learned sparse top-$k$ row | disjointness, distinctness and segment coverage of the witness set | any quality effect | vllm-project/vllm#47942 | 15 |
-| I.10 | `planner` | tensor lifetimes, DAGs, incidence graphs | sound offsets, exact transitive reduction, canonical islands | arena size is greedy | XNNPACK, TensorFlow, MuJoCo | 15 |
-
-`orbit` and `track` require the `alloc` feature; the other eight build wherever `aether-core` does. All 166 tests in these ten suites run in the CI `test` job. None is in the named `invariants` job, and none is covered by the mutation harnesses of §7.3.
-
-### I.1 Gauss linking number, writhe and knot determinant
-
-**Linking number in closed form.** For disjoint closed curves $A$, $B$ the Gauss integral
-
-$$
-\mathrm{Lk}(A,B) \;=\; \frac{1}{4\pi}\oint_A\oint_B \frac{(r_A - r_B)\cdot(dr_A \times dr_B)}{\lVert r_A - r_B\rVert^3}
-$$
-
-is an integer and an isotopy invariant. Over two polygons it splits into segment pairs. For a segment $p_1 \to p_2$ of $A$ and $p_3 \to p_4$ of $B$, with $r_{ij} = p_j - p_i$ and $\hat r$ the unit direction, each term is the signed area of the spherical quadrilateral swept by the Gauss map, fanned into two triangles and evaluated by the Van Oosterom–Strackee formula:
-
-$$
-\Omega(a,b,c) \;=\; 2\,\operatorname{atan2}\bigl(a\cdot(b\times c),\ 1 + a\cdot b + a\cdot c + b\cdot c\bigr),
-\qquad
-\omega_{ij} \;=\; -\bigl[\Omega(\hat r_{13}, \hat r_{14}, \hat r_{24}) + \Omega(\hat r_{13}, \hat r_{24}, \hat r_{23})\bigr],
-$$
-
-$$
-\widehat{\mathrm{Lk}} \;=\; \frac{1}{4\pi}\sum_{i}\sum_{j}\omega_{ij},
-\qquad
-\mathrm{Wr}(A) \;=\; \frac{2}{4\pi}\sum_{i<j,\ \text{non-adjacent}}\omega_{ij}.
-$$
-
-There is no quadrature term. Writhe is the same integral of one curve against itself; it depends on the embedding, is not an invariant, and is never rounded.
-
-**Error bound.** The code carries a first-order bound in the unit roundoff $u = 2^{-53}$, assuming IEEE-754 binary64 round-to-nearest, a correctly rounded `sqrt` and an `atan2` accurate to 2 ulp, and treating the vertices as exact. Each unit direction lies within $7u$ of the exact one; each triangle's numerator $N$ and denominator $D$ lie within $K = 128u$ of theirs; if the box of half-width $K$ about $(D, N)$ misses the branch cut $\lbrace N = 0,\ D \le 0\rbrace $ and $\rho = \operatorname{hypot}(N, D) > 2K$, the triangle's error is $e = 2\bigl(\sqrt2 K/(\rho - \sqrt2 K) + 8u\bigr)$; summation adds at most $\gamma_n\sum\lvert\omega_{ij}\rvert$ with $\gamma_n = nu/(1 - nu)$ (Higham, ch. 4). In total
-
-$$
-B \;=\; \frac{\sum_{ij} e_{ij} + \gamma_n \sum_{ij}\lvert\omega_{ij}\rvert}{4\pi} \;+\; 2u\,\bigl\lvert\widehat{\mathrm{Lk}}\bigr\rvert .
-$$
-
-**Certified.** `certify` rounds $\widehat{\mathrm{Lk}}$ to the integer $n$ only when $\lvert\widehat{\mathrm{Lk}} - n\rvert + B < \tfrac12$, so that $[\widehat{\mathrm{Lk}} - B,\ \widehat{\mathrm{Lk}} + B]$ contains no other integer. `Linked { lk }` means $\mathrm{Lk} = lk \ne 0$, so no isotopy keeping the curves disjoint separates them. `ZeroLinking` proves $\mathrm{Lk} = 0$ and certifies nothing further — the Whitehead link has $\mathrm{Lk} = 0$ and is not split — so no verdict reads "unlinked". `Undetermined` returns the estimate and claims nothing. The certificate is conditional on the first-order bound; it is not interval arithmetic. The source rounded on measured evidence instead (deviation from the integer at most `2.16e-13` at 1024 segments).
-
-**Knot determinant.** For a diagram crossing with over-arc $o$, incoming under-arc $a$ and outgoing under-arc $b$, the Alexander matrix rows at $t = -1$ are $(-1, -1, 2)$ and $(1, 1, -2)$ for positive and negative crossings — exact negatives — so $\lvert\Delta(-1)\rvert$ is the absolute determinant of any $(c-1)\times(c-1)$ minor and no crossing sign is needed. The minor is evaluated exactly in `i128` by Bareiss elimination, over a projection along $z$ retried across eight fixed reorientations when not generic. The determinant is an invariant but not a complete one: $4_1$ and $5_1$ both give 5, and a value of 1 does not certify the unknot. The projection uses the source's absolute tolerance `1e-9`, which is not scale-free.
-
-**Refusals** (`LinkingError`, never a number): a curve with fewer than three vertices; a non-finite coordinate; two segments that meet or come within rounding of meeting — the branch-cut condition, which involves no length scale; a difference vector whose squared length is not a normal binary64 number; no generic projection among the eight reorientations.
-
-**Implementation.** `linking.rs` → `fn linking_number`, `GaussLinking::certify`, `fn writhe`, `fn knot_determinant`. **Evidence.** `tests/linking.rs`, 18 tests: Hopf, torus and Whitehead ground truth, the sign against an independent midpoint quadrature, the rounding rule and every refusal.
-
-### I.2 Rounding certificates for top-k, argmin and threshold decisions
-
-When two candidates lie closer together than the rounding of the kernel that scored them, the arithmetic rather than the data chose the answer. `certify` proves that a decision is the one exact arithmetic returns on the stored inputs, or refuses and names the indices it cannot separate.
-
-**Error model.** With unit roundoff $u$ ($2^{-11}$ binary16, $2^{-24}$ binary32, $2^{-53}$ binary64), every normal-result operation satisfies $\mathrm{fl}(a \circ b) = (a \circ b)(1 + \delta)$ with $\lvert\delta\rvert \le u$, and a product of at most $n$ such factors lies in $[1 - \gamma_n, 1 + \gamma_n]$ (Higham, Lemma 3.1):
-
-$$
-\gamma_n \;=\; \frac{nu}{1 - nu}\ \ (\text{rounded upward}),
-\qquad
-\eta_d \;=\; 4(d+2)\,\sigma_{\min},
-$$
-
-where $\eta_d$ absorbs subnormal results and $\sigma_{\min}$ is the smallest subnormal.
-
-**Radii.** For stored vectors $x, q$ of width $d$ and the exact value $s$ of the named score:
-
-$$
-\text{Gram, } D = \mathrm{fl}\bigl((\lVert q\rVert^2 + \lVert x\rVert^2) - 2\langle x,q\rangle\bigr):\quad
-\lvert D - s\rvert \le \gamma_{d+2}\Bigl(\lVert x\rVert^2 + \lVert q\rVert^2 + 2\sum_l \lvert x_l\rvert\lvert q_l\rvert\Bigr) \le \gamma_{d+2}\bigl(\lVert x\rVert + \lVert q\rVert\bigr)^2,
-$$
-
-$$
-\text{direct, } D = \mathrm{fl}\Bigl(\sum_l \mathrm{fl}(q_l - x_l)^2\Bigr):\quad
-\lvert D - s\rvert \le \gamma_{d+2}\, s \le \frac{\gamma_{d+2}}{1 - \gamma_{d+2}}\, D .
-$$
-
-The direct bound counts $d + 2$ roundings because the rounded difference enters squared; the source counted $d + 1$ (§8.10). Each radius is then inflated to $R \leftarrow \mathrm{next\_up}\bigl(R\,(1 + \gamma_{d+2}^{(64)} + 8u_{64}) + \eta_d\bigr)$ to absorb its own binary64 evaluation.
-
-**Certificate.** With $\lvert D_i - s_i\rvert \le R_i$ for every $i$ and $T$ the $k$ smallest entries of $D$, $T$ is certified when
-
-$$
-\max_{i\in T}\,(D_i + R_i) \;<\; \min_{j\notin T}\,(D_j - R_j),
-$$
-
-and then $T$ is the top-$k$ set of every vector in the box $\prod_i [D_i - R_i,\ D_i + R_i]$, hence of the exact scores, hence of any other evaluation the bound covers (reduction order, blocking, fused multiply–add, thread count). The argmin is $k = 1$; the largest-$k$ set negates the scores. A threshold $t$ is decided per score: **above** if $D_i - R_i > t$, **below** if $D_i + R_i < t$, **undetermined** otherwise. Every endpoint is rounded outward by one ulp before comparison. Order within $T$ is certified only on request.
-
-**Certified and not.** Certified: the rounding of the named formula, on the stored inputs, in the declared precision, did not choose this set, index or side. Not certified: that the inputs are correct — an embedding from a binary16 forward pass carries error orders of magnitude above the binary32 rounding certified here — or anything about radii supplied from outside `enclose_scores`. A refusal states that this enclosure does not decide the boundary, not that the exact answer differs.
-
-**Refusals.** `BoundaryUndetermined` (carries the extreme pair and every index whose interval crosses the boundary), `NonFiniteInput`, `BoundVacuous` ($nu > 1/2$, or $\gamma \ge 1$ in the direct kernel's relative form, where the radius would be negative and certify everything), `RangeUnsafe` ($(\lVert q\rVert + \max_j\lVert x_j\rVert)^2$ exceeds the working format), and `Usage` ($k \notin (0, n)$, radii of the wrong length, a negative radius).
-
-**Implementation.** `certify.rs` → `fn unit_roundoff`, `fn gamma`, `fn eta`, `fn enclose_scores`, `fn certified_topk`, `fn certified_argmin`, `fn certified_threshold`. **Evidence.** `tests/certify.rs`, 17 tests, including `no_certified_topk_contradicts_exact_arithmetic_on_adversarial_near_ties` (every certified set checked against exact `i128` arithmetic), `direct_radius_counts_the_rounded_difference_twice` and `the_boundary_pair_rule_is_a_false_theorem_and_the_refusal_names_the_blocker`.
-
-### I.3 Certified integer invariants of a planar arrangement
-
-**Counting.** For a plane graph with $V$ vertices, $E$ edges, $C$ components and $F$ faces including the unbounded one, Euler's formula $V - E + F = 1 + C$ gives
-
-$$
-\text{faces} \;=\; F - 1 \;=\; E - V + C,
-\qquad
-\chi \;=\; V - E \;=\; \text{pieces} - \text{faces},
-$$
-
-so the enclosed faces are the first Betti number of the 1-complex. Given a correct, deduplicated edge list this is exact integer arithmetic; the difficulty lies entirely in producing that edge list.
-
-**The snap rule.** Bitwise-equal coordinates are one point. With $M = \max\lvert\text{coordinate}\rvert$ and the representability floor $\delta = 4096\cdot 2^{-52}M$, the separation spectrum is
-
-$$
-S \;=\; \lbrace \delta\rbrace  \,\cup\, \lbrace \,w : w \text{ an EMST edge weight},\ w > \delta\,\rbrace  \,\cup\, \lbrace \,d(p,s) > \delta : p \text{ not an endpoint of segment } s\,\rbrace  \;=\; \lbrace s_0 < s_1 < \dots < s_K\rbrace .
-$$
-
-Single-linkage partitions change only at Euclidean-MST weights (Gower & Ross 1969), so the partition is constant on each $[s_k, s_{k+1})$. A window is a candidate when $s_{k+1}/s_k \ge \rho = 10$; genuine gaps are tried in decreasing ratio, the merge-nothing window last, at most 4 windows, skipping any whose partition has a cluster above 16 points. Clusters are the components of EMST edges of weight at most $t_{\mathrm{below}}$, each represented by its lexicographically least point, and the reported radius is the log-midpoint $\sqrt{t_{\mathrm{below}}\,t_{\mathrm{above}}}$.
-
-**Checked in each window.** Margin: $t_{\mathrm{above}} > 64\cdot2^{-52}M$. P1: no segment has both endpoints in one cluster. P2: every vertex–non-incident-edge distance is exactly 0 (which subdivides the edge) or at least $t_{\mathrm{above}}$. P3: no two edges without a shared vertex properly cross. A margin or P1 failure moves to the next window; a P2 or P3 failure ends the run, because a finer window would read the near miss as a clean miss. No intersection point is ever computed: a square with both diagonals drawn as two crossing segments refuses, and the same figure drawn as four half-diagonals meeting at a written centre has four faces.
-
-**Certified:** the partition is constant on $[t_{\mathrm{below}}, t_{\mathrm{above}})$ with ratio at least $\rho$, the preconditions were checked, and the three integers are exact for the resulting graph. **Not certified:** that the identification is the one the author intended — the window is *stable*, not *right* — or that it is unique, since the first passing window wins. $\rho$, the window count, the floor and the cluster cap are policy constants, not theorems.
-
-**Refusals.** `NonFinite`, `InvalidGrid`, `NoGeometry`, `TooManyVertices`, `TooManyPairs`, `NoStableScale`, `MarginTooSmall`, `EdgeCollapsed` (P1), `VertexNearEdge` (P2), `EdgesCross` (P3).
-
-**Implementation.** `arrangement.rs` → `fn arrange`, `ArrangementConfig`, `Chi`, constants `RHO`, `CAND_MAX`, `FLOOR_ULPS`, `CLUSTER_MAX`, `MARGIN_ULPS`. **Evidence.** `tests/arrangement.rs`, 18 tests: closed-form figures, the snap-window boundaries, invariance under rigid motion, scaling, permutation and reversal, and each refusal path.
-
-### I.4 The resolvent operator: three attention corners of one head
-
-For a causal sequence of length $n$, queries and keys of width $d$, gate magnitudes $u_k$ and phases $\theta_k$, and switches $(\beta, \mathsf{qk}, g)$:
-
-$$
-s_{ij} = \frac{\langle q_i, k_j\rangle}{\sqrt d},\quad
-m_k = \operatorname{clamp}\bigl(1 + g(u_k - 1),\,0,\,1\bigr),\quad
-a_k = m_k\,e^{\mathrm{i}\,g\theta_k},\quad
-G_{ij} = \prod_{k=j+1}^{i} a_k,\quad
-Z_i = \sum_{j\le i} \lvert G_{ij}\rvert\, e^{\mathsf{qk}\, s_{ij}},
-$$
-
-$$
-W_{ij} \;=\; \frac{G_{ij}\, e^{\mathsf{qk}\, s_{ij}}}{Z_i^{\beta}}\ \ (j \le i),\qquad W_{ij} = 0\ \ (j > i),\qquad O_i = \sum_{j\le i} W_{ij} V_j ,
-$$
-
-with $G_{ii} = 1$, the empty product. Three settings of the switches are three familiar operators:
-
-$$
-\underbrace{\beta = 1,\ \mathsf{qk} = 1,\ g = 0}_{\text{softmax attention}}:\ W_{ij} = \frac{e^{s_{ij}}}{\sum_{j'\le i} e^{s_{ij'}}},
-\qquad
-\underbrace{\beta = 0,\ \mathsf{qk} = 1,\ g = 0}_{\text{unnormalised kernel}}:\ W_{ij} = e^{s_{ij}},
-\qquad
-\underbrace{\beta = 0,\ \mathsf{qk} = 0,\ g = 1}_{\text{path product}}:\ W_{ij} = G_{ij}.
-$$
-
-**The path-product corner is a resolvent.** With values $b$ ($b_0 = 0$) its readout is the chain $y_i = a_i y_{i-1} + b_i$, which is forward substitution in $(I - A)y = b$ with $A_{i,i-1} = a_i$ strictly lower triangular. $A$ is nilpotent, so the Neumann series terminates:
-
-$$
-G \;=\; (I - A)^{-1} \;=\; \sum_{k<n} A^{k}.
-$$
-
-The $\beta = 0$ kernel corner is not linear attention in the $O(n)$ sense: it is the unnormalised exponential kernel, with no finite feature map, and costs what the softmax corner costs.
-
-**Proved, in the source repository's Lean 4, and mirrored as tests here:** `three_corners_containment`, `corners_are_distinct`, `softmax_row_sum_one`, `beta_one_row_is_one`, `gate_zero_beta_zero_is_linear_attention`, `gate_zero_beta_zero_row_not_one`, `pathProd_abs`, `pathProd_eq_zero_iff`, `prefix_logit_mask_restated`, `no_prefix_scan_represents_a_zero_gate`, `bedM_gate_exact`, `negative_draw_is_on_the_band`, `constant_phase_gate_is_rope`, `cumulative_phase_is_separable`, `PhaseH.scalar_gate_commutes`, `CEQ.V15.chain_path_product`, `CEQ.V15Fork.chain_eq_sum`, `CEQ.Nilpotent.occupancy_is_exact_inverse` — among them $\lvert G_{ij}\rvert = \prod m_k \le 1$, $G_{ij} = 0$ iff some $m_k = 0$ on the path, rows summing to 1 exactly at $\beta = 1$, a constant-phase unit gate being the rotary embedding $e^{\mathrm{i}\omega(i-j)}$, and $\sum_{k<n}A^k$ being the exact two-sided inverse of $I - A$. These proofs live in `resolvent/lean/CEQ/`, not in this repository's `Aether/`, and are not built by this repository's CI. **Tested only:** the complex-gate chain identity, $G(I - A) = I$ as one matrix statement, every property of the binary64 evaluation, and nothing for $\beta$ strictly between 0 and 1.
-
-**Evaluation.** $Z_i^\beta$ is taken in the log domain, $W_{ij} = G_{ij}\exp\bigl(\mathsf{qk}\, s_{ij} - \beta\log Z_i\bigr)$, with $\log Z_i$ a max-shifted sum over the live entries, which keeps the $\beta = 1$ corner finite ($\lvert W_{ij}\rvert \le 1$) at logits of $\pm10^4$ where the dense form overflows. All-masked rows cannot occur, since every row has the live diagonal $G_{ii} = 1$. The path product is evaluated as a product, never through a logarithm, because $e^{C_i - C_j}$ can never be zero.
-
-**Refusals.** `NonFinite` for any non-finite query, key, gate magnitude, phase or switch, an overflowing phase $g\theta_k$ or an overflowing logit $\mathsf{qk}\, s_{ij}$. Away from $\beta = 1$ a live entry beyond the f64 range reads $\pm\infty$ — the value, not a failure — and never NaN.
-
-**Implementation.** `resolvent.rs` → `fn blend`, `fn gate`, `fn path_product`, `fn operator`, `fn readout`, `fn chain_label`. **Evidence.** `tests/resolvent.rs`, 17 tests: the softmax corner against the reference to 1e-14, the kernel and path-product corners bitwise, each mirrored Lean identity, causality, and finiteness at logits beyond 1e4.
-
-### I.5 Orbit partitions and the five bounds they certify
-
-A map $f : E \to A$ on $E = \lbrace 0,\dots,n-1\rbrace $ partitions $E$ into its fibres, $e_1 \sim e_2 \iff f(e_1) = f(e_2)$ — $H_0$ of that equivalence relation — called *orbits*, $m$ of them. Let $R : E \to A$ be the unknown ground relation, assumed **injective**, $\mathrm{err}(f) = \lvert\lbrace e : f(e) \ne R(e)\rbrace \rvert$, $G = R(E)$ the set of correct values, $m^\ast = \lvert f(E) \cap G\rvert$, $S = \lbrace e : \lvert[e]\rvert > 1\rbrace $ the certified set, $b$ the number of orbits of size at least two, $b_{\mathrm{adm}}$ those whose shared value lies in $G$, and $S^\ast = S \cup \lbrace e : f(e) \notin G\rbrace $. For every injective $R$ consistent with the observation:
-
-$$
-\textbf{1 (error floor):}\quad \mathrm{err}(f) \;\ge\; n - m^\ast \;\ge\; n - m ;
-$$
-
-$$
-\textbf{2 (pooling recovery):}\quad \Pr\bigl[h(f(e)) = e\bigr] \;\le\; \frac{1}{k}\quad \text{on an orbit of size } k,\ \text{for any } h ;
-$$
-
-$$
-\textbf{3 (join recovery):}\quad \frac{\lvert\lbrace e : h(f_1(e),\dots,f_T(e)) = e\rbrace \rvert}{n} \;\le\; \frac{m_{\mathrm{join}}}{n} ;
-$$
-
-$$
-\textbf{4 (precision of } S\textbf{):}\quad \frac{\lvert S \cap \mathrm{wrong}\rvert}{\lvert S\rvert} \;\ge\; \frac{\lvert S\rvert - b_{\mathrm{adm}}}{\lvert S\rvert} \;\ge\; \frac{n - m}{\lvert S\rvert} ;
-$$
-
-$$
-\textbf{5 (recall of } S^\ast\textbf{):}\quad \frac{\lvert S^\ast \cap \mathrm{wrong}\rvert}{\lvert\mathrm{wrong}\rvert} \;\ge\; \frac{n - m^\ast}{n}\quad \text{whenever } \mathrm{err}(f) \ge 1 .
-$$
-
-*Proofs.* (1) A map constant on an orbit agrees with an injective $R$ on at most one member, so an orbit of size $s$ holds at least $s - 1$ errors and $\sum(s_i - 1) = n - m$; the correct set $C$ has $f|_C$ injective into $f(E) \cap G$, so $\lvert C\rvert \le m^\ast$. (2) $h \circ f$ is constant on the orbit. (3) $h$ is constant on each block of the join, the common refinement, which is at least as fine as every $f_t$. (4) Every error of (1) lies in $S$, a singleton contributing $s - 1 = 0$, and an orbit whose value is not in $G$ has no correct member; since $\lvert S\rvert \ge 2b$ the floor is at least $\tfrac12$ whenever $S$ is non-empty. (5) The $n - m^\ast$ errors of (1) all lie in $S^\ast$ and $\lvert\mathrm{wrong}\rvert \le n$. $\square$ Every bound is attained. No *uniformly* positive recall floor exists (caustic's Theorem 7): with $f$ a bijection onto $G$, the truths $R = f$ and $R = f\circ\sigma$ for a fixed-point-free $\sigma$ give the same observation with recall 1 and 0.
-
-**Hypothesis and refusal.** Injectivity of $R$ is the caller's assertion and cannot be decided from the partition; its one visible violation, $\lvert G\rvert < n$, makes `admissible_distinct` and `admissible_collapsed_blocks` return `None`. Every bound returns `None` on counts no partition can produce ($n = 0$, $m \notin [1, n]$, $m^\ast > n$, $k = 0$, an empty $S$ whose precision is undefined, and so on). The certificate is one-sided: it can prove a map wrong and never proves one right. The source's measurements on language models are properties of those models and are not restated.
-
-**Implementation.** `orbit.rs` → `Partition::{from_map, from_edges, join}`, `fn orbit_error_bound`, `fn admissible_error_bound`, `fn certified_error_floor`, `fn pooling_recovery_bound`, `fn join_recovery_bound`, `fn certified_precision_bound`, `fn admissible_precision_bound`, `fn recall_floor`. **Evidence.** `tests/orbit.rs`, 15 tests pinning each inequality on seeded and exhaustive instances.
-
-### I.6 Injectivity, symmetry, dimension and sensitivity from sampled geometry
-
-The standard certificate of invertibility, $\det DF(x) \ne 0$ at every sample, establishes a local diffeomorphism and nothing more; everywhere-unramified maps that are not injective exist. `monodromy` decides injectivity from pairs of points and differentiates nothing. Its Lyapunov estimator is the stated exception: it consumes $DF$ along an orbit.
-
-**Injectivity.** Over a sample $X$,
-
-$$
-\lambda(F;X) = \min_{p\ne q\in X}\frac{\lVert F(p) - F(q)\rVert}{\lVert p - q\rVert},
-\qquad
-\rho_{\mathrm{free}} = \frac{\lambda(F;X)}{\operatorname{median}_{p\ne q}\ \lVert F(p) - F(q)\rVert/\lVert p - q\rVert},
-\qquad
-\ln\tilde\lambda(n) = a + b\ln n .
-$$
-
-A sampled $\lambda$ is an **upper** estimate of the infimum, since a minimum over a subset is never below the minimum over the whole. **Decided:** only "collision exhibited", with the witnessing pair; the complement is "no collision at this sampling", never "injective". Rule: fewer than 4 sizes or a ratio of largest to smallest size below 8, undecided; largest size at least 400, collision iff $\rho_{\mathrm{free}} < 8.8\times10^{-3}$; otherwise collision iff $b < -0.25$ and $b + 3\,\mathrm{se}(b) < 0$.
-
-**Symmetry.** Defects that vanish exactly on the symmetry set:
-
-$$
-D_{\mathrm{ch}}(X, gX) = \operatorname{mean}_{p\in X} d(p, gX) + \operatorname{mean}_{q\in gX} d(q, X),
-\qquad
-D_{\mathrm{PH}}(g;X) = \max_{k\in\lbrace 0,1\rbrace } d_B\bigl(\mathrm{PH}_k(X),\ \mathrm{PH}_k(X\cup gX)\bigr),
-$$
-
-$$
-E(g;F,X) = \max_{x\in X}\lVert F(gx) - gF(x)\rVert_\infty,
-\qquad
-s(n) = \frac{\sum_{m\ge1} P(mn)}{\sum_{k\ge1} P(k)},\quad P = \bigl\lvert\mathrm{DFT}(\delta - \bar\delta)\bigr\rvert^2,
-$$
-
-with $\delta(\theta) = D_{\mathrm{ch}}(X, R_\theta X)$ on a uniform angular grid about the centroid. Comparing $\mathrm{PH}(X)$ with $\mathrm{PH}(gX)$ would be useless — Rips persistence depends only on the distance matrix, so it is identical for every isometry — and the union is what moves. **Decided:** the rotation order $n$, the largest candidate with $s(n) \ge 0.85$, kept only if the defect at 360°/$n$ is within 2 mean nearest-neighbour spacings, with multiples promoted when the off-grid defect falls below half the profile median; reflections when an order above 1 exists and the reflection profile dips at least 0.9 as deep. Sound, not complete: order 1 means "nothing found", not "no symmetry".
-
-**Dimension.** Schweinhart's persistent-homology dimension, which at degree 0 is Steele's theorem on the $\alpha$-weighted minimum spanning tree:
-
-$$
-T_\alpha(X) = \sum_{\text{finite } H_0 \text{ bars}} (d_i - b_i)^\alpha,
-\qquad
-\mathbb{E}\,T_\alpha(X_n) \sim n^{(d-\alpha)/d},
-\qquad
-\ln T_\alpha(n) = c + s\ln n,\quad \hat d = \frac{\alpha}{1 - s},\quad 0 < \alpha < d .
-$$
-
-The interval is the image of $s \pm 1.96\,\mathrm{se}(s)$. **Decided:** Mandelbrot's predicate $d_H > d_{\mathrm{top}}$, only when the whole interval lies on one side.
-
-**Sensitivity.** The Lyapunov spectrum by QR (Benettin):
-
-$$
-Q_0 = I,\quad J_k Q_{k-1} = Q_k R_k\ \ \bigl((R_k)_{ii} > 0\bigr),\qquad
-\lambda_i = \frac{1}{N\,dt}\sum_{k=1}^{N}\ln (R_k)_{ii},\qquad
-D_{KY} = j + \frac{\sum_{i\le j}\lambda_i}{\lvert\lambda_{j+1}\rvert},
-$$
-
-with $j$ the largest index with $\sum_{i\le j}\lambda_i \ge 0$. **Decided:** nothing; spectrum and $D_{KY}$ are estimates.
-
-**Refusals.** Fewer than two points or no distinct pair; more than 4,000 points; an empty size list or zero repeats; a non-finite coordinate; zero diameter; a grid yielding fewer than four samples; $\alpha$ not positive and finite; fewer than three draws with positive total persistence; a sampler that delivers one size for every request; an empty Jacobian sequence; $dt \le 0$; a non-finite spectrum passed to `kaplan_yorke_dimension`. The failure regimes of each decision are collected in §9.
-
-**Implementation.** `monodromy.rs` → `fn free_ratio`, `fn lower_ratio_witness`, `fn ratio_scaling`, `fn collision_certificate`, `fn chamfer_defect`, `fn persistence_defect`, `fn equivariance_defect`, `fn recover_cyclic`, `fn recover_dihedral`, `fn alpha_total_persistence`, `fn ph_dimension`, `fn is_fractal`, `fn lyapunov_spectrum`, `fn map_spectrum`, `fn kaplan_yorke_dimension`; the decision thresholds are the source's, not re-fitted. **Evidence.** `tests/monodromy.rs`, 18 tests scored against closed-form answers: $x \mapsto x^2$ collides across $\lbrace p, -p\rbrace $; the exponential map on two periods collides although $\det DF = e^{2x} > 0$; $x \mapsto x^3$ is cleared where étale and read as a collision at its critical point; regular polygons recover $C_n$ at any position and scale; Gaussian clouds get no group; line, square, circle and torus give dimensions within 0.1, 0.15, 0.1 and 0.2 of 1, 2, 1, 2; the logistic map at $r = 4$ gives $\ln 2$ within 0.01; its period-2 orbit at $r = 3.2$ gives $\tfrac12\ln 0.16$ within $10^{-3}$; Hénon matches Sprott's $+0.41922$, $-1.62319$ and $D_{KY} = 1.25827$ within 0.01 each.
-
-### I.7 Cell tracking by assignment and min-cost circulation
-
-**Metric.** With voxel spacing $s = (s_z, s_y, s_x)$, $d(p,q) = \lVert\operatorname{diag}(s)(p - q)\rVert_2$; on the benchmark grid `SCALE_UM` $= (1.625, 0.40625, 0.40625)$ z is four times coarser than y and x.
-
-**Linking.** Frames $A$ ($n_A$ points) and $B$ ($n_B$ points) are linked by the optimal assignment on a padded matrix with gate $r$:
-
-$$
-C_{ij} = d(a_i, b_j)\ (j < n_B),\qquad C_{ij} = r\ (n_B \le j < n_B + n_A),\qquad
-E = \bigl\lbrace (i, \sigma^\ast(i)) : \sigma^\ast(i) < n_B,\ d(a_i, b_{\sigma^\ast(i)}) \le r\bigr\rbrace .
-$$
-
-The dummy columns price ending a track at exactly $r$, so $E$ is a maximum-weight matching under weights $r - d$. Assigning on the raw matrix and gating afterwards is not equivalent: a distant pair chosen by the solver blocks a nearer one, and one bad assignment costs two links.
-
-**Divisions.** Tracking with divisions is a min-cost circulation on a node-split graph, each detection $x$ becoming $x_{\mathrm{in}} \to x_{\mathrm{out}}$:
-
-| Arc | Capacity | Cost | Meaning |
-|---|---:|---|---|
-| $x_{\mathrm{in}} \to x_{\mathrm{out}}$ | 1 | $c_{\mathrm{det}}$ | the detection is used |
-| $s \to x_{\mathrm{in}}$ | 1 | $c_{\mathrm{app}}$ | a lineage starts at $x$ |
-| $x_{\mathrm{out}} \to t$ | 1 | $c_{\mathrm{dis}}$ | a lineage ends at $x$ |
-| $s \to x_{\mathrm{out}}$ | 1 | $c_{\mathrm{div}}$ | the second daughter's unit enters at $x$ |
-| $x_{\mathrm{out}} \to y_{\mathrm{in}}$ | 1 | $d(x,y)$ | $y$ in the next frame, among the $k$ nearest, $d \le r$ |
-| $t \to s$ | unbounded | 0 | closes the circulation |
-
-A node divides exactly when $x_{\mathrm{out}}$ emits two transitions, and, holding the rest fixed, a second daughter $y$ is attached to $x$ rather than started as a new lineage exactly when $c_{\mathrm{div}} + d(x,y) < c_{\mathrm{app}}$ — 5 µm under the defaults $c_{\mathrm{det}} = -50$, $c_{\mathrm{app}} = c_{\mathrm{dis}} = 10$, $c_{\mathrm{div}} = 5$, gate 12 µm, 5 neighbours.
-
-**The certificate.** "A cell divides only where a cell exists" couples arcs and destroys the total unimodularity that makes the relaxation integral, so it is checked on the answer:
-
-$$
-\mathrm{violation}(x) \iff f(s, x_{\mathrm{out}}) = 1 \,\wedge\, f(x_{\mathrm{in}}, x_{\mathrm{out}}) = 0,
-\qquad \text{calibration: } c_{\mathrm{div}} \ge c_{\mathrm{app}} + c_{\mathrm{det}} .
-$$
-
-Rerouting a violating unit from $s \to x_{\mathrm{out}}$ onto $s \to x_{\mathrm{in}} \to x_{\mathrm{out}}$ changes the cost by $c_{\mathrm{app}} + c_{\mathrm{det}} - c_{\mathrm{div}} \le 0$, and conservation at $x_{\mathrm{in}}$ frees both arcs of that path. Under strict calibration the reroute strictly improves, so no optimum violates the certificate and the circulation optimum is the integer-program optimum (lemmas `reroute_not_worse`, `conservation_frees_capacity`, `reroute_strictly_better` in the source's Lean). `TrackResult::violations` recomputes the count from the solved flow.
-
-**Solver.** Costs are rounded to integers $\mathrm{round}(wc)$; the circulation is solved as a min-cost $s$–$t$ flow by successive shortest paths with Bellman–Ford, stopping at the first non-negative path, which is exact because every arc goes forward in time. A `ponytail:` comment names the ceiling — Bellman–Ford is $O(VE)$ per augmentation over $O(V)$ augmentations — and Dijkstra on Johnson-reduced costs as the upgrade.
-
-**Guaranteed by construction:** in-degree at most 1; out-degree at most 1 from `link_sequence` and at most 2 from `flow_track`; every edge advances exactly one frame with length at most $r$; the graph is a forest; exact optima of the padded assignment and of the rounded circulation over its candidate arcs; invariance under isometries of $d$ and permutation of detections, up to exact cost ties. **Heuristic:** the costs and the gate, the $k$-nearest restriction, rounding to $1/w$, and whether a fork is a biological division. There is no gap closing: a missing detection ends every track through it.
-
-**Refusals.** `NonFiniteCoordinate`, `InvalidGate`, `InvalidScale`, `Uncalibrated` ($c_{\mathrm{div}} < c_{\mathrm{app}} + c_{\mathrm{det}}$), `InvalidNeighbours`, `InvalidCost` (a non-finite cost, a non-positive scale, or a rounded cost outside `i32`, which keeps every path sum exact in `i64`).
-
-**Implementation.** `track.rs` → `fn physical_distance`, `fn link_frames`, `fn link_sequence`, `fn flow_track`, `FlowConfig::validate`, `TrackResult::certified`. **Evidence.** `tests/track.rs`, 15 tests: lineage-forest invariants, the split price, the division certificate, and invariance under rigid motion and detection permutation.
-
-### I.8 Coupling operators, fixed points and islands
-
-**The operator.** A state $z \in \mathbb{R}^D$ and an action $a \in \mathbb{R}^K$ are lifted bilinearly and stepped by $W \in \mathbb{R}^{D\times L}$:
-
-$$
-\varphi(z,a) = \bigl[\,z;\ a\otimes z;\ a;\ 1\,\bigr] \in \mathbb{R}^{L},\quad L = D + KD + K + 1,
-\qquad
-z_{t+1} = W\varphi(z_t, a_t) = T_0 z_t + \sum_k a_{t,k}T_k z_t + B a_t + c .
-$$
-
-It is affine in $z$ for fixed $a$ and in $a$ for fixed $z$, not jointly. $W$ is the ridge regression
-
-$$
-W \;=\; \arg\min_W \sum_t \lVert W\varphi_t - z_{t+1}\rVert^2 + \lambda\lVert W\rVert_F^2 \;=\; Y^\top X\,(X^\top X + \lambda I)^{-1},
-$$
-
-solved by Cholesky, since $X^\top X + \lambda I$ is symmetric positive definite for every $\lambda > 0$.
-
-**Fixed point and rollout bound.** With $\rho = \sigma_{\max}(T_0)$ (computed by cyclic Jacobi on $T_0^\top T_0$, which does not under-estimate as a truncated power iteration does), the autonomous map $F(z) = T_0 z + c$ has $z^\ast = (I - T_0)^{-1}c$ whenever $I - T_0$ is invertible, and if $\rho < 1$,
-
-$$
-\lVert F^n(z_0) - z^\ast\rVert \le \rho^n\lVert z_0 - z^\ast\rVert,
-\qquad
-E(n) \le \varepsilon\,\frac{1 - \rho^n}{1 - \rho}\ \ (\rho < 1),
-\qquad
-E(n) \le \varepsilon\, n\,\rho^{n-1}\ \ (\rho \ge 1),
-$$
-
-where $\varepsilon$ bounds the RMS one-step residual; by the Banach fixed-point theorem $z^\ast$ is unique. An optional ceiling rescales $T_0 \leftarrow (\rho_{\max}/\rho)T_0$, and is never applied by default, because clipping a chaotic system's $\rho > 1$ buys a certificate by misreporting the dynamics. The directional estimate propagates the residual second moment, $C_n = T_0 C_{n-1}T_0^\top + \Sigma$, $\mathrm{estimate}(n) = \sqrt{\operatorname{tr}C_n/D}$.
-
-**Islands.** Points $i$, $j$ share an island at radius $r$ when joined by a chain of pairs at distance at most $r$. The island count is $\beta_0$ of the Rips complex at $r$, the number of $H_0$ bars with death $> r$, essential bar included (§3.8). The multi-body diagnostic is the block Frobenius matrix $S_{ij} = \lVert T_0[\text{body } i, \text{body } j]\rVert_F$.
-
-**Proved:** the contraction and fixed point for the *autonomous* map (with actions the per-step map is $T_0 + \sum_k a_k T_k$, whose norm $\rho$ does not bound); the scalar error bound under its RMS hypothesis; the ceiling producing $\sigma_{\max} = \rho_{\max}$; islands equal $\beta_0$. **Not proved:** the fitted $\varepsilon$ is an in-sample RMS, not a supremum, so a certificate built from a fit inherits the hypothesis rather than discharging it; the directional estimate is an expectation under zero-mean, step-uncorrelated residuals, not a bound. The source's Lyapunov-gain governor was declined, because its stability claim is false (§8.10).
-
-**Refusals.** A ridge that is not finite and positive, a negative or non-finite ceiling, fewer than two transitions, mismatched lengths, non-finite data, a non-positive Cholesky pivot; non-finite starts or actions in rollouts; a negative or non-finite island radius. `fixed_point` returns `None` when $I - T_0$ is exactly singular; a non-finite operator reports $\rho = \mathrm{NaN}$, which no certificate treats as contractive.
-
-**Implementation.** `coupling.rs` → `CouplingOperator::{autonomous, step, rollout, spectral_norm, project_spectral, fixed_point, coupling_strength, fit}`, `Fit::certificate`, `RolloutCertificate::{contractive, error_bound, directional_error, safe_horizon}`, `fn island_labels`. **Evidence.** `tests/coupling.rs`, 18 tests: bit-exact agreement with the naive lifted product, the contraction and error bounds on seeded states, and the island partition against flood fill and the $H_0$ barcode.
-
-### I.9 Segment witnesses for a learned sparse top-k
-
-A learned indexer top-$k$ concentrates where scores are high and says nothing about how its tokens spread over the context. The witness policy adds a covering constraint. For context length $L \ge 1$ and segment count $S \ge 1$, with $S_{\mathrm{eff}} = \min(S, L)$:
-
-$$
-e_s = \Bigl\lceil \frac{sL}{S_{\mathrm{eff}}}\Bigr\rceil,\quad I_s = [e_s, e_{s+1}),\quad
-\sigma(x) = \Bigl\lfloor \frac{x\,S_{\mathrm{eff}}}{L}\Bigr\rfloor,\quad
-W(K) = \lbrace \, e_s : s < S_{\mathrm{eff}},\ s \notin \sigma(K) \,\rbrace .
-$$
-
-**Invariant.** $\sigma(e_s) = s$ for every $s < S_{\mathrm{eff}}$ — a segment's left edge, rounded up, lies in that segment — which needs $S_{\mathrm{eff}} \le L$ (rounding down does not round-trip: $L = 10$, $S = 4$, $s = 1$ gives 2, and $\sigma(2) = 0$). Three properties follow without a scan: $W(K) \cap K = \varnothing$; witnesses are pairwise distinct; and $\sigma\bigl(K \cup W(K)\bigr) = \lbrace 0,\dots,S_{\mathrm{eff}} - 1\rbrace $.
-
-**Uncovered runs.** A maximal run of unselected tokens cannot contain a whole segment, since every segment holds a selected token, so it lies within two adjacent segments less one selected token from each:
-
-$$
-\text{run length} \;\le\; 2\Bigl\lceil \frac{L}{S_{\mathrm{eff}}}\Bigr\rceil - 2 .
-$$
-
-The upstream pull request describes the uncovered run as bounded at $L/S$ tokens; this is the bound segment coverage actually implies.
-
-**Merge.** A row is a fixed-width array of `topk` slots. Slots $[0, \mathrm{keep})$ are kept verbatim; witnesses in ascending segment order overwrite slots from `keep` up to the budget $B = \min(\mathrm{max\_repl},\ \mathrm{topk} - \mathrm{keep})$; the serving entry point uses $\mathrm{keep} = \mathrm{topk} - S$ and $\mathrm{max\_repl} = S$. Occupancy is read from the whole learned row, including tail slots about to be overwritten, so full coverage holds for $K \cup W(K)$ but not always for the merged row (§9). Entries are row-relative offsets; $-1$ is padding; $S = 0$ is the off switch.
-
-**Metrics and nulls.** For a candidate set $C$ and a dense attention row $a$,
-
-$$
-\mathrm{cov}(C) = \frac{\lvert\sigma\bigl(C\cap[0,L)\bigr)\rvert}{S_{\mathrm{eff}}},
-\qquad
-\mathrm{recall}(C;a) = \frac{\sum_{x\in C\cap[0,L)} a_x}{\sum_{x<L} a_x},
-$$
-
-compared at identical budget against a seeded uniform draw and against the most recent tokens — row $L - 1$ of `attention::Selector::Random` and `::Local`, called rather than reimplemented. **Certified:** the three properties above and the budget contract (at most $B$ slots change, all in $[\mathrm{keep}, \mathrm{keep} + B)$). **Not measured:** any quality effect; the pull request ran no model-level evaluation and states that its evidence shows the change correct, bounded and cheap, not an improvement. It reports the fused CUDA kernel at 1.12× to 1.62× the cost of copying the same buffer (512 down to 32 rows, `topk = 2048`, $S = 64$, RTX 4060 Laptop, sm_89) and 1,000/1,000 randomised configurations identical to the torch reference; those figures are cited, not reproduced here.
-
-**Refusals** (`WitnessError`): context lengths that do not cover every row; $S \notin [1, 64]$ at the merge, because the fused kernel carries occupancy as a 64-bit mask; $\mathrm{keep} > \mathrm{topk}$.
-
-**Implementation.** `kvwitness.rs` → `fn segment_of`, `fn topology_witness_indices`, `fn apply_topology_witnesses`, `fn scatter_topology_witnesses`, `fn random_null`, `fn locality_null`, `fn segment_coverage`, `fn attention_mass_recall`. **Evidence.** `tests/kvwitness.rs`, 15 tests, including the coverage example of §9.
-
-### I.10 Runtime planning: offsets, transitive reduction, islands
-
-**Offset planning** (google/XNNPACK#10801). Tensors with byte sizes and inclusive lifetimes $[\mathrm{first}, \mathrm{last}]$ receive offsets in one arena such that tensors live at a common node occupy disjoint bytes. Minimising the arena exactly is dynamic storage allocation (Garey & Johnson, SR2), NP-complete, so the planner is greedy: tensors in decreasing size, each taking the smallest free interval among the coalesced ranges of placed tensors whose lifetimes intersect its own (best fit), with the **leading interval** $[0, \text{first block})$ a candidate that wins ties. Invariant: no two placed tensors with intersecting lifetimes share a byte; hence
-
-$$
-\text{arena} \;\ge\; \text{peak live bytes} \;=\; \max_{\text{node } v}\ \sum_{\text{tensors live at } v} \text{size},
-$$
-
-since the tensors live at the peak node pairwise intersect. Cost $O(n^2\log n)$. The upstream bug considered gaps between live blocks and after the last, never before the first; `a_free_leading_interval_is_reused_instead_of_appending` pins the fix, where the plan reaches the live peak of 180 bytes against 240 without the leading gap. Over 500 seeded instances the planned arena averages 1.0283 times the peak-live lower bound, worst 1.2826. The pull request reports MobileNet V1 FP32 peak allocation falling from 23.862980 MiB to 22.331730 MiB (6.42%), measured upstream.
-
-**Transitive reduction** (tensorflow/tensorflow#124410). For a finite DAG the transitive reduction is unique: exactly the edges $u \to v$ with no other path from $u$ to $v$. Reachability is closed as a bit matrix in one reverse-topological pass, so each successor's row is final before it is folded into its predecessor's, and
-
-$$
-u \to v \text{ survives} \iff v \notin \bigcup_{w \in \mathrm{succ}(u)\setminus\lbrace v\rbrace } \mathrm{reach}(w).
-$$
-
-Each edge is decided against the complete closure, so the result is a function of the edge set and not of its order. Cost $O\bigl(E\log E + (n + E)\lceil n/64\rceil\bigr)$ time and $n^2/8$ bytes. The upstream bug copied a destination's reachable set once and never propagated later additions, so bypasses implied by paths of length three or more survived, and the output depended on hash-set iteration order.
-
-**Islands** (google-deepmind/mujoco#3396; google-deepmind/mujoco_warp#1541 is the GPU form). A disjoint-set forest whose union links the larger root under the smaller, so every root is its set's minimum and $\mathrm{parent}[x] \le x$; one ascending pass numbers the roots. Labels are canonical: island $k$ is the one whose smallest member is the $k$-th smallest, whatever the order and orientation of the incidences. Linking by minimum index rather than by rank forgoes the inverse-Ackermann bound; path compression alone gives $O(\log n)$ amortised per operation (Tarjan & van Leeuwen 1984). Upstream, MuJoCo's peak island stack went from $5\,n_{\mathrm{tree}}^2 + 36\,n_{\mathrm{tree}} + 32$ to $16\,n_{\mathrm{tree}} + 32$ bytes — 84,033,568 to 65,568 bytes at 4,096 trees.
-
-**Implementation.** `planner.rs` → `fn plan_offsets`, `fn peak_live_bytes`, `fn transitive_reduction` (panics on an edge against the topological numbering), `fn islands`. **Evidence.** `tests/planner.rs`, 15 tests: byte-disjointness and the peak bound on random instances, the leading-gap cases, reachability preservation and minimality, order independence of the reduction, and canonical island labels. `cargo test -p aether-core --test planner -- --nocapture` prints the 500-instance ratio.
-
-### I.11 Merged upstream contributions
-
-The ideas above were first contributed to the projects they came from. Status as reported by `gh pr view` on 2026-09-27: **nine merged, one open, two closed without merging.**
-
-| Pull request | State | Merged | +/− | Change | In Aether-Lang |
-|---|---|---|---|---|---|
-| [triton-lang/kernels#22](https://github.com/triton-lang/kernels/pull/22) | merged | 2026-07-28 | +804 / −1 | topology-derived sparse attention kernel | `scheduled` (§5.5) |
-| [google/XNNPACK#10801](https://github.com/google/XNNPACK/pull/10801) | merged | 2026-07-23 | +131 / −8 | reuse leading gaps in the memory planner | `planner::plan_offsets` |
-| [google-deepmind/mujoco#3396](https://github.com/google-deepmind/mujoco/pull/3396) | merged | 2026-07-20 | +645 / −93 | disjoint-set forest replaces quadratic island scratch | `planner::islands` |
-| [google-deepmind/mujoco#3450](https://github.com/google-deepmind/mujoco/pull/3450) | merged | 2026-08-03 | +16 / −12 | remove a quadratic scan from convex-hull graph construction | not ported |
-| [tensorflow/tensorflow#124410](https://github.com/tensorflow/tensorflow/pull/124410) | merged | 2026-08-05 | +362 / −26 | exact transitive reduction of collective control edges | `planner::transitive_reduction` |
-| [google/highway#3244](https://github.com/google/highway/pull/3244) | merged | 2026-08-05 | +173 / −5 | prune PHast builder collision and scan tests by slice structure | not ported |
-| [NVIDIA/NeMo-Relay#481](https://github.com/NVIDIA/NeMo-Relay/pull/481) | merged | 2026-08-10 | +1,370 / −86 | reuse stable ACG prompt scaffolds | not ported |
-| [dsx-ai-factory/topograph#432](https://github.com/dsx-ai-factory/topograph/pull/432) | merged | 2026-08-19 | +145 / −96 | gate ClusterRole rules by engine and provider (Helm chart) | not mathematics |
-| [google-deepmind/mujoco_warp#1541](https://github.com/google-deepmind/mujoco_warp/pull/1541) | merged | 2026-08-25 | +615 / −1,184 | linear-memory GPU disjoint-set island discovery | `planner::islands` (sequential form) |
-| [vllm-project/vllm#47942](https://github.com/vllm-project/vllm/pull/47942) | **open** | — | +583 / −0 | cover missed context segments in the sparse MLA indexer top-k | `kvwitness` |
-| [openxla/xla#46539](https://github.com/openxla/xla/pull/46539) | closed, not merged | — | +5 / −1 | deterministic GPU reduction group order | not ported |
-| [facebook/pyrefly#4180](https://github.com/facebook/pyrefly/pull/4180) | closed, not merged | — | +70 / −2 | test capturing a capped-recheck propagation panic | not ported |
-
-### I.12 Language surface
-
-Every module above is importable from Aether-Lang programs. The bindings, the `seal until stable(...)` loop and a worked pipeline across five of the modules are documented with the language, in [§4.9](#49-the-integrated-modules).
-
----
-
 ## 4. The language
 
 ### 4.1 Lexical conventions
@@ -1436,7 +1125,7 @@ Every variant the parser produces, from `StmtKind`:
 
 ### 4.3 Expression grammar
 
-From `ExprKind`: `Literal` · `Ident` · `BinaryOp` · `UnaryOp` · `FieldAccess` · `Call` · `MethodCall` · `Index` · `Config` · `New` · `Range` · `List` · `Member` · `Element`. `Member` and `Element` are postfix `.field` and `[i]` on any expression's value, added with the module bindings of §I.12; `Index` remains the manifold slice `M[a:b]`.
+From `ExprKind`: `Literal` · `Ident` · `BinaryOp` · `UnaryOp` · `FieldAccess` · `Call` · `MethodCall` · `Index` · `Config` · `New` · `Range` · `List` · `Member` · `Element`. `Member` and `Element` are postfix `.field` and `[i]` on any expression's value, added with the module bindings of §4.9; `Index` remains the manifold slice `M[a:b]`.
 
 Binary operators `+ - * / % == != < > <= >= && ||` parse to `Add Sub Mul Div Mod Eq Neq Lt Gt Le Ge And Or`; unary operators are `Neg` and `Not`.
 
@@ -1529,7 +1218,7 @@ prints `[5, 1.414213562373095]`: the fourth pass moves $x$ by $2.1\times10^{-6}$
 
 Until this revision the spelling did not run: the example this README previously opened with, `🦭 until convergence(1e-6) { regress { model: "polynomial", escalate: true }~ }`, passed `aether check` and failed at runtime with `condition must be boolean`, because `convergence` was a keyword with no definition and `1e-6` lexed as `1`, `e`, `-`, `6`. Three changes make the loop run as written: the tolerance semantics above, exponent literals (§4.4), and parenthesised grouping, which the expression grammar also lacked — `(x + 2 / x) / 2` was a parse error. That example now reaches its body and stops with `Runtime error: no manifold for regression`, because `regress` needs a manifold in scope. A tolerance loop is a scalar stopping rule; a seal loop terminates on topology only when its condition computes something topological, which is what `stable` over a Betti vector does.
 
-**Stable-invariant seal loops.** The one condition form with its own semantics is `seal until stable(expr)`, unless the program defines a function named `stable`. Writing $v_i$ for the value of `expr` evaluated before iteration $i$, the loop stops at the first $i \ge 1$ with $v_i = v_{i-1}$ — the first pass of the body that left the watched value unchanged — still within 1,000 iterations. Equality is exact and structural over numbers, booleans, strings, lists and records; values of other kinds are refused. `seal until stable(topology.betti(topology.ph(M), radius=r))` therefore stops on the Betti vector of a filtration, which is the construction the language's premise describes; §I.12 shows the same form over a certified face count. Note that exact equality makes $\beta$-stability a one-pass window: a vector that repeats once is accepted, the objection §2.1 raises against topological stopping without a window.
+**Stable-invariant seal loops.** The one condition form with its own semantics is `seal until stable(expr)`, unless the program defines a function named `stable`. Writing $v_i$ for the value of `expr` evaluated before iteration $i$, the loop stops at the first $i \ge 1$ with $v_i = v_{i-1}$ — the first pass of the body that left the watched value unchanged — still within 1,000 iterations. Equality is exact and structural over numbers, booleans, strings, lists and records; values of other kinds are refused. `seal until stable(topology.betti(topology.ph(M), radius=r))` therefore stops on the Betti vector of a filtration, which is the construction the language's premise describes; §4.9 shows the same form over a certified face count. Note that exact equality makes $\beta$-stability a one-pass window: a vector that repeats once is accepted, the objection §2.1 raises against topological stopping without a window.
 
 ### 4.7 The regress statement and ConvergenceCond
 
@@ -1562,9 +1251,9 @@ The tree-walking interpreter (`interpreter.rs`) is the reference. `TitanVM` (`vm
 | `webgl_export.rs` | 117 | WebGL export path for `render` |
 | `python.rs` | 81 | `pyo3` surface; the bindings package is empty |
 
-### 4.9 The integrated modules
+### 4.9 The certified library
 
-The ten modules of [Integrated mathematics from sibling work](#integrated-mathematics-from-sibling-work) are language features. `import <module>~` binds its functions, `from linking import writhe~` binds one, and `coupling.coupling_fixed_point(...)` calls through the module name. Results are numbers, lists, strings, booleans or records read with `r.field`; reading a field a record does not have is an error, never 0. Verdicts are strings a program branches on (`r.verdict == "linked"`). Every typed refusal of the core reaches the program as a runtime error of the form `<module> refused: <Variant { data }>` — for example `arrangement refused: EdgesCross { first: 0, second: 1, count: 1 }` — never as a number standing in for the answer. Points are lists of numbers, zero-padded to the dimension a routine works in, and matrices are lists of rows.
+Ten modules extend the language with mathematics that answers only when it can prove the answer. Their definitions, theorems and derivations are in the [documentation](https://teerthsharma.github.io/Aether-Lang/integrated/); here they are language features. `import <module>~` binds its functions, `from linking import writhe~` binds one, and `coupling.coupling_fixed_point(...)` calls through the module name. Results are numbers, lists, strings, booleans or records read with `r.field`; reading a field a record does not have is an error, never 0. Verdicts are strings a program branches on (`r.verdict == "linked"`). Every typed refusal of the core reaches the program as a runtime error of the form `<module> refused: <Variant { data }>` — for example `arrangement refused: EdgesCross { first: 0, second: 1, count: 1 }` — never as a number standing in for the answer. Points are lists of numbers, zero-padded to the dimension a routine works in, and matrices are lists of rows.
 
 | `import` | Functions | Returns |
 |---|---|---|
@@ -1691,7 +1380,7 @@ agreement: arrangement pieces = planner islands = orbit count
 Execution complete. 🦭
 ```
 
-The three independent counts agree — two arrangement pieces, two planner islands, two orbits. The lineage forest encloses no face, so its Euler characteristic equals its number of lineages (§I.3), and the identification error floor is $n - m = 8 - 2 = 6$ (§I.5, Bound 1). The recovery ceiling 0.2 is $1/5$, the pooling bound for the larger lineage of five cells.
+The three independent counts agree — two arrangement pieces, two planner islands, two orbits. The lineage forest encloses no face, so its Euler characteristic equals its number of lineages ([`arrangement` docs](https://teerthsharma.github.io/Aether-Lang/integrated/arrangement/)), and the identification error floor is $n - m = 8 - 2 = 6$ ([`orbit` docs](https://teerthsharma.github.io/Aether-Lang/integrated/orbit/), Bound 1). The recovery ceiling 0.2 is $1/5$, the pooling bound for the larger lineage of five cells.
 
 One program per module sits beside it. Each output below was produced by `cargo run -p aether-cli -- run examples/<file>`:
 
@@ -1743,7 +1432,7 @@ The workspace has seven members.
 | `memory` | manifold heap, generational handles, Chebyshev guard (§3.25) | safety comes from marking, not from the inequality |
 | `state` | `SystemState<D>` and three deviation metrics | $L_2$, $L_\infty$ and $L_1$ offered, not chosen |
 | `ml` | tensors, layers, optimisers, clustering, classification, regression, convergence (§3.27–§3.29) | written from scratch, `no_std` |
-| `linking`, `certify`, `arrangement`, `resolvent`, `orbit`, `monodromy`, `track`, `coupling`, `kvwitness`, `planner` | the ten ported modules: certified linking numbers, rounding certificates, arrangement invariants, a three-corner attention operator, partition bounds, sampled-geometry decisions, tracking, coupling operators, segment witnesses, runtime planning | [Integrated mathematics from sibling work](#integrated-mathematics-from-sibling-work); each separates what it certifies from what it estimates |
+| `linking`, `certify`, `arrangement`, `resolvent`, `orbit`, `monodromy`, `track`, `coupling`, `kvwitness`, `planner` | the certified library: certified linking numbers, rounding certificates, arrangement invariants, a three-corner attention operator, partition bounds, sampled-geometry decisions, tracking, coupling operators, segment witnesses, runtime planning | [§4.9](#49-the-certified-library) and the [documentation](https://teerthsharma.github.io/Aether-Lang/integrated/); each separates what it certifies from what it estimates |
 
 The `no_std` claim is checked on a real target:
 
@@ -1846,9 +1535,9 @@ Seven variants, and the two that are not selection strategies at all are the rea
 
 **Every selector materialises a dense `[seq, seq]` boolean mask.** No selector here is sub-quadratic in *memory*, however few keys it picks: the savings are real in dot products and absent in allocation. This is a property of a reference built for checkability, and it is the recorded trigger on the clustering routine's `ponytail:` comment — a neighbour graph saves nothing until the mask stops being dense.
 
-### 5.5 The scheduled-attention port
+### 5.5 Scheduled attention
 
-`crates/aether-core/src/scheduled.rs`, 1,008 lines. A Rust port of [`triton-lang/kernels#22`](https://github.com/triton-lang/kernels/pull/22), "Add topology-derived sparse attention kernel". The Python original requires CUDA; this compiles wherever `aether-core` does, including `no_std`.
+`crates/aether-core/src/scheduled.rs`, 1,008 lines. Topology-derived sparse attention, which the author first wrote as a Triton kernel ([`triton-lang/kernels#22`](https://github.com/triton-lang/kernels/pull/22), merged), rebuilt in Rust. The Triton version requires CUDA; this compiles wherever `aether-core` does, including `no_std`.
 
 ```rust
 pub struct BlockSchedule { pub offsets: Vec<usize>, pub indices: Vec<usize> }   // CSR
@@ -2194,7 +1883,7 @@ Placement (§3.21) is the share of the achievable gain the selector captures, an
 
 ### 7.1 Test inventory
 
-A count is not evidence, so the suites that carry the correctness argument are listed with what they assert. `aether-core` runs 330 tests (56 unit, 274 integration), `aether-lang` 63, and `aether-gpu` 107 integration tests of which 80 are hardware-gated. The per-suite figures below are bound to the files by `readme_claims.rs`: the test count exactly, the line count to 5%.
+A count is not evidence, so the suites that carry the correctness argument are listed with what they assert. `aether-core` runs 330 tests (56 unit, 274 integration), `aether-lang` 64, and `aether-gpu` 107 integration tests of which 80 are hardware-gated. The per-suite figures below are bound to the files by `readme_claims.rs`: the test count exactly, the line count to 5%.
 
 | Suite | Tests | Lines | Asserts |
 |---|---:|---:|---|
@@ -2210,18 +1899,18 @@ A count is not evidence, so the suites that carry the correctness argument are l
 | `readme_claims.rs` | 2 | 304 | this document's suite counts; no CPU crate depends on the GPU backend |
 | `doc_ratchet.rs` | 1 | 92 | the count of modules enforcing `missing_docs` never falls |
 | `orphaned_sources.rs` | 1 | 121 | every source file is reachable from a module tree |
-| `linking.rs` | 18 | 627 | Hopf, torus and Whitehead ground truth; rounding rule; refusals (§I.1) |
-| `certify.rs` | 17 | 761 | enclosures and certificates against exact integer arithmetic (§I.2) |
-| `arrangement.rs` | 18 | 655 | closed-form counts, snap windows, invariances, refusals (§I.3) |
-| `resolvent.rs` | 17 | 856 | the three corners and the mirrored Lean identities (§I.4) |
-| `orbit.rs` | 15 | 805 | the five bounds on seeded and exhaustive instances (§I.5) |
-| `monodromy.rs` | 18 | 766 | closed-form injectivity, symmetry, dimension and spectrum cases (§I.6) |
-| `track.rs` | 15 | 762 | lineage-forest invariants and the division certificate (§I.7) |
-| `coupling.rs` | 18 | 1,292 | lifted product, contraction and error bounds, islands (§I.8) |
-| `kvwitness.rs` | 15 | 511 | witness invariants, budget contract, coverage (§I.9) |
-| `planner.rs` | 15 | 487 | byte-disjointness, reduction minimality, canonical islands (§I.10) |
+| `linking.rs` | 18 | 627 | Hopf, torus and Whitehead ground truth; rounding rule; refusals ([`linking` docs](https://teerthsharma.github.io/Aether-Lang/integrated/linking/)) |
+| `certify.rs` | 17 | 761 | enclosures and certificates against exact integer arithmetic ([`certify` docs](https://teerthsharma.github.io/Aether-Lang/integrated/certify/)) |
+| `arrangement.rs` | 18 | 655 | closed-form counts, snap windows, invariances, refusals ([`arrangement` docs](https://teerthsharma.github.io/Aether-Lang/integrated/arrangement/)) |
+| `resolvent.rs` | 17 | 856 | the three corners and the mirrored Lean identities ([`resolvent` docs](https://teerthsharma.github.io/Aether-Lang/integrated/resolvent/)) |
+| `orbit.rs` | 15 | 805 | the five bounds on seeded and exhaustive instances ([`orbit` docs](https://teerthsharma.github.io/Aether-Lang/integrated/orbit/)) |
+| `monodromy.rs` | 18 | 766 | closed-form injectivity, symmetry, dimension and spectrum cases ([`monodromy` docs](https://teerthsharma.github.io/Aether-Lang/integrated/monodromy/)) |
+| `track.rs` | 15 | 762 | lineage-forest invariants and the division certificate ([`track` docs](https://teerthsharma.github.io/Aether-Lang/integrated/track/)) |
+| `coupling.rs` | 18 | 1,292 | lifted product, contraction and error bounds, islands ([`coupling` docs](https://teerthsharma.github.io/Aether-Lang/integrated/coupling/)) |
+| `kvwitness.rs` | 15 | 511 | witness invariants, budget contract, coverage ([`kvwitness` docs](https://teerthsharma.github.io/Aether-Lang/integrated/kvwitness/)) |
+| `planner.rs` | 15 | 487 | byte-disjointness, reduction minimality, canonical islands ([`planner` docs](https://teerthsharma.github.io/Aether-Lang/integrated/planner/)) |
 
-The last ten rows are the suites of the ported modules; the mathematics each pins is in [Integrated mathematics from sibling work](#integrated-mathematics-from-sibling-work), and each is also listed below in the form `readme_claims.rs` binds.
+The last ten rows are the suites of the certified library; the mathematics each pins is in the [documentation](https://teerthsharma.github.io/Aether-Lang/integrated/), and each is also listed below in the form `readme_claims.rs` binds.
 
 #### `persistence_invariants.rs` — 12 tests, 740 lines
 
@@ -2314,43 +2003,43 @@ Pins the brackets the selection-quality measurement of §6.5 depends on: `the_de
 
 #### `linking.rs` — 18 tests, 627 lines
 
-Ground truth for §I.1: the Hopf link and the $(2, 2k)$ torus family certify their linking numbers with one sign, the Whitehead link has $\mathrm{Lk} = 0$ and is never certified separable, the sign of $\omega_{ij}$ agrees with an independent midpoint quadrature, the bound covers the measured distance to the integer, and rounding happens only when the bound proves it. The linking number is invariant under rotation, translation, cyclic shift of the start vertex and swapping the curves, bitwise invariant under power-of-two scaling, and negated by reversing an orientation or reflecting. Writhe is odd under reflection and refuses self-intersection; knot determinants match the classical table and are projection-invariant, mirror-blind and incomplete; every refusal path is taken.
+Ground truth for [`linking` docs](https://teerthsharma.github.io/Aether-Lang/integrated/linking/): the Hopf link and the $(2, 2k)$ torus family certify their linking numbers with one sign, the Whitehead link has $\mathrm{Lk} = 0$ and is never certified separable, the sign of $\omega_{ij}$ agrees with an independent midpoint quadrature, the bound covers the measured distance to the integer, and rounding happens only when the bound proves it. The linking number is invariant under rotation, translation, cyclic shift of the start vertex and swapping the curves, bitwise invariant under power-of-two scaling, and negated by reversing an orientation or reflecting. Writhe is odd under reflection and refuses self-intersection; knot determinants match the classical table and are projection-invariant, mirror-blind and incomplete; every refusal path is taken.
 
 #### `certify.rs` — 17 tests, 761 lines
 
-Soundness of §I.2 against exact `i128` arithmetic: Gram and direct enclosures contain the exact score, the cheap radius dominates the tight one, no certified top-$k$ set contradicts exact arithmetic on adversarial near-ties, the threshold trit never places a score on the wrong side, the certified set survives the worst corner of its box, and the two soundness findings of §8.10 are pinned.
+Soundness of [`certify` docs](https://teerthsharma.github.io/Aether-Lang/integrated/certify/) against exact `i128` arithmetic: Gram and direct enclosures contain the exact score, the cheap radius dominates the tight one, no certified top-$k$ set contradicts exact arithmetic on adversarial near-ties, the threshold trit never places a score on the wrong side, the certified set survives the worst corner of its box, and the two soundness findings of §8.10 are pinned.
 
 #### `arrangement.rs` — 18 tests, 655 lines
 
-§I.3's integers on figures with closed-form counts, the snap-window boundaries, invariance under rigid motion, scaling, permutation and segment reversal, and each refusal path.
+[`arrangement` docs](https://teerthsharma.github.io/Aether-Lang/integrated/arrangement/)'s integers on figures with closed-form counts, the snap-window boundaries, invariance under rigid motion, scaling, permutation and segment reversal, and each refusal path.
 
 #### `resolvent.rs` — 17 tests, 856 lines
 
-The three corners of §I.4 — softmax against the reference to 1e-14, the kernel and path-product corners bitwise — each Lean statement mirrored numerically, causality, and finiteness at logits beyond $10^4$.
+The three corners of [`resolvent` docs](https://teerthsharma.github.io/Aether-Lang/integrated/resolvent/) — softmax against the reference to 1e-14, the kernel and path-product corners bitwise — each Lean statement mirrored numerically, causality, and finiteness at logits beyond $10^4$.
 
 #### `orbit.rs` — 15 tests, 805 lines
 
-Each of the five bounds of §I.5 on seeded random and exhaustive small instances, attainment where the proof says it is attained, and `None` on impossible counts.
+Each of the five bounds of [`orbit` docs](https://teerthsharma.github.io/Aether-Lang/integrated/orbit/) on seeded random and exhaustive small instances, attainment where the proof says it is attained, and `None` on impossible counts.
 
 #### `monodromy.rs` — 18 tests, 766 lines
 
-Every assertion scored against a closed-form answer rather than a recorded output (§I.6): folds and the wrapped exponential collide, injective controls are cleared, the critical point of $x^3$ reads as a collision with the witness saying which, polygons recover $C_n$ and their mirrors, integer dimensions are recovered within stated tolerances, and the logistic, period-2 and Hénon spectra match their exact or published values.
+Every assertion scored against a closed-form answer rather than a recorded output ([`monodromy` docs](https://teerthsharma.github.io/Aether-Lang/integrated/monodromy/)): folds and the wrapped exponential collide, injective controls are cleared, the critical point of $x^3$ reads as a collision with the witness saying which, polygons recover $C_n$ and their mirrors, integer dimensions are recovered within stated tolerances, and the logistic, period-2 and Hénon spectra match their exact or published values.
 
 #### `track.rs` — 15 tests, 762 lines
 
-§I.7's guarantees: constant-velocity particles tracked at their closed-form cost, exactly one split on the correct parent, a split taken only when it beats a new lineage, a dropout ending the track without renumbering, the gate priced inside the assignment rather than applied after it, the gate applied in micrometres rather than voxels, the forest invariants on seeded scenes, a barely calibrated division price still certifying, refusal exactly at the calibration bound, and invariance under rigid motion and detection permutation.
+[`track` docs](https://teerthsharma.github.io/Aether-Lang/integrated/track/)'s guarantees: constant-velocity particles tracked at their closed-form cost, exactly one split on the correct parent, a split taken only when it beats a new lineage, a dropout ending the track without renumbering, the gate priced inside the assignment rather than applied after it, the gate applied in micrometres rather than voxels, the forest invariants on seeded scenes, a barely calibrated division price still certifying, refusal exactly at the calibration bound, and invariance under rigid motion and detection permutation.
 
 #### `coupling.rs` — 18 tests, 1,292 lines
 
-§I.8's operator bit-exact against the naive lifted product, the ridge fit, the contraction and rollout bounds on seeded states, the spectral ceiling, the fixed point, and the island partition against flood fill and the $H_0$ barcode.
+[`coupling` docs](https://teerthsharma.github.io/Aether-Lang/integrated/coupling/)'s operator bit-exact against the naive lifted product, the ridge fit, the contraction and rollout bounds on seeded states, the spectral ceiling, the fixed point, and the island partition against flood fill and the $H_0$ barcode.
 
 #### `kvwitness.rs` — 15 tests, 511 lines
 
-§I.9's witness invariants — disjointness, distinctness, coverage of $K \cup W(K)$ — the budget and fallback contracts, the lost-coverage case of §9, and the random and locality nulls.
+[`kvwitness` docs](https://teerthsharma.github.io/Aether-Lang/integrated/kvwitness/)'s witness invariants — disjointness, distinctness, coverage of $K \cup W(K)$ — the budget and fallback contracts, the lost-coverage case of §9, and the random and locality nulls.
 
 #### `planner.rs` — 15 tests, 487 lines
 
-§I.10's offset planner never lets live tensors share a byte and never beats the peak-live bound, reuses the leading gap, and prints its ratio to that bound over 500 instances; the transitive reduction preserves reachability, is minimal, removes length-three bypasses in every edge order, and rejects an edge against the topological numbering; island labels are canonical.
+[`planner` docs](https://teerthsharma.github.io/Aether-Lang/integrated/planner/)'s offset planner never lets live tensors share a byte and never beats the peak-live bound, reuses the leading gap, and prints its ratio to that bound over 500 instances; the transitive reduction preserves reachability, is minimal, removes length-three bypasses in every edge order, and rejects an edge against the topological numbering; island labels are canonical.
 
 The two remaining suites have one test each: `doc_ratchet.rs` fails if the number of modules enforcing `missing_docs` falls, so finished documentation cannot regress; `orphaned_sources.rs` fails if any source file is unreachable from a module tree, since the compiler cannot warn about a file it is never given.
 
@@ -2359,7 +2048,7 @@ The two remaining suites have one test each: `doc_ratchet.rs` fails if the numbe
 - **No external parity.** Nothing compares against ripser, GUDHI, giotto-tda or Dionysus. Every test above is internal consistency, which a self-consistently wrong implementation can satisfy.
 - **No finite-difference check for `ml/autograd.rs`.** The scheduled-attention backward pass and the softmax dense layer have one; the general reverse-mode engine does not.
 - **Thin `ml/` coverage.** Beyond the activation contracts, the clustering, classification and regression modules have far less coverage than the topology core. K-means is not tested for initialisation sensitivity, and the two single-linkage implementations are not checked against each other.
-- **Ported modules outside the mutation harnesses.** The 166 tests of the ten ported suites run in CI, but no injected defect has measured what they would catch.
+- **The certified library is outside the mutation harnesses.** The 166 tests of its ten suites run in CI, but no injected defect has measured what they would catch.
 - **Untested formulas.** `persistent_entropy`, `total_persistence`, `landscape_norm` and the Chebyshev guard have no dedicated tests; the governor's stability condition is derived, not asserted; the salience-multiset test uses a fixture that cannot expose the overwrite of §3.20.
 - **Seven kernel tests never execute** — four in `scheduler.rs`, two in `loader.rs`, one in `interrupts.rs`.
 - **The Lean tree is not built.** No `lake build` in CI.
@@ -2380,7 +2069,7 @@ The GPU harness needs an adapter and refuses to run without one, because every h
 
 Both harnesses run their suites separately rather than together, and the reason is measured rather than stylistic: when the GPU harness held 24 mutants, 19 of them were caught by exactly one of its three suites, so a combined pass/fail would hide which suite does the work, and dropping any one suite would let those defects through.
 
-Neither harness yet injects defects into the ten ported modules of [Integrated mathematics from sibling work](#integrated-mathematics-from-sibling-work).
+Neither harness yet injects defects into the ten modules of the certified library (§4.9).
 
 The records below are in discovery order and give the counts as they stood when each was written, so their denominators are smaller than the table above.
 
@@ -2581,24 +2270,6 @@ This revision re-derived every formula in §3 from the source and ran the docume
 
 Stale counts corrected in the same pass: 11 persistence invariants (12), 102, 93 and 60 GPU tests (107), 76 hardware-gated tests (80), 50, 24, 25 and 10 GPU or whole-tree mutants (26 GPU, 52 total), 215 passing tests in the claims table (the badge's figure, re-measured), six workspace crates (seven), "no gradcheck anywhere" (the scheduled backward pass and the softmax layer have finite-difference checks; `ml/autograd.rs` does not), the four-kernel-test count (seven tests never execute), and every source line count in §4.8, §5 and [Repository layout](#repository-layout).
 
-### 8.10 Soundness findings in sibling work
-
-Three claims in the source repositories did not survive porting (§I.2, §I.8). Each is recorded here rather than carried into this tree.
-
-**separatrix: the direct-kernel radius counted one rounding too few.** The source bounds the direct squared distance $\mathrm{fl}\bigl(\sum_l \mathrm{fl}(q_l - x_l)^2\bigr)$ with $\gamma_{d+1}$, counting the rounded difference once. It enters squared, so its rounding passes through twice, and the correct factor is $\gamma_{d+2}$. `direct_radius_counts_the_rounded_difference_twice` draws 40,000 seeded binary32 pairs per dimension at $d = 1$ and $d = 2$, compares every radius with exact integer arithmetic, and asserts that the source's $\gamma_{d+1}$ radius is escaped at both dimensions while the ported $\gamma_{d+2}$ radius never is.
-
-**separatrix: the boundary-pair rule is a false theorem.** Certifying a top-$k$ set by comparing only the rank-$k$ and rank-$(k+1)$ enclosures is unsound whenever the radii vary. Scores $(0, 1, 2, 10)$ with radii $(12, 0, 0, 0)$ and $k = 2$ present disjoint boundary enclosures, $[1, 1]$ against $[2, 2]$, so the rule certifies $\lbrace 0, 1\rbrace $; yet $(11, 1, 2, 10)$ lies in the box and has top-2 $\lbrace 1, 2\rbrace $. The ported rule compares every member against every non-member, refuses this input with the frontier pair $(0, 2)$, and lists indices 0, 2 and 3 as straddling (`the_boundary_pair_rule_is_a_false_theorem_and_the_refusal_names_the_blocker`).
-
-**sigmoid: the Lyapunov-gain condition does not give stability.** sigmoid's `LyapunovGain`, with defaults $\alpha = 0.5$, $\beta = 0.2$, $dt = 1$, states that the gain condition $\alpha + \beta/dt < 1$ with $dt \ge 1$ gives energy descent for the PD-corrected rollout. With $e_t = T_0\tilde e_{t-1}$ the error to the fixed point after a step and $\tilde e_t = e_t - dt\bigl(\alpha e_t + \beta(e_t - e_{t-1})/dt\bigr)$ the error after correction,
-
-$$
-\tilde e_t \;=\; (1 - dt\,\alpha - \beta)\,T_0\,\tilde e_{t-1} \;+\; \beta\,T_0\,\tilde e_{t-2}.
-$$
-
-At $T_0 = 10I$ the default gains satisfy the condition ($0.5 + 0.2 = 0.7 < 1$), and each coordinate obeys $\tilde e_t = 3\tilde e_{t-1} + 2\tilde e_{t-2}$, whose characteristic roots are $(3 \pm \sqrt{17})/2$. The larger, about 3.56, makes the corrected error grow geometrically. The condition constrains the gains and ignores the operator they act on, so it cannot guarantee descent. The governor was not ported.
-
----
-
 ## 9. Limitations
 
 Longer than most projects' feature lists, deliberately. Every limitation below is also stated where the relevant mechanism is described; this section collects them.
@@ -2645,11 +2316,11 @@ Longer than most projects' feature lists, deliberately. Every limitation below i
 
 **Example and argument hygiene.** `examples/seal_loop_demo.aegis`, the fullest seal-loop example, does not parse under the current grammar: it uses a `seal for` form the parser does not have, and `aether check` stops at line 33 with `expected {, found for`. The breakage predates the port and occurs identically on the pre-port tree. Named arguments a function does not recognise are ignored rather than rejected, so a misspelt option silently takes its default.
 
-**`monodromy` decides little and estimates with known bias (§I.6).** Only the injectivity decision is Jacobian-free; the Lyapunov estimator consumes $DF$. An injective map with a critical point is read as a collision — $x \mapsto x^3$ at the origin — and the witness, not the verdict, tells the two situations apart. $\rho_{\mathrm{free}}$ falls with $n$, so its threshold is valid only from 400 points; it was set from eight 2-D maps and checked on three 3-D maps, and the source missed a 3-D non-injective map reading 2.050e-2 at $n = 200$. A collision in a region the sampler never reaches is invisible to any bounded sample. The persistent-homology dimension is biased downward in high dimension (8.660 at $n \le 400$ and 8.531 at $n \le 1600$ on the 10-cube, in the source's measurement), its interval models sampling noise rather than bias, and at small $n$ a segment reads fractal against $d_{\mathrm{top}} = 1$ — a failure the suite pins deliberately. Symmetry recovery is sound, not complete: on jittered regular polygons the source recovered 6/6, 5/6, 4/6, 2/6 and 2/6 at 0, 2, 5, 8 and 10% jitter. Oseledets' hypotheses are not checked, and the Kaplan–Yorke dimension equals the information dimension only under the Kaplan–Yorke conjecture.
+**`monodromy` decides little and estimates with known bias ([`monodromy` docs](https://teerthsharma.github.io/Aether-Lang/integrated/monodromy/)).** Only the injectivity decision is Jacobian-free; the Lyapunov estimator consumes $DF$. An injective map with a critical point is read as a collision — $x \mapsto x^3$ at the origin — and the witness, not the verdict, tells the two situations apart. $\rho_{\mathrm{free}}$ falls with $n$, so its threshold is valid only from 400 points; it was set from eight 2-D maps and checked on three 3-D maps, and the source missed a 3-D non-injective map reading 2.050e-2 at $n = 200$. A collision in a region the sampler never reaches is invisible to any bounded sample. The persistent-homology dimension is biased downward in high dimension (8.660 at $n \le 400$ and 8.531 at $n \le 1600$ on the 10-cube, in the source's measurement), its interval models sampling noise rather than bias, and at small $n$ a segment reads fractal against $d_{\mathrm{top}} = 1$ — a failure the suite pins deliberately. Symmetry recovery is sound, not complete: on jittered regular polygons the source recovered 6/6, 5/6, 4/6, 2/6 and 2/6 at 0, 2, 5, 8 and 10% jitter. Oseledets' hypotheses are not checked, and the Kaplan–Yorke dimension equals the information dimension only under the Kaplan–Yorke conjecture.
 
-**`kvwitness` is correct, bounded and unevaluated (§I.9).** Full segment coverage holds for the learned set plus its witnesses but not always for the merged row: occupancy is read before the tail is overwritten, so a segment whose only learned token sits in an overwritten slot is lost. `overwriting_a_sole_tail_occupant_uncovers_its_segment` pins the case: the row $[0, 1, 2, 3, 12, -1, -1, -1]$ with $L = 16$, $S = 4$ merges to $[0, 1, 2, 3, 4, 8, -1, -1]$, coverage 0.75. The uncovered-run bound is $2\lceil L/S_{\mathrm{eff}}\rceil - 2$, looser than the upstream description's $L/S$. No model-level quality evaluation exists here or upstream; the kernel cost figures are the pull request's, on an RTX 4060 Laptop GPU.
+**`kvwitness` is correct, bounded and unevaluated ([`kvwitness` docs](https://teerthsharma.github.io/Aether-Lang/integrated/kvwitness/)).** Full segment coverage holds for the learned set plus its witnesses but not always for the merged row: occupancy is read before the tail is overwritten, so a segment whose only learned token sits in an overwritten slot is lost. `overwriting_a_sole_tail_occupant_uncovers_its_segment` pins the case: the row $[0, 1, 2, 3, 12, -1, -1, -1]$ with $L = 16$, $S = 4$ merges to $[0, 1, 2, 3, 4, 8, -1, -1]$, coverage 0.75. The uncovered-run bound is $2\lceil L/S_{\mathrm{eff}}\rceil - 2$, looser than the upstream description's $L/S$. No model-level quality evaluation exists here or upstream; the kernel cost figures are the pull request's, on an RTX 4060 Laptop GPU.
 
-**The ported modules carry their sources' calibrations and the port's own limits.** Thresholds in `monodromy` and `arrangement` are policy constants from the sources, not re-fitted; the `linking` certificate is first order in the unit roundoff, not interval arithmetic; the `coupling` error bound inherits an in-sample residual level as its hypothesis; `track` has no gap closing; and none of the ten suites is in the mutation harnesses of §7.3.
+**The certified library carries fixed calibrations and first-order bounds.** Thresholds in `monodromy` and `arrangement` are policy constants, not re-fitted; the `linking` certificate is first order in the unit roundoff, not interval arithmetic; the `coupling` error bound inherits an in-sample residual level as its hypothesis; `track` has no gap closing; and none of the ten suites is in the mutation harnesses of §7.3.
 
 **All timings are single-machine, single-run** — Windows 11, nightly, no confidence intervals, no turbo control, no core pinning (§6.1).
 
@@ -2788,7 +2459,7 @@ The evidence policy in one rule: **a number without a reproduction command does 
 
 | Claim | Where | Command |
 |---|---|---|
-| 427 passed, 80 ignored (guarded: ignored) | [Status](#15-status) | `cargo test --workspace --exclude aether-kernel` |
+| 428 passed, 80 ignored (guarded: ignored) | [Status](#15-status) | `cargo test --workspace --exclude aether-kernel` |
 | Per-suite test and line counts (guarded) | [§7.1](#71-test-inventory) | `cargo test -p aether-core --test readme_claims` |
 | 12 persistence invariants | [§7.1](#persistence_invariantsrs--12-tests-740-lines) | `cargo test -p aether-core --test persistence_invariants` |
 | 17 diagram-metric tests | [§7.1](#diagram_distancers--17-tests-422-lines) | `cargo test -p aether-core --test diagram_distance` |
@@ -2809,15 +2480,14 @@ The evidence policy in one rule: **a number without a reproduction command does 
 | `no_std` on Cortex-M3 | [Status](#15-status) | `cargo build -p aether-core --no-default-features --features no_std -Z build-std=core,alloc --target thumbv7m-none-eabi` |
 | Formatting clean | [Status](#15-status) | `cargo fmt --all -- --check` |
 | Clippy clean | [Status](#15-status) | `cargo clippy --workspace --exclude aether-kernel --all-targets -- -D warnings -D clippy::correctness -D clippy::suspicious -A clippy::style -A clippy::complexity -A clippy::perf` |
-| 53,163 Rust lines, 104 files (guarded: lines) | [§1.3](#13-scope-of-the-claims) | `(Get-ChildItem crates -Recurse -Filter *.rs \| Get-Content).Count`, or `find crates -name '*.rs' \| xargs cat \| wc -l` |
+| 53,228 Rust lines, 105 files (guarded: lines) | [§1.3](#13-scope-of-the-claims) | `(Get-ChildItem crates -Recurse -Filter *.rs \| Get-Content).Count`, or `find crates -name '*.rs' \| xargs cat \| wc -l` |
 | `nalgebra` has zero call sites | [§8.6](#86-nalgebra-a-phantom-dependency) | `grep -rn nalgebra crates/ --include=*.rs` |
 | 107 GPU tests, 80 hardware-gated | [§5.11](#511-aether-gpu) | `cargo test -p aether-gpu --features gpu --release` |
 | 20 WGSL kernels (guarded) | [§5.11](#511-aether-gpu) | `grep -c '^@compute' crates/aether-gpu/src/shaders.wgsl` |
 | 0 of 26 GPU mutants escape, 0 of 26 in core | [§7.3](#73-mutation-testing) | `./crates/aether-gpu/mutants.sh`, `./crates/aether-core/mutants.sh` |
 | matmul crossover $n = 128$ (magnitude not reproducible; 10×–63× observed) | [§5.11](#511-aether-gpu) | `cargo run -p aether-gpu --example tensor_crossover --release`, and `-- --samples` for the raw timings |
 | 11,637 Lean lines (guarded), 48 theorems, 0 `sorry` | [§7.4](#74-the-lean-formalization) | `(Get-ChildItem Aether -Recurse -Filter *.lean \| Get-Content).Count`, then `Select-String "^\s*(theorem\|lemma)\s"` and `Select-String "\bsorry\b"` |
-| Ported-suite test counts (guarded) and the 500-instance arena ratio 1.0283 / 1.2826 | [§I.10](#i10-runtime-planning-offsets-transitive-reduction-islands) | `cargo test -p aether-core --test planner -- --nocapture`; each suite by `--test <module>` |
-| Upstream pull-request states | [§I.11](#i11-merged-upstream-contributions) | `gh pr view <number> -R <owner/repo> --json state,mergedAt,additions,deletions` |
+| Certified-library test counts (guarded) and the 500-instance arena ratio 1.0283 / 1.2826 | [`planner` docs](https://teerthsharma.github.io/Aether-Lang/integrated/planner/) | `cargo test -p aether-core --test planner -- --nocapture`; each suite by `--test <module>` |
 | 707 Lean `example` blocks; 45 of 47 `Core.lean` theorems by `native_decide` | [§7.4](#74-the-lean-formalization) | `grep -cE '^\s*example' Aether/*.lean`; inspect the proof of each `theorem` in `Core.lean` |
 
 ### Numbers that are not reproducible from this repository
@@ -2930,7 +2600,7 @@ crates/aether-core/tests/                                  lines
                                                          12,621
 ```
 
-**12,621 lines of tests against 12,896 lines of non-`ml` source.** The topology core and the ported modules are well covered; the 5,075-line `ml` subtree is covered mainly by in-module tests and one contract suite, and that asymmetry is the shape of this repository's assurance.
+**12,621 lines of tests against 12,896 lines of non-`ml` source.** The topology core and the certified library are well covered; the 5,075-line `ml` subtree is covered mainly by in-module tests and one contract suite, and that asymmetry is the shape of this repository's assurance.
 
 ### aether-lang and aether-kernel
 
@@ -2962,7 +2632,7 @@ crates/aether-kernel/src/
 
 ### Example programs
 
-`examples/` holds the 17 programs below, from before the port, and one program per ported module plus a pipeline, listed in §I.12. All use the pre-rename `.aegis` and `.ag` extensions; the CLI accepts `.aegis` and warns on `.ag`.
+`examples/` holds the 17 programs below, one program per module of the certified library plus a pipeline (listed in §4.9), and `tour.aegis`, the program at the top of this document. All use the pre-rename `.aegis` and `.ag` extensions; the CLI accepts `.aegis` and warns on `.ag`.
 
 | File | Bytes | What it demonstrates |
 |---|---:|---|
@@ -3107,7 +2777,7 @@ The house rule for any contribution that adds a number to this README: **it come
 
 **Bio mode** — the label the CLI prints as its execution mode. It changes nothing.
 
-**`ponytail:` comment** — the repository's marker for a deliberate shortcut, naming its ceiling and the trigger that should force revisiting it. The pre-port crate has two, in `attention.rs` and `diagram.rs`; the ported `certify.rs` and `track.rs` add one each; all four name concrete triggers.
+**`ponytail:` comment** — the repository's marker for a deliberate shortcut, naming its ceiling and the trigger that should force revisiting it. The topology core has two, in `attention.rs` and `diagram.rs`; the certified library adds one each in `certify.rs` and `track.rs`; all four name concrete triggers.
 
 **Active / Ungated / Hardware-gated** — the status vocabulary of §1.5: evidence produced by a CI command; evidence that exists but that no CI command produces; evidence that needs an adapter no CI runner has.
 
@@ -3117,7 +2787,7 @@ The house rule for any contribution that adds a number to this README: **it come
 
 Aether-Lang is distributed under the **Aether-Lang Custom Attribution License, Version 1.0** — see [LICENSE](LICENSE). In summary: personal use is unlimited with attribution; educational use is permitted with attribution in course materials; open-source use is permitted only if the project prominently credits Teerth Sharma and includes the license in full; commercial use requires prior written permission. Forks and derivatives that are distributed must carry the same license and attribution requirement. The summary is not the license; the file is.
 
-Copyright © 2026 Teerth Sharma. The Lean formalization, the persistence engine, the language, and every mistake catalogued above are original work. The scheduled-attention module is a port of [`triton-lang/kernels#22`](https://github.com/triton-lang/kernels/pull/22), contributed by the same author to that repository under its license.
+Copyright © 2026 Teerth Sharma. The Lean formalization, the persistence engine, the language, and every mistake catalogued above are original work. The scheduled-attention module rebuilds in Rust the kernel the same author contributed to [`triton-lang/kernels#22`](https://github.com/triton-lang/kernels/pull/22) under that repository's license.
 
 To cite this work, use [`CITATION.cff`](CITATION.cff) (DOI [10.5281/zenodo.21997728](https://doi.org/10.5281/zenodo.21997728)).
 
