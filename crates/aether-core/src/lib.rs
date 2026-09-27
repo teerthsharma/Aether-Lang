@@ -32,6 +32,7 @@ extern crate alloc;
 pub mod aether;
 pub mod arrangement;
 pub mod attention;
+pub mod certify;
 pub mod diagram;
 pub mod governor;
 pub mod linking;
