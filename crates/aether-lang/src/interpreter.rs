@@ -547,8 +547,12 @@ impl EscalatingRegressor {
 
 /// Runtime environment
 pub struct Interpreter {
-    /// Variable bindings
-    pub variables: BTreeMap<String, Value>, // Made public for tests
+    /// Global bindings, the program's top level. A function reads them and
+    /// never writes them. Public for tests.
+    pub variables: BTreeMap<String, Value>,
+    /// The running function's parameters and locals, `None` at top level. A
+    /// function sees this frame and the globals, never its caller's frame.
+    local: Option<BTreeMap<String, Value>>,
     /// Manifold workspaces
     manifolds: Vec<ManifoldWorkspace>,
     /// Block geometries
@@ -584,6 +588,7 @@ impl Interpreter {
 
         Self {
             variables,
+            local: None,
             manifolds: Vec::new(),
             blocks: Vec::new(),
             classes: Vec::new(),
@@ -604,6 +609,33 @@ impl Interpreter {
             }
         }
         Ok(last_value)
+    }
+
+    /// A name's value: the running function's frame first, then the globals.
+    fn get_var(&self, name: &str) -> Option<&Value> {
+        self.local
+            .as_ref()
+            .and_then(|frame| frame.get(name))
+            .or_else(|| self.variables.get(name))
+    }
+
+    /// Bind a name: in the running function's frame, or globally at top level.
+    fn set_var(&mut self, name: String, value: Value) {
+        match &mut self.local {
+            Some(frame) => frame.insert(name, value),
+            None => self.variables.insert(name, value),
+        };
+    }
+
+    /// Take a variable out for a method to mutate in place. Inside a function
+    /// a global is copied, not taken: the write lands in the local frame.
+    fn take_var(&mut self, name: &str) -> Option<Value> {
+        match &mut self.local {
+            Some(frame) => frame
+                .remove(name)
+                .or_else(|| self.variables.get(name).cloned()),
+            None => self.variables.remove(name),
+        }
     }
 
     fn execute_statement(&mut self, stmt: &Statement) -> Result<RuntimeFlow, String> {
@@ -643,14 +675,12 @@ impl Interpreter {
 
         let handle = ClassHandle(self.classes.len());
         self.classes.push(class_def);
-        self.variables
-            .insert(decl.name.clone(), Value::Class(handle));
+        self.set_var(decl.name.clone(), Value::Class(handle));
         Ok(Value::Class(handle))
     }
 
     fn execute_fn_decl(&mut self, decl: &FnDecl) -> Result<Value, String> {
-        self.variables
-            .insert(decl.name.clone(), Value::Function(decl.clone()));
+        self.set_var(decl.name.clone(), Value::Function(decl.clone()));
         Ok(Value::Unit)
     }
 
@@ -665,7 +695,7 @@ impl Interpreter {
 
     #[allow(unused_variables)]
     fn evaluate_new(&mut self, class_name: &String, args: &[Expr]) -> Result<Value, String> {
-        let class_handle = if let Some(Value::Class(h)) = self.variables.get(class_name) {
+        let class_handle = if let Some(Value::Class(h)) = self.get_var(class_name) {
             *h
         } else {
             return Err(format!("Class '{}' not found", class_name));
@@ -695,7 +725,7 @@ impl Interpreter {
             let shown = if module == "Ml" { "ml" } else { module };
             let value = binding(module, symbol)
                 .ok_or_else(|| format!("Symbol '{}' not found in {}", symbol, shown))?;
-            self.variables.insert(symbol.clone(), value);
+            self.set_var(symbol.clone(), value);
             return Ok(Value::Unit);
         }
         // Every module but math is also a value, for `topology.ph(M)`; ml is
@@ -704,18 +734,16 @@ impl Interpreter {
         match module {
             "math" => {}
             "ml" | "Ml" => {
-                self.variables
-                    .insert(String::from("Ml"), Value::Module(String::from("Ml")));
+                self.set_var(String::from("Ml"), Value::Module(String::from("Ml")));
             }
             _ => {
-                self.variables
-                    .insert(String::from(module), Value::Module(String::from(module)));
+                self.set_var(String::from(module), Value::Module(String::from(module)));
             }
         }
         for name in names {
             let value = binding(module, name)
                 .ok_or_else(|| format!("{}: '{}' is exported but not defined", module, name))?;
-            self.variables.insert(String::from(*name), value);
+            self.set_var(String::from(*name), value);
         }
         Ok(Value::Unit)
     }
@@ -727,7 +755,7 @@ impl Interpreter {
             None => self.sample_data.clone(),
         };
         let manifold = natives::embed_manifold(self, data, DIM, tau)?;
-        self.variables.insert(decl.name.clone(), manifold.clone());
+        self.set_var(decl.name.clone(), manifold.clone());
         Ok(manifold)
     }
 
@@ -793,8 +821,7 @@ impl Interpreter {
             let block = workspace.extract_block(start, end);
             let handle = BlockHandle(self.blocks.len());
             self.blocks.push(block);
-            self.variables
-                .insert(decl.name.clone(), Value::Block(handle));
+            self.set_var(decl.name.clone(), Value::Block(handle));
             Ok(Value::Block(handle))
         } else {
             Err("manifold not found".to_string())
@@ -819,7 +846,7 @@ impl Interpreter {
     }
 
     fn get_manifold_handle(&self, name: &String) -> Result<ManifoldHandle, String> {
-        if let Some(Value::Manifold(h)) = self.variables.get(name) {
+        if let Some(Value::Manifold(h)) = self.get_var(name) {
             Ok(*h)
         } else {
             Err("variable is not a manifold".to_string())
@@ -854,17 +881,17 @@ impl Interpreter {
 
     fn execute_var(&mut self, decl: &VarDecl) -> Result<Value, String> {
         let value = self.evaluate_expr(&decl.value)?;
-        self.variables.insert(decl.name.clone(), value.clone());
+        self.set_var(decl.name.clone(), value.clone());
         Ok(value)
     }
 
     fn execute_assign(&mut self, stmt: &AssignStmt) -> Result<Value, String> {
-        if !self.variables.contains_key(&stmt.name) {
+        if self.get_var(&stmt.name).is_none() {
             return Err(format!("cannot assign undefined variable '{}'", stmt.name));
         }
 
         let value = self.evaluate_expr(&stmt.value)?;
-        self.variables.insert(stmt.name.clone(), value.clone());
+        self.set_var(stmt.name.clone(), value.clone());
         Ok(value)
     }
 
@@ -946,8 +973,7 @@ impl Interpreter {
         let mut last_value = Value::Unit;
 
         while (step > 0 && current < end) || (step < 0 && current > end) {
-            self.variables
-                .insert(stmt.iterator.clone(), Value::Num(current as f64));
+            self.set_var(stmt.iterator.clone(), Value::Num(current as f64));
             match self.execute_stmt_block(&stmt.body)? {
                 RuntimeFlow::Value(value) => last_value = value,
                 RuntimeFlow::Return(value) => return Ok(value),
@@ -960,8 +986,7 @@ impl Interpreter {
             current += step;
         }
 
-        self.variables
-            .insert(stmt.iterator.clone(), Value::Num(current as f64));
+        self.set_var(stmt.iterator.clone(), Value::Num(current as f64));
         Ok(last_value)
     }
 
@@ -1045,7 +1070,7 @@ impl Interpreter {
                 Literal::Str(s) => Ok(Value::Str(s.clone())),
             },
             ExprKind::Ident(name) => {
-                if let Some(v) = self.variables.get(name) {
+                if let Some(v) = self.get_var(name) {
                     Ok(v.clone())
                 } else {
                     Ok(Value::Unit)
@@ -1142,7 +1167,7 @@ impl Interpreter {
     }
 
     fn evaluate_call(&mut self, name: &Ident, args: &[CallArg]) -> Result<Value, String> {
-        match self.variables.get(name) {
+        match self.get_var(name) {
             Some(Value::NativeFn(NativeFunction::Print)) => self.print(args),
             Some(Value::NativeFn(NativeFunction::Native(id))) => {
                 let id = *id;
@@ -1153,7 +1178,8 @@ impl Interpreter {
                 let func = func.clone();
                 self.execute_user_fn(&func, args)
             }
-            _ => Ok(Value::Unit),
+            Some(_) => Ok(Value::Unit),
+            None => Err(format!("undefined function '{}'", name)),
         }
     }
 
@@ -1219,19 +1245,15 @@ impl Interpreter {
             ));
         }
 
-        let mut frame = self.variables.clone();
-        for (param, value) in func.params.iter().zip(args) {
-            frame.insert(param.clone(), value);
-        }
-
-        let outer = core::mem::replace(&mut self.variables, frame);
+        let frame = func.params.iter().cloned().zip(args).collect();
+        let caller = core::mem::replace(&mut self.local, Some(frame));
         let result = match self.execute_stmt_block(&func.body) {
             Ok(RuntimeFlow::Return(value)) | Ok(RuntimeFlow::Value(value)) => Ok(value),
             Ok(RuntimeFlow::Break) => Err(String::from("break outside loop")),
             Ok(RuntimeFlow::Continue) => Err(String::from("continue outside loop")),
             Err(err) => Err(err),
         };
-        self.variables = outer;
+        self.local = caller;
         result
     }
 
@@ -1241,7 +1263,7 @@ impl Interpreter {
         method: &String,
         args: &[CallArg],
     ) -> Result<Value, String> {
-        let module = match self.variables.get(object_name) {
+        let module = match self.get_var(object_name) {
             None => return Err(format!("Object '{}' not found", object_name)),
             Some(Value::Module(module)) => Some(module.clone()),
             Some(_) => None,
@@ -1253,18 +1275,18 @@ impl Interpreter {
             return natives::method(&mut Value::Module(module), method, args, self);
         }
         // Anything else is taken out and put back, so the method mutates it in
-        // place rather than a copy.
+        // place rather than a copy; inside a function it goes back into the
+        // local frame, as every write there does.
         let mut receiver = self
-            .variables
-            .remove(object_name)
+            .take_var(object_name)
             .ok_or_else(|| format!("Object '{}' not found", object_name))?;
         let result = natives::method(&mut receiver, method, args, self);
-        self.variables.insert(object_name.clone(), receiver);
+        self.set_var(object_name.clone(), receiver);
         result
     }
 
     fn evaluate_field_access(&self, object: &String, field: &String) -> Result<Value, String> {
-        match self.variables.get(object) {
+        match self.get_var(object) {
             Some(record @ Value::Record(_)) => natives::field(record, field),
             Some(Value::Object(handle)) => Ok(self
                 .objects
