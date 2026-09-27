@@ -428,8 +428,7 @@ pub fn certified_precision_bound(n: usize, m: usize, flagged: usize) -> Option<f
 /// `flagged = 0`, or when `2·b_adm > flagged`, which is impossible because every
 /// counted orbit has at least two members.
 pub fn admissible_precision_bound(flagged: usize, b_adm: usize) -> Option<f64> {
-    (flagged >= 1 && 2 * b_adm <= flagged)
-        .then(|| (flagged - b_adm) as f64 / flagged as f64)
+    (flagged >= 1 && 2 * b_adm <= flagged).then(|| (flagged - b_adm) as f64 / flagged as f64)
 }
 
 /// Bound 5: `recall(S*) ≥ (n − m*) / n` whenever `f` errs at all, for injective
