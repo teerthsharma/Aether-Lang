@@ -42,6 +42,8 @@ pub mod persistence;
 pub mod scheduled;
 pub mod state;
 pub mod topology;
+#[cfg(feature = "alloc")]
+pub mod track;
 
 // Re-export key types for convenience
 pub use aether::{BlockMetadata, DriftDetector, HierarchicalBlockTree};
