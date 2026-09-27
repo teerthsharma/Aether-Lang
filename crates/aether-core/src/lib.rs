@@ -39,6 +39,7 @@ pub mod ml;
 #[cfg(feature = "alloc")]
 pub mod orbit;
 pub mod persistence;
+pub mod resolvent;
 pub mod scheduled;
 pub mod state;
 pub mod topology;
