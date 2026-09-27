@@ -36,6 +36,8 @@ pub mod governor;
 pub mod manifold;
 pub mod memory;
 pub mod ml;
+#[cfg(feature = "alloc")]
+pub mod orbit;
 pub mod persistence;
 pub mod scheduled;
 pub mod state;
