@@ -81,11 +81,20 @@ struct Instance {
 }
 
 fn instance(rng: &mut Rng, n: usize) -> Instance {
-    let truth: Vec<u32> = rng.permutation(2 * n)[..n].iter().map(|&v| v as u32).collect();
+    let truth: Vec<u32> = rng.permutation(2 * n)[..n]
+        .iter()
+        .map(|&v| v as u32)
+        .collect();
     let alphabet = 1 + rng.below(2 * n);
     let f = truth
         .iter()
-        .map(|&t| if rng.coin() { t } else { rng.below(alphabet) as u32 })
+        .map(|&t| {
+            if rng.coin() {
+                t
+            } else {
+                rng.below(alphabet) as u32
+            }
+        })
         .collect();
     let mut gold = truth.clone();
     gold.sort_unstable();
@@ -252,7 +261,11 @@ fn orbits_are_invariant_under_relabelling_of_elements_and_values() {
             .iter()
             .map(|&v| 7919 * code[v as usize] as u64 + 3)
             .collect();
-        assert_eq!(Partition::from_map(&recoded), p, "seed {seed}: value recoding");
+        assert_eq!(
+            Partition::from_map(&recoded),
+            p,
+            "seed {seed}: value recoding"
+        );
 
         let pi = rng.permutation(n);
         let mut moved = vec![0u32; n];
@@ -328,12 +341,19 @@ fn bound_1_never_exceeds_the_true_error_count() {
         let t1_star = admissible_error_bound(n, m_star).unwrap();
         let err = errors(&x.f, &x.truth);
 
-        assert!(m_star <= p.m(), "seed {seed}: m* = {m_star} > m = {}", p.m());
+        assert!(
+            m_star <= p.m(),
+            "seed {seed}: m* = {m_star} > m = {}",
+            p.m()
+        );
         assert!(
             t1 <= t1_star && t1_star <= err,
             "seed {seed}: n − m = {t1}, n − m* = {t1_star}, true errors {err}"
         );
-        let sum: usize = representatives(&p).iter().map(|&r| p.block_size(r) - 1).sum();
+        let sum: usize = representatives(&p)
+            .iter()
+            .map(|&r| p.block_size(r) - 1)
+            .sum();
         assert_eq!(t1, sum, "seed {seed}: n − m is Σ (s − 1) over orbits");
         assert_eq!(
             certified_error_floor(n, p.m()),
@@ -359,7 +379,13 @@ fn bound_1_is_attained_when_every_orbit_holds_one_correct_value() {
         // Fresh values lie outside f's alphabet, so each truth is injective.
         let fresh = |e: usize| 1000 + e as u32;
         let every: Vec<u32> = (0..n)
-            .map(|e| if p.representative(e) == e { f[e] } else { fresh(e) })
+            .map(|e| {
+                if p.representative(e) == e {
+                    f[e]
+                } else {
+                    fresh(e)
+                }
+            })
             .collect();
         assert_eq!(
             errors(&f, &every),
@@ -368,7 +394,13 @@ fn bound_1_is_attained_when_every_orbit_holds_one_correct_value() {
         );
 
         let some: Vec<u32> = (0..n)
-            .map(|e| if p.representative(e) == e && keep[e] { f[e] } else { fresh(e) })
+            .map(|e| {
+                if p.representative(e) == e && keep[e] {
+                    f[e]
+                } else {
+                    fresh(e)
+                }
+            })
             .collect();
         let m_star = admissible_distinct(&f, &some).unwrap();
         assert_eq!(
@@ -437,7 +469,9 @@ fn bound_3_no_decoder_of_the_tuple_beats_m_join_over_n() {
             .fold(parts[0].clone(), |acc, p| acc.join(p).unwrap());
 
         // The join is the fibres of the tuple map, and refines every component.
-        let tuples_of: Vec<Vec<u32>> = (0..n).map(|e| maps.iter().map(|f| f[e]).collect()).collect();
+        let tuples_of: Vec<Vec<u32>> = (0..n)
+            .map(|e| maps.iter().map(|f| f[e]).collect())
+            .collect();
         assert_eq!(Partition::from_map(&tuples_of), join, "seed {seed}");
         let m_join = join.m();
         assert!(parts.iter().all(|p| m_join >= p.m()), "seed {seed}");
@@ -450,8 +484,15 @@ fn bound_3_no_decoder_of_the_tuple_beats_m_join_over_n() {
         let ceiling = join_recovery_bound(n, m_join).unwrap();
         let mut best = 0;
         for h in tuples(n, m_join) {
-            let recovered = block.iter().enumerate().filter(|&(e, &b)| h[b] == e).count();
-            assert!(recovered as f64 / n as f64 <= ceiling, "seed {seed}: h = {h:?}");
+            let recovered = block
+                .iter()
+                .enumerate()
+                .filter(|&(e, &b)| h[b] == e)
+                .count();
+            assert!(
+                recovered as f64 / n as f64 <= ceiling,
+                "seed {seed}: h = {h:?}"
+            );
             best = best.max(recovered);
         }
         assert_eq!(best, m_join, "seed {seed}: one recovery per join block");
@@ -470,7 +511,10 @@ fn bound_4_precision_floor_holds_against_every_injective_truth_and_is_attained()
     for seed in 0..300u64 {
         let mut rng = Rng::new(seed);
         let n = 2 + rng.below(5);
-        let gold: Vec<u32> = rng.permutation(2 * n)[..n].iter().map(|&v| v as u32).collect();
+        let gold: Vec<u32> = rng.permutation(2 * n)[..n]
+            .iter()
+            .map(|&v| v as u32)
+            .collect();
         let alphabet = 1 + rng.below(2 * n);
         let f = rng.map(n, alphabet);
         let p = Partition::from_map(&f);
@@ -487,7 +531,10 @@ fn bound_4_precision_floor_holds_against_every_injective_truth_and_is_attained()
         assert_eq!(n - p.m(), s - b, "seed {seed}: n − m = |S| − b");
         assert!(b_adm <= b && t6 >= 0.5 && t6_star >= t6, "seed {seed}");
         if b_adm == b {
-            assert_eq!(t6_star, t6, "seed {seed}: no sharpening without an inadmissible orbit");
+            assert_eq!(
+                t6_star, t6,
+                "seed {seed}: no sharpening without an inadmissible orbit"
+            );
         }
 
         let mut worst = usize::MAX;
@@ -539,13 +586,23 @@ fn bound_5_recall_floor_holds_exhaustively_and_is_attained() {
                 let m_star = admissible_distinct(&f, &gold).unwrap();
                 let floor = recall_floor(n, m_star).unwrap();
                 let recall = caught as f64 / wrong as f64;
-                assert!(recall >= floor, "f = {f:?}, truth = {truth:?}: {recall} < {floor}");
-                assert_eq!(floor == 0.0, m_star == n, "f = {f:?}: zero exactly at m* = n");
+                assert!(
+                    recall >= floor,
+                    "f = {f:?}, truth = {truth:?}: {recall} < {floor}"
+                );
+                assert_eq!(
+                    floor == 0.0,
+                    m_star == n,
+                    "f = {f:?}: zero exactly at m* = n"
+                );
                 attained += usize::from(recall == floor);
             }
         }
     }
-    assert!(attained > 0, "the floor is never attained, so it is not tight");
+    assert!(
+        attained > 0,
+        "the floor is never attained, so it is not tight"
+    );
 
     for seed in 0..2000u64 {
         let mut rng = Rng::new(seed);
@@ -576,7 +633,11 @@ fn bound_5_is_zero_exactly_at_the_shuffle_witness() {
     assert_eq!(m_star, n);
     assert_eq!(recall_floor(n, m_star), Some(0.0));
     assert_eq!(recall_counts(&f, &f, &gold), (0, 0), "R = f: nothing wrong");
-    assert_eq!(recall_counts(&f, &shifted, &gold), (0, n), "R = f∘σ: all wrong, none caught");
+    assert_eq!(
+        recall_counts(&f, &shifted, &gold),
+        (0, n),
+        "R = f∘σ: all wrong, none caught"
+    );
 
     // One answer leaving G makes the floor positive, and it still holds.
     let mut off = f.clone();
@@ -601,7 +662,11 @@ fn a_gold_set_smaller_than_n_voids_the_certificate_and_is_refused() {
     let f = truth;
     let p = Partition::from_map(&f);
     assert_eq!(errors(&f, &truth), 0);
-    assert_eq!(orbit_error_bound(4, p.m()), Some(2), "the false certificate");
+    assert_eq!(
+        orbit_error_bound(4, p.m()),
+        Some(2),
+        "the false certificate"
+    );
     assert_eq!(admissible_distinct(&f, &truth), None);
     assert_eq!(admissible_collapsed_blocks(&f, &truth), None);
 }
@@ -610,7 +675,13 @@ fn a_gold_set_smaller_than_n_voids_the_certificate_and_is_refused() {
 fn empty_and_singleton_inputs_have_the_trivial_partition() {
     let empty = Partition::from_map::<u32>(&[]);
     assert_eq!(
-        (empty.n(), empty.m(), empty.largest(), empty.flagged(), empty.collapsed_blocks()),
+        (
+            empty.n(),
+            empty.m(),
+            empty.largest(),
+            empty.flagged(),
+            empty.collapsed_blocks()
+        ),
         (0, 0, 0, 0, 0)
     );
     assert_eq!(Partition::from_edges(0, &[]), Some(empty.clone()));
@@ -620,10 +691,20 @@ fn empty_and_singleton_inputs_have_the_trivial_partition() {
 
     let one = Partition::from_map(&[7u32]);
     assert_eq!(
-        (one.n(), one.m(), one.largest(), one.flagged(), one.collapsed_blocks()),
+        (
+            one.n(),
+            one.m(),
+            one.largest(),
+            one.flagged(),
+            one.collapsed_blocks()
+        ),
         (1, 1, 1, 0, 0)
     );
-    assert_eq!(Partition::from_edges(1, &[(0, 0)]), Some(one.clone()), "a self-loop");
+    assert_eq!(
+        Partition::from_edges(1, &[(0, 0)]),
+        Some(one.clone()),
+        "a self-loop"
+    );
     assert_eq!(one.collision(0), None, "no other element to collide with");
     assert_eq!(orbit_error_bound(1, 1), Some(0));
     assert_eq!(pooling_recovery_bound(one.largest()), Some(1.0));
@@ -637,7 +718,10 @@ fn identity_and_constant_maps_sit_at_the_two_ends_of_every_bound() {
     // Identity: fully separated. The certificate is silent, and says so.
     let identity: Vec<u32> = (0..n as u32).collect();
     let p = Partition::from_map(&identity);
-    assert_eq!((p.m(), p.largest(), p.flagged(), p.collapsed_blocks()), (n, 1, 0, 0));
+    assert_eq!(
+        (p.m(), p.largest(), p.flagged(), p.collapsed_blocks()),
+        (n, 1, 0, 0)
+    );
     assert_eq!(orbit_error_bound(n, p.m()), Some(0));
     assert_eq!(certified_error_floor(n, p.m()), Some(0.0));
     assert_eq!(certified_precision_bound(n, p.m(), p.flagged()), None);
@@ -647,9 +731,15 @@ fn identity_and_constant_maps_sit_at_the_two_ends_of_every_bound() {
     // Constant: total collapse onto one value.
     let constant = vec![7u32; n];
     let c = Partition::from_map(&constant);
-    assert_eq!((c.m(), c.largest(), c.flagged(), c.collapsed_blocks()), (1, n, n, 1));
+    assert_eq!(
+        (c.m(), c.largest(), c.flagged(), c.collapsed_blocks()),
+        (1, n, n, 1)
+    );
     assert_eq!(orbit_error_bound(n, c.m()), Some(n - 1));
-    assert_eq!(certified_precision_bound(n, c.m(), c.flagged()), Some(19.0 / 20.0));
+    assert_eq!(
+        certified_precision_bound(n, c.m(), c.flagged()),
+        Some(19.0 / 20.0)
+    );
     assert_eq!(pooling_recovery_bound(c.largest()), Some(1.0 / 20.0));
     assert!((0..n).all(|e| c.collision(e) == Some(1.0)));
 
@@ -672,17 +762,41 @@ fn every_bound_refuses_counts_no_partition_can_produce() {
     assert_eq!(certified_error_floor(5, 0), None);
     assert_eq!(admissible_error_bound(0, 0), None);
     assert_eq!(admissible_error_bound(5, 6), None);
-    assert_eq!(admissible_error_bound(5, 0), Some(5), "m* = 0 is total inadmissible collapse");
+    assert_eq!(
+        admissible_error_bound(5, 0),
+        Some(5),
+        "m* = 0 is total inadmissible collapse"
+    );
     assert_eq!(recall_floor(5, 6), None);
     assert_eq!(pooling_recovery_bound(0), None);
     assert_eq!(join_recovery_bound(4, 0), None);
     assert_eq!(join_recovery_bound(4, 5), None);
-    assert_eq!(certified_precision_bound(12, 12, 0), None, "empty S has no precision");
-    assert_eq!(certified_precision_bound(20, 15, 3), None, "5 errors cannot fit in |S| = 3");
+    assert_eq!(
+        certified_precision_bound(12, 12, 0),
+        None,
+        "empty S has no precision"
+    );
+    assert_eq!(
+        certified_precision_bound(20, 15, 3),
+        None,
+        "5 errors cannot fit in |S| = 3"
+    );
     assert_eq!(certified_precision_bound(5, 1, 6), None, "|S| > n");
-    assert_eq!(admissible_precision_bound(0, 0), None, "empty S has no precision");
-    assert_eq!(admissible_precision_bound(4, 3), None, "3 orbits of ≥ 2 need |S| ≥ 6");
-    assert_eq!(Partition::from_edges(3, &[(0, 3)]), None, "edge out of range");
+    assert_eq!(
+        admissible_precision_bound(0, 0),
+        None,
+        "empty S has no precision"
+    );
+    assert_eq!(
+        admissible_precision_bound(4, 3),
+        None,
+        "3 orbits of ≥ 2 need |S| ≥ 6"
+    );
+    assert_eq!(
+        Partition::from_edges(3, &[(0, 3)]),
+        None,
+        "edge out of range"
+    );
     assert_eq!(
         Partition::from_map(&[1u8, 2]).join(&Partition::from_map(&[1u8, 2, 3])),
         None,

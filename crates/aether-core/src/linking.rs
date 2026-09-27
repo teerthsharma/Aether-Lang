@@ -534,7 +534,12 @@ fn det_for_orientation(pts: &[V3], attempt: usize) -> Option<u128> {
             out[c] = arc;
         }
     }
-    if inn.iter().chain(&out).chain(&over).any(|&v| v == usize::MAX) {
+    if inn
+        .iter()
+        .chain(&out)
+        .chain(&over)
+        .any(|&v| v == usize::MAX)
+    {
         return None; // a crossing missing a pass: the walk was inconsistent
     }
 

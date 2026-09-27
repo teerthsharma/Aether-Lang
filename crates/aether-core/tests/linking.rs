@@ -107,7 +107,11 @@ fn torus_knot(p: usize, q: usize, n: usize) -> Vec<Vec3> {
         .map(|k| {
             let t = TAU * k as f64 / n as f64;
             let r = 2.0 + (q as f64 * t).cos();
-            [r * (p as f64 * t).cos(), r * (p as f64 * t).sin(), (q as f64 * t).sin()]
+            [
+                r * (p as f64 * t).cos(),
+                r * (p as f64 * t).sin(),
+                (q as f64 * t).sin(),
+            ]
         })
         .collect()
 }
@@ -215,11 +219,20 @@ fn torus_link_2_2k_certifies_lk_k_with_one_sign_across_the_family() {
     for k in 1..=4i64 {
         let (a, b) = twisted_band(k as i32, 1.0, 0.2, 256);
         let got = certified_lk(&a, &b);
-        assert_eq!(got.abs(), k, "(2,{}) torus link certified lk = {got}", 2 * k);
+        assert_eq!(
+            got.abs(),
+            k,
+            "(2,{}) torus link certified lk = {got}",
+            2 * k
+        );
         if sign == 0 {
             sign = got.signum();
         }
-        assert_eq!(got.signum(), sign, "one generator must give one sign, k = {k}");
+        assert_eq!(
+            got.signum(),
+            sign,
+            "one generator must give one sign, k = {k}"
+        );
     }
 }
 
@@ -245,7 +258,11 @@ fn whitehead_link_has_lk_zero_and_is_never_certified_as_separable() {
     );
     // The proven zero is the whole verdict. There is no variant that could
     // read as "separable", and none is returned.
-    assert_eq!(g.certify(), LinkVerdict::ZeroLinking, "Whitehead link: {g:?}");
+    assert_eq!(
+        g.certify(),
+        LinkVerdict::ZeroLinking,
+        "Whitehead link: {g:?}"
+    );
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -354,7 +371,10 @@ fn linking_number_is_invariant_under_rigid_rotation() {
         &map_all(&a, |p| rotate(p, ax, ay, az)),
         &map_all(&b, |p| rotate(p, ax, ay, az)),
     );
-    assert!((base.value - rot.value).abs() < 1e-10, "{base:?} vs {rot:?}");
+    assert!(
+        (base.value - rot.value).abs() < 1e-10,
+        "{base:?} vs {rot:?}"
+    );
     assert_eq!(rot.certify(), base.certify());
 }
 
@@ -364,7 +384,10 @@ fn linking_number_is_invariant_under_translation() {
     let base = lk(&a, &b);
     let t = [123.5, -7.25, 4096.0];
     let moved = lk(&map_all(&a, |p| add(p, t)), &map_all(&b, |p| add(p, t)));
-    assert!((base.value - moved.value).abs() < 1e-10, "{base:?} vs {moved:?}");
+    assert!(
+        (base.value - moved.value).abs() < 1e-10,
+        "{base:?} vs {moved:?}"
+    );
     assert_eq!(moved.certify(), base.certify());
 }
 
@@ -378,7 +401,11 @@ fn linking_number_and_bound_are_bitwise_invariant_under_power_of_two_scaling() {
     for c in [0.25, 0.5, 2.0, 1024.0, 1.0 / 1024.0, 2f64.powi(400)] {
         let got = lk(&map_all(&a, |p| mul(p, c)), &map_all(&b, |p| mul(p, c)));
         assert_eq!(base.value.to_bits(), got.value.to_bits(), "scale {c}");
-        assert_eq!(base.error_bound.to_bits(), got.error_bound.to_bits(), "scale {c}");
+        assert_eq!(
+            base.error_bound.to_bits(),
+            got.error_bound.to_bits(),
+            "scale {c}"
+        );
     }
     for c in [1e-6, 0.037, 3.7, 1.9e5] {
         let got = lk(&map_all(&a, |p| mul(p, c)), &map_all(&b, |p| mul(p, c)));
@@ -482,9 +509,15 @@ fn too_few_vertices_and_non_finite_coordinates_are_refused_everywhere() {
         bad[5][1] = bad_value;
         assert_eq!(
             linking_number(&ring, &bad),
-            Err(LinkingError::NonFinite { curve: 1, vertex: 5 })
+            Err(LinkingError::NonFinite {
+                curve: 1,
+                vertex: 5
+            })
         );
-        let first = LinkingError::NonFinite { curve: 0, vertex: 5 };
+        let first = LinkingError::NonFinite {
+            curve: 0,
+            vertex: 5,
+        };
         assert_eq!(linking_number(&bad, &ring), Err(first));
         assert_eq!(writhe(&bad), Err(first));
         assert_eq!(knot_determinant(&bad), Err(first));
@@ -523,7 +556,10 @@ fn writhe_is_real_valued_odd_under_reflection_and_refuses_self_intersection() {
         "writhe {w} is suspiciously integral; it is not an invariant"
     );
     let reflected = writhe(&map_all(&a, |p| [p[0], p[1], -p[2]])).unwrap();
-    assert!((w + reflected).abs() < 1e-10, "{w} vs reflected {reflected}");
+    assert!(
+        (w + reflected).abs() < 1e-10,
+        "{w} vs reflected {reflected}"
+    );
 
     // Lemniscate of Gerono: crosses itself at the origin, off every vertex.
     let lemniscate: Vec<Vec3> = (0..64)
@@ -571,7 +607,12 @@ fn knot_determinant_matches_the_classical_table() {
 #[test]
 fn knot_determinant_is_projection_invariant_mirror_blind_and_incomplete() {
     let k = torus_knot(2, 3, 240);
-    for (ax, ay, az) in [(0.7, 0.0, 0.0), (0.0, 1.9, 0.0), (0.0, 0.0, 2.6), (3.3, 0.4, -1.2)] {
+    for (ax, ay, az) in [
+        (0.7, 0.0, 0.0),
+        (0.0, 1.9, 0.0),
+        (0.0, 0.0, 2.6),
+        (3.3, 0.4, -1.2),
+    ] {
         let r = map_all(&k, |p| rotate(p, ax, ay, az));
         assert_eq!(knot_determinant(&r), Ok(3), "rotation ({ax}, {ay}, {az})");
     }
