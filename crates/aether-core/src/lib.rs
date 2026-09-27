@@ -37,6 +37,7 @@ pub mod coupling;
 pub mod diagram;
 pub mod governor;
 pub mod linking;
+pub mod kvwitness;
 pub mod manifold;
 pub mod memory;
 pub mod ml;
