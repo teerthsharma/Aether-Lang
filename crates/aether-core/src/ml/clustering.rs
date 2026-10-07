@@ -544,8 +544,8 @@ impl<const D: usize> AgglomerativeClustering<D> {
         let mut next_cluster_id = n;
 
         for merge_idx in 0..(n - 1) {
-            // Find closest pair of active clusters
-            let mut min_dist = f64::MAX;
+            // Find closest pair of active clusters using squared distance
+            let mut min_dist_sq = f64::MAX;
             let mut best_i = 0;
             let mut best_j = 1;
 
@@ -558,19 +558,21 @@ impl<const D: usize> AgglomerativeClustering<D> {
                         continue;
                     }
 
-                    let dist = match self.linkage {
-                        Linkage::Single => distance(&data[i], &data[j]),
-                        Linkage::Complete => distance(&data[i], &data[j]),
-                        Linkage::Average => distance(&data[i], &data[j]),
+                    let dist_sq = match self.linkage {
+                        Linkage::Single => squared_distance(&data[i], &data[j]),
+                        Linkage::Complete => squared_distance(&data[i], &data[j]),
+                        Linkage::Average => squared_distance(&data[i], &data[j]),
                     };
 
-                    if dist < min_dist {
-                        min_dist = dist;
+                    if dist_sq < min_dist_sq {
+                        min_dist_sq = dist_sq;
                         best_i = i;
                         best_j = j;
                     }
                 }
             }
+
+            let min_dist = sqrt(min_dist_sq);
 
             // Merge clusters
             result.merges[merge_idx] = (
