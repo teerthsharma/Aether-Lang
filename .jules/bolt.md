@@ -7,3 +7,6 @@
 ## 2026-07-25 - Tensor metadata cloning in MLP forward passes
 **Learning:** In `aether-core::ml::neural`, cloning the `input` tensor in `MLP::forward` before passing its reference to the first layer's `forward` method triggers an unnecessary heap allocation for tensor metadata and an `Rc` increment.
 **Action:** Extract the first layer using `self.layers.iter_mut()` to pass the initial `input` as a `&Tensor` reference directly, as subsequent layers naturally consume the output of the previous layer.
+## 2026-07-06 - Replacing Manual Index-Based Loops with Functional Iterator Chains
+**Learning:** Manual `for i in 0..n` loops require explicit bounds checking by Rust during each array iteration, limiting optimization. Using `.iter().zip().map().sum()` avoids these bounds checks and allows LLVM to auto-vectorize operations over slices, resulting in faster and safer scalar reduction logic.
+**Action:** When implementing mathematical reductions (e.g., loss, distances) on vectors, prefer functional iterator chains over explicit index-based loops to enable compiler vectorization and elide safety checks.
