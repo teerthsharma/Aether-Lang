@@ -1,0 +1,5 @@
+// a program whose last statement is a loop
+let s = 0~
+for i in 0..3 {
+    s = s + 10~
+}

@@ -1,0 +1,6 @@
+// print(a, f()) where f itself prints
+fn f() {
+    print("inner")~
+    return 2~
+}
+print(1, f())~

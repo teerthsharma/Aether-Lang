@@ -1,0 +1,7 @@
+// a parameter shadows a global of the same name without overwriting it
+let x = 10~
+fn id(x) {
+    return x~
+}
+print(id(3))~
+print(x)~

@@ -1,0 +1,5 @@
+
+--- stderr ---
+Parse error at line 45, column 10: expected {, found for
+--- exit ---
+1

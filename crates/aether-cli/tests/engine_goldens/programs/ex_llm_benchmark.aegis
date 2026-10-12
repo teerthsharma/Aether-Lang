@@ -1,0 +1,24 @@
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// AEGIS LLM Benchmark
+// ═══════════════════════════════════════════════════════════════════════════════
+
+import Ml
+
+let PROMPT = "Explain quantum physics to a 5 year old."
+let MODEL_ID = "TinyLlama/TinyLlama-1.1B-Chat-v1.0"
+let MAX_TOKENS = 50
+
+print("Benchmarking AEGIS (Candle) - " + MODEL_ID)
+
+// 1. Data Loading
+// (Timing is implicit in execution for now, or tracked via shell wrapper)
+print("Loading Model...")
+let model = Ml.load_llama(MODEL_ID)
+
+// 2. Inference
+print("Generating...")
+let output = Ml.generate(model, PROMPT, MAX_TOKENS)
+
+print("Finished.")
+~

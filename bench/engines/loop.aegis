@@ -1,0 +1,9 @@
+// 10^6-iteration while loop with a little arithmetic. acc stays below
+// 1000003, so every intermediate is an exact integer in f64.
+let i = 0~
+let acc = 0~
+while i < 1000000 {
+    acc = (acc + i * 3) % 1000003~
+    i = i + 1~
+}
+acc~

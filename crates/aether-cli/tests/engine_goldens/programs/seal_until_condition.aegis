@@ -1,0 +1,11 @@
+// seal until <boolean>: the condition is checked before each pass
+let count = 0~
+seal until count >= 3 {
+    count = count + 1~
+}
+print(count)~
+let never = 0~
+seal until true {
+    never = never + 1~
+}
+print(never)~

@@ -1,0 +1,11 @@
+[hopf: verdict, lk, error bound, linked, 1, 7.072564457345712e-14]
+[split: verdict, lk, zero_linking, 0]
+certified: the hoop cannot be pulled off the square
+[writhe of a planar square, 0]
+[determinant: trefoil, unknot, 3, 1]
+
+Execution complete. 🦭
+--- stderr ---
+
+--- exit ---
+0

@@ -1,0 +1,3 @@
+// reading a name never bound
+print(nope)~
+print(nope + 1)~

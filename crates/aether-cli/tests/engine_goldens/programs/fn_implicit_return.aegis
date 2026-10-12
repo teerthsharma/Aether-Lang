@@ -1,0 +1,13 @@
+// a function without `return` yields its last statement's value
+fn one() {
+    let x = 1~
+    x~
+}
+fn last_let() {
+    let y = 2~
+}
+fn empty() {
+}
+print(one())~
+print(last_let())~
+print(empty())~

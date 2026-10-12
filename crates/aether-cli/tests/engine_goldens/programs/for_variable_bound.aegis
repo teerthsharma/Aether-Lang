@@ -1,0 +1,5 @@
+// a range bound that is a variable rather than a literal
+let n = 3~
+for i in 0..n {
+    print(i)~
+}

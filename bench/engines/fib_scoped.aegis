@@ -1,0 +1,13 @@
+// fib.aegis with two whole-module imports ahead of it, which bind every
+// export into the variable map. Interpreter only: it shows how per-call cost
+// depends on scope size.
+import monodromy~
+import linking~
+
+fn fib(n) {
+    if n < 2 {
+        return n~
+    }
+    return fib(n - 1) + fib(n - 2)~
+}
+fib(25)~

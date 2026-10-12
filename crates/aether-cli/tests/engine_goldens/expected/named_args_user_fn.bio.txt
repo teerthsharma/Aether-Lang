@@ -1,0 +1,5 @@
+3
+--- stderr ---
+Runtime error: function 'add' does not accept named arguments
+--- exit ---
+1

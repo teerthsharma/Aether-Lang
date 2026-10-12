@@ -1,0 +1,12 @@
+// a user `fn stable` declared after a `seal until stable(...)` loop
+let n = 0~
+seal until stable(n) {
+    if n < 3 {
+        n = n + 1~
+    }
+}
+print(n)~
+fn stable(v) {
+    return v >= 2~
+}
+print(stable(n))~

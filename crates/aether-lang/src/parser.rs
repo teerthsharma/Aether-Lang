@@ -429,7 +429,7 @@ impl<'a> Parser<'a> {
         self.expect(TokenKind::Seal)?;
         let until = if self.check(TokenKind::Until) {
             self.advance();
-            Some(self.parse_expr()?)
+            Some(loop_cond(self.parse_expr()?))
         } else {
             None
         };
@@ -1180,6 +1180,23 @@ impl core::fmt::Display for ParseError {
     }
 }
 
+/// `until stable(e)` and `until convergence(e)` are loop forms, not calls: the
+/// parser decides, so a program function named `stable` cannot change how a
+/// loop ends. Any other shape, including those names with other arguments, is
+/// an ordinary condition.
+fn loop_cond(expr: Expr) -> LoopCond {
+    if let ExprKind::Call { name, args } = &expr.node {
+        if let [CallArg::Positional(arg)] = args.as_slice() {
+            match name.as_str() {
+                "stable" => return LoopCond::Stable(arg.clone()),
+                "convergence" => return LoopCond::Convergence(arg.clone()),
+                _ => {}
+            }
+        }
+    }
+    LoopCond::Expr(expr)
+}
+
 fn token_label(kind: &TokenKind) -> String {
     match kind {
         TokenKind::Identifier(name) => format!("identifier '{}'", name),
@@ -1280,7 +1297,27 @@ mod tests {
             panic!("expected seal loop");
         };
 
-        assert!(loop_stmt.until.is_some());
+        assert!(matches!(loop_stmt.until, Some(LoopCond::Expr(_))));
+    }
+
+    #[test]
+    fn seal_loop_forms_are_decided_by_the_parser() {
+        let program = Parser::new(
+            "seal until stable(x) { }\nseal until convergence(0.1) { }\nseal until stable(x, y) { }",
+        )
+        .parse()
+        .expect("program should parse");
+        let conds: Vec<_> = program
+            .statements
+            .iter()
+            .filter_map(|s| match &s.node {
+                StmtKind::Loop(l) => l.until.as_ref(),
+                _ => None,
+            })
+            .collect();
+        assert!(matches!(conds[0], LoopCond::Stable(_)));
+        assert!(matches!(conds[1], LoopCond::Convergence(_)));
+        assert!(matches!(conds[2], LoopCond::Expr(_)));
     }
 
     #[test]

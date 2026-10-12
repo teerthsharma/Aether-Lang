@@ -24,8 +24,10 @@ use rustyline::DefaultEditor;
 use std::fs;
 use std::path::PathBuf;
 
+use aether_lang::interpreter::Value;
 use aether_lang::parser::ParseError;
-use aether_lang::{Interpreter, Parser};
+use aether_lang::vm::{Compiler, TitanVM};
+use aether_lang::{Interpreter, Parser, Program};
 
 /// AEGIS - The Universal Programming Language
 #[derive(ClapParser)]
@@ -48,8 +50,8 @@ enum Commands {
         /// Path to .aether or .ae file
         #[arg(value_name = "FILE")]
         file: PathBuf,
-        /// Execution Mode: "bio" (default) or "titan"
-        #[arg(long, default_value = "bio")]
+        /// Engine: "bio", the reference interpreter (default), or "titan", the bytecode VM
+        #[arg(long, default_value = "bio", value_parser = ["bio", "titan"])]
         mode: String,
     },
 
@@ -166,7 +168,12 @@ fn execute_line(interpreter: &mut Interpreter, source: &str) -> Result<String, S
 fn run_file(path: &PathBuf, mode: &str) {
     println!("═══════════════════════════════════════════════════════════════");
     println!("  🛡️ AEGIS - Running: {}", path.display());
-    println!("  Mode: {}", mode);
+    let engine = if mode == "titan" {
+        "titan"
+    } else {
+        "interpreter"
+    };
+    println!("  Mode: {}", engine);
     println!("═══════════════════════════════════════════════════════════════");
 
     let source = match fs::read_to_string(path) {
@@ -198,42 +205,39 @@ fn run_file(path: &PathBuf, mode: &str) {
         }
     };
 
+    match run_program(&ast, mode) {
+        Ok(result) => {
+            if !matches!(result, Value::Unit) {
+                println!("{}", result);
+            }
+            println!();
+            println!("Execution complete. 🦭");
+        }
+        Err(line) => {
+            eprintln!("{}", line);
+            std::process::exit(1);
+        }
+    }
+}
+
+/// Run a parsed program on the engine `mode` selects: "titan" compiles to
+/// bytecode and runs TitanVM, anything else runs the reference interpreter.
+///
+/// `Err` is the complete stderr line. A construct Titan cannot compile is
+/// `titan: <CompileError>`; it never falls back to the interpreter, so a Titan
+/// run is always a Titan result or a named refusal.
+fn run_program(ast: &Program, mode: &str) -> Result<Value, String> {
     if mode == "titan" {
-        use aether_lang::vm::{Compiler, TitanVM};
-        // Compile to Bytecode
-        let compiler = Compiler::new();
-        let code = compiler.compile(&ast);
-
+        let chunk = Compiler::new()
+            .compile(ast)
+            .map_err(|e| format!("titan: {}", e))?;
         let mut vm = TitanVM::new();
-        vm.load_code(code);
-
-        match vm.run() {
-            Ok(result) => {
-                println!("{:?}", result);
-                println!();
-                println!("Titan Execution complete. ⚡");
-            }
-            Err(e) => {
-                eprintln!("Titan Runtime error: {}", e);
-                std::process::exit(1);
-            }
-        }
+        vm.load(chunk);
+        vm.run().map_err(|e| format!("Runtime error: {}", e))
     } else {
-        // Bio-Script (Standard Interpreter)
-        let mut interpreter = Interpreter::new();
-        match interpreter.execute(&ast) {
-            Ok(result) => {
-                if !matches!(result, aether_lang::interpreter::Value::Unit) {
-                    println!("{}", result);
-                }
-                println!();
-                println!("Execution complete. 🦭");
-            }
-            Err(e) => {
-                eprintln!("Runtime error: {}", e);
-                std::process::exit(1);
-            }
-        }
+        Interpreter::new()
+            .execute(ast)
+            .map_err(|e| format!("Runtime error: {}", e))
     }
 }
 

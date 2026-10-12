@@ -1,0 +1,11 @@
+let xs = []~
+xs.push(10)~
+xs.push(20)~
+xs.push([1, 2])~
+print(xs.len())~
+print(xs[0])~
+print(xs[2][1])~
+print(xs)~
+print(xs.pop())~
+print(xs)~
+print(xs[5])~

@@ -1,0 +1,10 @@
+[softmax, v = 1, [1, 1, 1]]
+[kernel, v = 1, [1, 2, 3]]
+[path, b = [0, 1, 1], [0, 1, 1.5]]
+[path, gate 1 closed, [1, 1, 2]]
+
+Execution complete. 🦭
+--- stderr ---
+
+--- exit ---
+0

@@ -1,0 +1,38 @@
+// Gauss linking number, writhe and knot determinant (import linking).
+// Closed-form truths: a Hopf link has |lk| = 1, a split pair has lk = 0,
+// a planar polygon has writhe 0, the trefoil (2,3) torus knot has determinant 3.
+
+import linking~
+import math~
+
+// Unit square in z = 0, and a 1 x 2 rectangle in x = 0.5 whose top edge
+// sits at y = 0.5, so the square's edge y = 0 pierces it once.
+let square = [[0, 0, 0], [1, 0, 0], [1, 1, 0], [0, 1, 0]]~
+let hoop = [[0.5, 0.5, -1], [0.5, 0.5, 1], [0.5, -0.5, 1], [0.5, -0.5, -1]]~
+let apart = [[0.5, -0.5, -1], [0.5, -0.5, 1], [0.5, -1.5, 1], [0.5, -1.5, -1]]~
+
+let hopf = linking_number(square, hoop)~
+print(["hopf: verdict, lk, error bound", hopf.verdict, hopf.lk, hopf.error_bound])~
+
+let split = linking_number(square, apart)~
+print(["split: verdict, lk", split.verdict, split.lk])~
+
+// Certified branching: only a proven nonzero lk counts as linked.
+if hopf.verdict == "linked" && split.verdict == "zero_linking" {
+    print("certified: the hoop cannot be pulled off the square")~
+}
+
+print(["writhe of a planar square", writhe(square)])~
+
+// The (2,3) torus knot as a 60-gon: r = 2 + cos 3t, (r cos 2t, r sin 2t, sin 3t).
+let trefoil = []~
+for i in 0..60 {
+    let t = 2 * pi * i / 60~
+    let r = 2 + cos(3 * t)~
+    trefoil.push([r * cos(2 * t), r * sin(2 * t), sin(3 * t)])~
+}
+print(["determinant: trefoil, unknot", knot_determinant(trefoil), knot_determinant(square)])~
+
+// Touching curves are refused, never summed: uncomment for
+// "linking refused: Intersecting { segment_a: 0, segment_b: 0 }".
+// linking_number(square, [[0.5, 0, -1], [0.5, 0, 1], [0.5, -1, 1], [0.5, -1, -1]])~

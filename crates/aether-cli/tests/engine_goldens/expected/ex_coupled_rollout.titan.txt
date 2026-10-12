@@ -1,0 +1,10 @@
+[rollout, [[1, 1], [1.5, 1.5], [1.75, 1.75]]]
+[fixed point, converged, rho, contractive, [2, 2], true, 0.5, true]
+[sealed state, steps, [2, 2], 55]
+[islands at r = 1.5, 2]
+
+Execution complete. 🦭
+--- stderr ---
+
+--- exit ---
+0

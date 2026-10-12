@@ -1,0 +1,5 @@
+
+--- stderr ---
+Parse error at line 3, column 13: expected number
+--- exit ---
+1

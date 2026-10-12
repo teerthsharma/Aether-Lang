@@ -275,7 +275,7 @@ Schedule sources, all clamped causally:
 
 | Surface | Gate |
 | --- | --- |
-| Titan VM language parity | VM tests per construct |
+| Titan VM language parity | Partial, reshape in progress. Active needs zero refused and zero diverged programs on the goldens in `crates/aether-cli/tests/engine_goldens/`. [Execution model →](../language/execution-model.md#parity) |
 | Full static type checking | Static checker and diagnostics |
 | Complete class/object semantics | Interpreter tests and docs |
 | Render as a user-facing graphics command | CLI artifact or exported file test |

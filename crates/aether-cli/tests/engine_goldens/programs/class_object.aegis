@@ -1,0 +1,9 @@
+// a class with field defaults, instantiated with `new`
+class Point {
+    x = 1,
+    y = 2
+}
+let p = new Point()~
+print(p.x)~
+print(p.y)~
+print(p.z)~

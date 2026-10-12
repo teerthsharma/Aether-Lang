@@ -1,0 +1,6 @@
+// an empty range, with the iterator name already bound
+let i = 42~
+for i in 3..3 {
+    print("body ran")~
+}
+print(i)~

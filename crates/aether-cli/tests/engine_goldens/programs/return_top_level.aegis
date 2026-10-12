@@ -1,0 +1,4 @@
+// `return` at the top level of a program
+print(1)~
+return 7~
+print(2)~

@@ -1,0 +1,13 @@
+// loop.aegis with two whole-module imports ahead of it, which bind every
+// export into the variable map. Interpreter only: the loop makes no calls, so
+// this is the control for fib_scoped.
+import monodromy~
+import linking~
+
+let i = 0~
+let acc = 0~
+while i < 1000000 {
+    acc = (acc + i * 3) % 1000003~
+    i = i + 1~
+}
+acc~

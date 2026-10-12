@@ -1,0 +1,9 @@
+// `import math` binds some of the math module; `from math import` binds one name
+import math~
+print(sqrt(16))~
+print(sin(0))~
+print(cos(0))~
+print(pi)~
+print(exp(1))~
+from math import exp~
+print(exp(0))~

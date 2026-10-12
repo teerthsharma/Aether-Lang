@@ -1,0 +1,42 @@
+// ═══════════════════════════════════════════════════════════════════════════════
+// AEGIS Example: 3D Cluster Analysis
+// ═══════════════════════════════════════════════════════════════════════════════
+//
+// Demonstrates 3D non-linear data analysis:
+// 1. Multiple block extraction
+// 2. Geometric feature comparison
+// 3. Cluster visualization
+// ═══════════════════════════════════════════════════════════════════════════════
+
+// Embed high-dimensional data into 3D manifold
+manifold M = embed(data, dim=3, tau=7)
+
+// Extract multiple blocks for comparison
+block A = M.cluster(0:32)
+block B = M.cluster(32:64)
+block C = M.cluster(64:96)
+
+// Get centroids for each block
+centroid_A = A.center
+centroid_B = B.center
+centroid_C = C.center
+
+// Get spreads (radii) for concentration analysis
+spread_A = A.spread
+spread_B = B.spread
+spread_C = C.spread
+
+// Run regression on each block separately for local fitting
+regress {
+    model: "rbf",
+    target: M.project(axis=0),
+    escalate: true,
+    until: convergence(1e-4)
+}
+
+// Render all blocks with different highlights
+render M {
+    color: by_cluster,
+    highlight: A,
+    trajectory: on
+}
