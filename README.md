@@ -2,6 +2,8 @@
 
 <p align="center"><b>A programming language that computes with shape.<br>Its loops end when the shape of the data stops changing, and its answers come with proof, or not at all.</b></p>
 
+<p align="center"><a href="https://teerth.blog/aether-lang"><b>Read the essay at teerth.blog/aether-lang</b></a> &nbsp;·&nbsp; the maths, the proofs and live figures</p>
+
 <img src="assets/hero.svg" width="100%" alt="A sine wave sampled eighteen times and delay-embedded into a cloud of points that forms a loop; beside it the persistence barcode, where every blue piece-bar dies except one and a single amber loop-bar lives from radius 0.93 to 2.05; the seal loop stops at radius 1 with Betti numbers [1, 1, 0]: one piece, one loop">
 
 ```bash
