@@ -7,3 +7,6 @@
 ## 2026-07-25 - Tensor metadata cloning in MLP forward passes
 **Learning:** In `aether-core::ml::neural`, cloning the `input` tensor in `MLP::forward` before passing its reference to the first layer's `forward` method triggers an unnecessary heap allocation for tensor metadata and an `Rc` increment.
 **Action:** Extract the first layer using `self.layers.iter_mut()` to pass the initial `input` as a `&Tensor` reference directly, as subsequent layers naturally consume the output of the previous layer.
+## 2026-10-15 - Tensor metadata cloning and slice allocation in DenseLayer backward pass
+**Learning:** In `DenseLayer::backward`, cloning `Option<Tensor>` cached states (`last_z` and `last_input`) and using `Tensor::new` for `grad_w` triggers unnecessary heap allocations for tensor metadata and redundant slice copies.
+**Action:** Use `.take().expect(...)` to consume cached states directly and `Tensor::from_vec()` to take ownership of the constructed vector without internal copies.

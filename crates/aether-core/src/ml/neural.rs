@@ -324,16 +324,16 @@ impl DenseLayer {
 
     /// Backward pass
     pub fn backward(&mut self, grad_output: &Tensor, config: &OptimizerConfig) -> Tensor {
+        // OPTIMIZATION: take ownership of cached state instead of cloning Option<Tensor>
+        // Avoids O(N) heap allocations for tensor metadata and data copies
         let last_z = self
             .last_z
-            .as_ref()
-            .expect("Forward must be called before backward")
-            .clone();
+            .take()
+            .expect("Forward must be called before backward");
         let last_input = self
             .last_input
-            .as_ref()
-            .expect("Forward must be called before backward")
-            .clone();
+            .take()
+            .expect("Forward must be called before backward");
 
         // Softmax has no elementwise derivative — every output depends on every
         // logit in its row — so it cannot be handled by the multiply below and
@@ -384,7 +384,8 @@ impl DenseLayer {
                 dw_data.push(delta_data[i] * input_data[j]);
             }
         }
-        let grad_w = Tensor::new(&dw_data, &self.weights.shape);
+        // OPTIMIZATION: consume vector directly using from_vec to avoid redundant slice allocations
+        let grad_w = Tensor::from_vec(dw_data, self.weights.shape.clone());
         let grad_b = delta.clone();
 
         // Compute input gradient for next layer
