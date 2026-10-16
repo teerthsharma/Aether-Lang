@@ -578,7 +578,7 @@ impl<const D: usize> AgglomerativeClustering<D> {
             let min_dist = if min_dist_sq == f64::MAX {
                 f64::MAX
             } else {
-                min_dist_sq.sqrt()
+                sqrt(min_dist_sq)
             };
 
             // Merge clusters
