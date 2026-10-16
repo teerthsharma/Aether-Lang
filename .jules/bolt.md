@@ -7,3 +7,6 @@
 ## 2026-07-25 - Tensor metadata cloning in MLP forward passes
 **Learning:** In `aether-core::ml::neural`, cloning the `input` tensor in `MLP::forward` before passing its reference to the first layer's `forward` method triggers an unnecessary heap allocation for tensor metadata and an `Rc` increment.
 **Action:** Extract the first layer using `self.layers.iter_mut()` to pass the initial `input` as a `&Tensor` reference directly, as subsequent layers naturally consume the output of the previous layer.
+## 2026-10-16 - Deferred sqrt in Agglomerative Clustering
+**Learning:** When finding the closest pair of clusters in `AgglomerativeClustering::fit`, computing the true Euclidean distance in the O(N^2) inner loop via `distance()` performs an expensive `sqrt` operation for every pair.
+**Action:** Use `squared_distance()` for the inner comparison loop, and defer the `sqrt` operation until the final minimum distance (`min_dist`) has been found, significantly reducing the number of `sqrt` calls.
