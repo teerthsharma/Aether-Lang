@@ -558,10 +558,11 @@ impl<const D: usize> AgglomerativeClustering<D> {
                         continue;
                     }
 
+                    // ⚡ Bolt: Use squared distance for inner loop comparisons to avoid expensive sqrt calls
                     let dist = match self.linkage {
-                        Linkage::Single => distance(&data[i], &data[j]),
-                        Linkage::Complete => distance(&data[i], &data[j]),
-                        Linkage::Average => distance(&data[i], &data[j]),
+                        Linkage::Single => squared_distance(&data[i], &data[j]),
+                        Linkage::Complete => squared_distance(&data[i], &data[j]),
+                        Linkage::Average => squared_distance(&data[i], &data[j]),
                     };
 
                     if dist < min_dist {
@@ -573,10 +574,11 @@ impl<const D: usize> AgglomerativeClustering<D> {
             }
 
             // Merge clusters
+            // ⚡ Bolt: Defer sqrt until the final minimum distance is found to store exact distances
             result.merges[merge_idx] = (
                 cluster_ids[best_i],
                 cluster_ids[best_j],
-                min_dist,
+                sqrt(min_dist),
                 cluster_sizes[best_i] + cluster_sizes[best_j],
             );
             result.n_merges = merge_idx + 1;
