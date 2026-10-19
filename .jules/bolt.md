@@ -7,3 +7,7 @@
 ## 2026-07-25 - Tensor metadata cloning in MLP forward passes
 **Learning:** In `aether-core::ml::neural`, cloning the `input` tensor in `MLP::forward` before passing its reference to the first layer's `forward` method triggers an unnecessary heap allocation for tensor metadata and an `Rc` increment.
 **Action:** Extract the first layer using `self.layers.iter_mut()` to pass the initial `input` as a `&Tensor` reference directly, as subsequent layers naturally consume the output of the previous layer.
+
+## 2026-10-19 - Iterator Chaining for Manual Loops in `linalg.rs`
+**Learning:** In `aether-core::ml::linalg`, avoid manual `for i in 0..n` loops with `a_data[i]` indices. Manual indexing introduces loop bounds check and prevents auto-vectorization. Using iterator chains (`iter().zip().map()`) elides these checks and gives LLVM the opportunity to auto-vectorize for better performance without allocating intermediate data arrays. When aggregating values across two slices like vectors or tensors, this pattern applies across MSE, MAE, distances, BCE, and hinge loss, where iterating via `.zip().map()` is robust and directly produces the scalar fold without the bounds checks.
+**Action:** Default to single-pass `.iter().zip().map()` loops for pairwise reduction operations in slices where possible, making sure `cfg` tags or specific math functions are carefully managed within the closures.
