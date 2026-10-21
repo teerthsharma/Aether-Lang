@@ -115,8 +115,8 @@ impl<'a> Iterator for BatchIterator<'a> {
         let mut batch_x = Vec::with_capacity(end - start);
         let mut batch_y = Vec::with_capacity(end - start);
 
-        for i in start..end {
-            let idx = self.indices[i];
+        for &idx in &self.indices[start..end] {
+            // PERF: Clone metadata for reference-counted payloads during batching.
             batch_x.push(self.loader.features[idx].clone());
             batch_y.push(self.loader.targets[idx].clone());
         }

@@ -7,3 +7,6 @@
 ## 2026-07-25 - Tensor metadata cloning in MLP forward passes
 **Learning:** In `aether-core::ml::neural`, cloning the `input` tensor in `MLP::forward` before passing its reference to the first layer's `forward` method triggers an unnecessary heap allocation for tensor metadata and an `Rc` increment.
 **Action:** Extract the first layer using `self.layers.iter_mut()` to pass the initial `input` as a `&Tensor` reference directly, as subsequent layers naturally consume the output of the previous layer.
+## 2026-10-21 - Slice iteration in dataloader
+**Learning:** In `aether-core::ml::dataloader`, manual index-based loops (`for i in start..end`) require repeated bounds checking when accessing the `indices` array.
+**Action:** Use slice iteration (`for &idx in &self.indices[start..end]`) to elide bounds checks and improve batching performance.
