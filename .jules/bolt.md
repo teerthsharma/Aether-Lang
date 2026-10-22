@@ -7,3 +7,6 @@
 ## 2026-07-25 - Tensor metadata cloning in MLP forward passes
 **Learning:** In `aether-core::ml::neural`, cloning the `input` tensor in `MLP::forward` before passing its reference to the first layer's `forward` method triggers an unnecessary heap allocation for tensor metadata and an `Rc` increment.
 **Action:** Extract the first layer using `self.layers.iter_mut()` to pass the initial `input` as a `&Tensor` reference directly, as subsequent layers naturally consume the output of the previous layer.
+## 2026-10-22 - Optimizing neural network layer backpropagation by transferring ownership
+**Learning:** In reverse-mode autograd passes (like `DenseLayer::backward`), calling `.as_ref().expect(...).clone()` on cached `Option<Tensor>` states like `last_z` and `last_input` causes unnecessary and expensive O(N) heap allocations for both tensor metadata and actual data copies during each layer's backward pass.
+**Action:** Use `.take().expect(...)` to acquire ownership of the cached tensors directly. This avoids all cloning overhead since backward passes consume these values anyway, making the optimization safe and performant.
