@@ -7,3 +7,6 @@
 ## 2026-07-25 - Tensor metadata cloning in MLP forward passes
 **Learning:** In `aether-core::ml::neural`, cloning the `input` tensor in `MLP::forward` before passing its reference to the first layer's `forward` method triggers an unnecessary heap allocation for tensor metadata and an `Rc` increment.
 **Action:** Extract the first layer using `self.layers.iter_mut()` to pass the initial `input` as a `&Tensor` reference directly, as subsequent layers naturally consume the output of the previous layer.
+## 2026-10-26 - Optimizing distance and loss calculations
+**Learning:** Manual index-based loops in linear algebra reductions (like `mse`, `mae`, `euclidean_distance`) involve bounds checking for each element access, inhibiting auto-vectorization and optimal performance.
+**Action:** Use functional iterator chains (e.g., `.iter().zip().map().sum()`) directly on the borrowed data arrays. For distance metrics requiring max reductions, use `.fold(0.0, |max, val| if val > max { val } else { max })` since `f64` does not implement `Ord` for standard `.max()`.
