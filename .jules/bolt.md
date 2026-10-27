@@ -7,3 +7,7 @@
 ## 2026-07-25 - Tensor metadata cloning in MLP forward passes
 **Learning:** In `aether-core::ml::neural`, cloning the `input` tensor in `MLP::forward` before passing its reference to the first layer's `forward` method triggers an unnecessary heap allocation for tensor metadata and an `Rc` increment.
 **Action:** Extract the first layer using `self.layers.iter_mut()` to pass the initial `input` as a `&Tensor` reference directly, as subsequent layers naturally consume the output of the previous layer.
+
+## 2026-10-27 - Optimize Loss Metrics Iteration
+**Learning:** Manual loops over indexed collections combined with explicit index reads (`true_data[i] - pred_data[i]`) can cause unnecessary O(N) overhead due to bounds-checking in Rust, particularly when dealing with ML loss metrics functions.
+**Action:** Use functional iterator chains, e.g., `.iter().zip().map()`, which allows LLVM to auto-vectorize and elide bounds checks for metric reduction operations like `mse`, `mae`, `binary_cross_entropy`, and `hinge_loss`.
