@@ -102,7 +102,9 @@ pub fn mse(y_true: &Tensor, y_pred: &Tensor) -> f64 {
     let n = true_data.len();
 
     // ⚡ Bolt: Use iterator for loss calculation to enable auto-vectorization and elide bounds checks
-    let sum: f64 = true_data.iter().zip(pred_data.iter())
+    let sum: f64 = true_data
+        .iter()
+        .zip(pred_data.iter())
         .map(|(y, p)| {
             let diff = y - p;
             diff * diff
@@ -119,7 +121,9 @@ pub fn mae(y_true: &Tensor, y_pred: &Tensor) -> f64 {
     let n = true_data.len();
 
     // ⚡ Bolt: Use iterator for loss calculation to enable auto-vectorization and elide bounds checks
-    let sum: f64 = true_data.iter().zip(pred_data.iter())
+    let sum: f64 = true_data
+        .iter()
+        .zip(pred_data.iter())
         .map(|(y, p)| fabs(y - p))
         .sum();
     sum / n as f64
@@ -138,7 +142,9 @@ pub fn binary_cross_entropy(y_true: &Tensor, y_pred: &Tensor) -> f64 {
     let n = true_data.len();
 
     // ⚡ Bolt: Use iterator for loss calculation to enable auto-vectorization and elide bounds checks
-    let sum: f64 = true_data.iter().zip(pred_data.iter())
+    let sum: f64 = true_data
+        .iter()
+        .zip(pred_data.iter())
         .map(|(y, p_raw)| {
             let p = p_raw.clamp(1e-7, 1.0 - 1e-7);
 
@@ -163,10 +169,16 @@ pub fn hinge_loss(y_true: &Tensor, y_pred: &Tensor) -> f64 {
     let n = true_data.len();
 
     // ⚡ Bolt: Use iterator for loss calculation to enable auto-vectorization and elide bounds checks
-    let sum: f64 = true_data.iter().zip(pred_data.iter())
+    let sum: f64 = true_data
+        .iter()
+        .zip(pred_data.iter())
         .map(|(y, p)| {
             let margin = 1.0 - y * p;
-            if margin > 0.0 { margin } else { 0.0 }
+            if margin > 0.0 {
+                margin
+            } else {
+                0.0
+            }
         })
         .sum();
     sum / n as f64
