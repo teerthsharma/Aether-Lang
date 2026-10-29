@@ -7,3 +7,6 @@
 ## 2026-07-25 - Tensor metadata cloning in MLP forward passes
 **Learning:** In `aether-core::ml::neural`, cloning the `input` tensor in `MLP::forward` before passing its reference to the first layer's `forward` method triggers an unnecessary heap allocation for tensor metadata and an `Rc` increment.
 **Action:** Extract the first layer using `self.layers.iter_mut()` to pass the initial `input` as a `&Tensor` reference directly, as subsequent layers naturally consume the output of the previous layer.
+## 2026-10-29 - Vector allocations in DenseLayer weight gradients
+**Learning:** When computing weight gradients in `DenseLayer::backward`, replacing explicit nested loops with a `flat_map` iterator chain introduces a performance regression. The `flat_map` loses exact `size_hint`s, preventing `.collect()` from pre-allocating the required capacity and causing multiple heap reallocations.
+**Action:** Maintain explicit nested loops combined with `Vec::with_capacity` when iterating over multi-dimensional tensor data to compute gradients, and consume the vector directly using `Tensor::from_vec()` to avoid redundant slice allocations.

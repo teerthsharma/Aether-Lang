@@ -324,16 +324,17 @@ impl DenseLayer {
 
     /// Backward pass
     pub fn backward(&mut self, grad_output: &Tensor, config: &OptimizerConfig) -> Tensor {
+        // ⚡ Bolt Optimization: Use .take() to consume the cached Option<Tensor>
+        // payloads instead of cloning them, avoiding costly O(N) heap allocations for
+        // tensor metadata during the backward pass.
         let last_z = self
             .last_z
-            .as_ref()
-            .expect("Forward must be called before backward")
-            .clone();
+            .take()
+            .expect("Forward must be called before backward");
         let last_input = self
             .last_input
-            .as_ref()
-            .expect("Forward must be called before backward")
-            .clone();
+            .take()
+            .expect("Forward must be called before backward");
 
         // Softmax has no elementwise derivative — every output depends on every
         // logit in its row — so it cannot be handled by the multiply below and
@@ -365,7 +366,9 @@ impl DenseLayer {
                 .collect();
             drop(p_data);
             drop(g_data);
-            Tensor::new(&values, &grad_output.shape)
+            // ⚡ Bolt Optimization: Consume the vector directly using Tensor::from_vec
+            // to avoid redundant slice allocations.
+            Tensor::from_vec(values, grad_output.shape.clone())
         } else {
             let act_deriv = self.activation.derivative(&last_z);
             grad_output.mul(&act_deriv)
@@ -384,7 +387,11 @@ impl DenseLayer {
                 dw_data.push(delta_data[i] * input_data[j]);
             }
         }
-        let grad_w = Tensor::new(&dw_data, &self.weights.shape);
+        // ⚡ Bolt Optimization: Consume the pre-allocated vector directly using Tensor::from_vec
+        // instead of Tensor::new() to avoid redundant O(N) slice allocations. We maintain the
+        // explicit nested loops above instead of using a flat_map chain to preserve the exact size
+        // and avoid capacity reallocations.
+        let grad_w = Tensor::from_vec(dw_data, self.weights.shape.clone());
         let grad_b = delta.clone();
 
         // Compute input gradient for next layer
