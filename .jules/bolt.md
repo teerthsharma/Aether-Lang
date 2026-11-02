@@ -7,3 +7,6 @@
 ## 2026-07-25 - Tensor metadata cloning in MLP forward passes
 **Learning:** In `aether-core::ml::neural`, cloning the `input` tensor in `MLP::forward` before passing its reference to the first layer's `forward` method triggers an unnecessary heap allocation for tensor metadata and an `Rc` increment.
 **Action:** Extract the first layer using `self.layers.iter_mut()` to pass the initial `input` as a `&Tensor` reference directly, as subsequent layers naturally consume the output of the previous layer.
+## 2024-11-02 - Avoid Expensive sqrt in Inner Loops
+**Learning:** High-level APIs often hide expensive operations (like `sqrt` in Euclidean distance). In algorithms like hierarchical clustering, computing exact distances in O(N^2) inner loops causes severe performance degradation.
+**Action:** Use squared distance for comparisons in inner loops and defer the `sqrt` operation until the final minimum value is found and needs to be stored or returned.
