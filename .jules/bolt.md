@@ -7,3 +7,6 @@
 ## 2026-07-25 - Tensor metadata cloning in MLP forward passes
 **Learning:** In `aether-core::ml::neural`, cloning the `input` tensor in `MLP::forward` before passing its reference to the first layer's `forward` method triggers an unnecessary heap allocation for tensor metadata and an `Rc` increment.
 **Action:** Extract the first layer using `self.layers.iter_mut()` to pass the initial `input` as a `&Tensor` reference directly, as subsequent layers naturally consume the output of the previous layer.
+## 2026-11-05 - Iterator Vectorization over Manual Loops in Tensor Math
+**Learning:** In `aether-core::ml::linalg`, explicitly indexing into raw tensor data borrows inside a `for` loop (e.g., `for i in 0..n { diff = true_data[i] - pred_data[i]; sum += diff * diff; }`) disables loop unrolling and LLVM auto-vectorization due to bounds checking overhead at each index.
+**Action:** Replace manual indexing with single-pass iterator chains (`.iter().zip().map().sum()`) directly on the underlying tensor data to elide bounds checks and dramatically speed up scalar reduction operations like MSE, MAE, distance functions, and kernels. When needing a max value (Chebyshev distance), use `.fold()` instead of `.max()` because `f64` does not implement `Ord`.
