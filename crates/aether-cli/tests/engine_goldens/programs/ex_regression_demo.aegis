@@ -1,0 +1,36 @@
+// ═══════════════════════════════════════════════════════════════════════════════
+// AEGIS Example: Regression Demo
+// ═══════════════════════════════════════════════════════════════════════════════
+//
+// This script demonstrates the escalating regression system:
+// 1. Embed data into 3D manifold
+// 2. Run escalating regression with automatic difficulty increase
+// 3. Wait for topological convergence ("answers come")
+// ═══════════════════════════════════════════════════════════════════════════════
+
+// Create manifold from sensor data
+manifold M = embed(data, dim=3, tau=3)
+
+// Run escalating regression
+// - model: start with polynomial
+// - degree: initial degree 3
+// - escalate: automatically increase complexity
+// - until: stop when topology converges
+regress {
+    model: "polynomial",
+    degree: 3,
+    target: M.project(axis=2),
+    escalate: true,
+    until: convergence(1e-6)
+}
+
+// The answer "comes" when:
+// 1. Betti numbers stabilize
+// 2. Centroid drift → 0
+// 3. Residual manifold collapses
+
+// Visualize the fit
+render M {
+    color: gradient,
+    trajectory: on
+}

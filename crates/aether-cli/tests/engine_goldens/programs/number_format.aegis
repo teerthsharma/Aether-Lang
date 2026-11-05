@@ -1,0 +1,11 @@
+// how print shows numbers, and how literals are read
+print(3)~
+print(0.25)~
+print(0.0001)~
+print(0.00001)~
+print(1e-6)~
+print(0.1234567)~
+print(100000000 * 100000000)~
+print(100000000 * 10000000)~
+print(0)~
+print(-0.5)~

@@ -1,0 +1,10 @@
+// the iterator's value after the loop: after running out, and after `break`
+for i in 0..3 {
+}
+print(i)~
+for j in 0..10 {
+    if j == 2 {
+        break~
+    }
+}
+print(j)~

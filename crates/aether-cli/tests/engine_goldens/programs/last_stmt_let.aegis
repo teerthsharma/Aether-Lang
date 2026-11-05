@@ -1,0 +1,2 @@
+// a program whose last statement is `let`
+let x = 5~

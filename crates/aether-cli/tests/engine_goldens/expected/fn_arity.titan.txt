@@ -1,0 +1,5 @@
+1
+--- stderr ---
+Runtime error: function 'pair' expected 2 arguments, got 1
+--- exit ---
+1

@@ -1,0 +1,5 @@
+
+--- stderr ---
+Runtime error: embed expects a numeric list
+--- exit ---
+1

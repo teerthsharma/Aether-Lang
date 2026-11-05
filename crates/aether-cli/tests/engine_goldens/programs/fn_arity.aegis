@@ -1,0 +1,6 @@
+// calling a user function with too few arguments
+fn pair(a, b) {
+    return a~
+}
+print(pair(1, 2))~
+print(pair(1))~

@@ -298,10 +298,21 @@ pub struct ForStmt {
     pub body: Block,
 }
 
+/// How a seal loop ends. Decided at parse time; no runtime name lookup.
+#[derive(Debug, Clone, PartialEq)]
+pub enum LoopCond {
+    /// `until expr`: stop before a pass when `expr` is true.
+    Expr(Expr),
+    /// `until stable(expr)`: stop before a pass when `expr` equals its value one pass earlier.
+    Stable(Expr),
+    /// `until convergence(eps)`: stop after pass i >= 2 when max_change(v_i, v_{i-1}) <= eps.
+    Convergence(Expr),
+}
+
 /// Seal loop (topological): seal until condition { ... } or seal { ... }
 #[derive(Debug, Clone, PartialEq)]
 pub struct LoopStmt {
-    pub until: Option<Expr>,
+    pub until: Option<LoopCond>,
     pub body: Block,
 }
 

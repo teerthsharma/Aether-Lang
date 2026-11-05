@@ -1,0 +1,15 @@
+let x = 5~
+if x > 3 {
+    print("big")~
+} else {
+    print("small")~
+}
+if x > 10 {
+    print("huge")~
+} else {
+    print("not huge")~
+}
+if false {
+    print("never")~
+}
+print("done")~

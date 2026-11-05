@@ -1,0 +1,11 @@
+0
+1
+2
+3
+6
+
+Execution complete. 🦭
+--- stderr ---
+
+--- exit ---
+0

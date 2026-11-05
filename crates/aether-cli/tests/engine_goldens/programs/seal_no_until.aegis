@@ -1,0 +1,14 @@
+// seal with no `until`: left by `break`, or by the iteration cap
+let n = 0~
+seal {
+    n = n + 1~
+    if n == 5 {
+        break~
+    }
+}
+print(n)~
+let m = 0~
+seal {
+    m = m + 1~
+}
+print(m)~

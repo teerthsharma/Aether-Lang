@@ -1,0 +1,9 @@
+// field access on a record returned by a certified-library function
+import linking~
+let square = [[0, 0, 0], [1, 0, 0], [1, 1, 0], [0, 1, 0]]~
+let hoop = [[0.5, 0.5, -1], [0.5, 0.5, 1], [0.5, -0.5, 1], [0.5, -0.5, -1]]~
+let r = linking_number(square, hoop)~
+print(r.verdict)~
+print(r.lk)~
+print(linking_number(square, hoop).verdict)~
+print(r.nope)~

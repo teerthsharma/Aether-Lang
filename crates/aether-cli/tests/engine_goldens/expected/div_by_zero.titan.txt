@@ -1,0 +1,10 @@
+inf
+-inf
+NaN
+NaN
+
+Execution complete. 🦭
+--- stderr ---
+
+--- exit ---
+0

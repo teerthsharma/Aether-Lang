@@ -1,0 +1,5 @@
+before
+--- stderr ---
+Runtime error: condition must be boolean
+--- exit ---
+1

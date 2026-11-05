@@ -1,0 +1,30 @@
+// Rounding-certified decisions (import certify). Each score carries a forward
+// error radius. A decision is returned only when no point of the enclosure box
+// could decide otherwise; otherwise the call refuses and names the frontier.
+
+import certify~
+
+let scores = [3.0, 1.0, 2.0, 5.0]~
+
+// Radius 0.1 separates every pair: the argmin is index 1.
+print(["argmin", certified_argmin(scores, 0.1)])~
+
+// The two smallest as a set, then certified in rank order, then the argmax.
+print(["top-2 set", certified_topk(scores, 0.1, 2)])~
+print(["top-2 ordered", certified_topk(scores, 0.1, 2, ordered=true)])~
+print(["argmax", certified_topk(scores, 0.1, 1, largest=true)])~
+
+// Threshold 2.05: the enclosure 2.0 +- 0.1 straddles it.
+print(["against 2.05", certified_threshold(scores, 0.1, 2.05)])~
+
+// A seal loop whose condition is a certified decision: halve the radius until
+// 1.0 < 1.5 is proven, i.e. until 1.0 + r < 1.5 survives outward rounding.
+let r = 2.0~
+🦭 until certified_threshold([1.0, 2.0], r, 1.5)[0] == "below" {
+    r = r / 2~
+}
+print(["radius at which 1.0 < 1.5 is certified", r])~
+
+// Radius 0.6 makes 1.0 and 2.0 overlap, so argmin refuses rather than guess.
+// Uncomment for "certify refused: BoundaryUndetermined { .. straddling: [1, 2] }":
+// certified_argmin(scores, 0.6)~

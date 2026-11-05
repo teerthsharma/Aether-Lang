@@ -1,0 +1,13 @@
+[x^2: verdict, witness p, q, collision_exhibited, 0.14619599999991806, -0.14560000000005857]
+[2x+1: verdict, lambda, no_collision_at_this_sampling, 2]
+[square outline: order, dihedral, 4, true]
+[PH dimension: segment, square, 1.005333965800075, 2.1648461420645866]
+[diag(2, 1/2) exponents, [0.6931471805599453, -0.6931471805599453]]
+[logistic r = 4 exponent, 0.6931410625139396]
+positive exponent: sensitive dependence
+
+Execution complete. 🦭
+--- stderr ---
+
+--- exit ---
+0

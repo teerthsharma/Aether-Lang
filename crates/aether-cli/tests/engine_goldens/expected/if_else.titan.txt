@@ -1,0 +1,9 @@
+big
+not huge
+done
+
+Execution complete. 🦭
+--- stderr ---
+
+--- exit ---
+0

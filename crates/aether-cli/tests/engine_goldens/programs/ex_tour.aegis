@@ -1,0 +1,37 @@
+import topology~
+import linking~
+import certify~
+import math~
+
+// Shape. A periodic signal, sampled eighteen times and delay-embedded into a
+// cloud in three dimensions. Nothing below asks whether it is periodic.
+let signal = []~
+let t = 0~
+while t < 18 {
+    signal.push(sin(t * 0.7))~
+    t = t + 1~
+}
+manifold M = embed(signal, dim=3, tau=2)~
+let shape = topology.ph(M, max_dim=1, mode="vr")~
+
+// Widen the lens until the cloud is one piece, then read its Betti numbers.
+let r = 0~
+🦭 until topology.betti(shape, radius=r)[0] == 1 {
+    r = r + 0.25~
+}
+print(["one piece at radius", r, "betti", topology.betti(shape, radius=r)])~
+
+// Certainty. A square, and a hoop threaded through it.
+let square = [[0, 0, 0], [1, 0, 0], [1, 1, 0], [0, 1, 0]]~
+let hoop = [[0.5, 0.5, -1], [0.5, 0.5, 1], [0.5, -0.5, 1], [0.5, -0.5, -1]]~
+let link = linking_number(square, hoop)~
+print(["linked?", link.verdict, "lk", link.lk, "error bound", link.error_bound])~
+
+// Proof as a stopping rule. Is 1.0 below 1.5 when every score may be off by
+// the radius? Halve it until the answer is proven.
+let radius = 2~
+🦭 until certified_threshold([1.0], radius, 1.5)[0] == "below" {
+    print(["radius", radius, "verdict", certified_threshold([1.0], radius, 1.5)[0]])~
+    radius = radius / 2~
+}
+print(["proven at radius", radius])~

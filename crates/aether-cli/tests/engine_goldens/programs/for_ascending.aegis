@@ -1,0 +1,7 @@
+// for over an ascending integer range: 0, 1, 2, 3
+let sum = 0~
+for i in 0..4 {
+    print(i)~
+    sum = sum + i~
+}
+print(sum)~

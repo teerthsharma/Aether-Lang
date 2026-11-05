@@ -1,0 +1,10 @@
+[nodes, divisions, certified, 5, 1, true]
+[dividing node [frame, index], [0, 0]]
+[edges [frame, index, frame, index], [[0, 0, 1, 0], [0, 0, 1, 1], [1, 0, 2, 0], [1, 1, 2, 1]]]
+[one-to-one: links, divisions, 3, 0]
+
+Execution complete. 🦭
+--- stderr ---
+
+--- exit ---
+0

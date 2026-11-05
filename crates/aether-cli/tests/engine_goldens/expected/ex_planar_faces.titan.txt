@@ -1,0 +1,9 @@
+[square: pieces, faces, chi, 1, 1, 0]
+[with half-diagonals: pieces, faces, chi, snap radius, 1, 4, -3, 1.3486991523486091e-6]
+[spokes in when faces sealed, faces, 4, 4]
+
+Execution complete. 🦭
+--- stderr ---
+
+--- exit ---
+0

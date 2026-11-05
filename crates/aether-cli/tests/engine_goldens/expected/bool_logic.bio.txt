@@ -1,0 +1,12 @@
+false
+true
+false
+true
+false
+true
+false
+false
+--- stderr ---
+Runtime error: Invalid unary operation
+--- exit ---
+1
