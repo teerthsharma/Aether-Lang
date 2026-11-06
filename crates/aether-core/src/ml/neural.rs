@@ -324,16 +324,15 @@ impl DenseLayer {
 
     /// Backward pass
     pub fn backward(&mut self, grad_output: &Tensor, config: &OptimizerConfig) -> Tensor {
+        // ⚡ Bolt: Take ownership of cached tensors instead of cloning to avoid O(N) allocations
         let last_z = self
             .last_z
-            .as_ref()
-            .expect("Forward must be called before backward")
-            .clone();
+            .take()
+            .expect("Forward must be called before backward");
         let last_input = self
             .last_input
-            .as_ref()
-            .expect("Forward must be called before backward")
-            .clone();
+            .take()
+            .expect("Forward must be called before backward");
 
         // Softmax has no elementwise derivative — every output depends on every
         // logit in its row — so it cannot be handled by the multiply below and
@@ -365,7 +364,8 @@ impl DenseLayer {
                 .collect();
             drop(p_data);
             drop(g_data);
-            Tensor::new(&values, &grad_output.shape)
+            // ⚡ Bolt: Use from_vec to consume vector directly, avoiding extra allocation and copy
+            Tensor::from_vec(values, grad_output.shape.clone())
         } else {
             let act_deriv = self.activation.derivative(&last_z);
             grad_output.mul(&act_deriv)
@@ -384,7 +384,8 @@ impl DenseLayer {
                 dw_data.push(delta_data[i] * input_data[j]);
             }
         }
-        let grad_w = Tensor::new(&dw_data, &self.weights.shape);
+        // ⚡ Bolt: Use from_vec to consume vector directly, avoiding extra allocation and copy
+        let grad_w = Tensor::from_vec(dw_data, self.weights.shape.clone());
         let grad_b = delta.clone();
 
         // Compute input gradient for next layer
