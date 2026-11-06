@@ -1,6 +1,6 @@
 site_name: Aether Lang
 site_description: Mechanical systems documentation for the Aether language runtime, topology core, ML primitives, and sparse-event kernel.
-site_url: https://teerthsharma.github.io/Aether-Lang/
+site_url: https://teerth.dev/Aether-Lang/
 repo_url: https://github.com/teerthsharma/Aether-Lang
 theme:
   name: material
