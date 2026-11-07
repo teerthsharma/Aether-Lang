@@ -324,16 +324,15 @@ impl DenseLayer {
 
     /// Backward pass
     pub fn backward(&mut self, grad_output: &Tensor, config: &OptimizerConfig) -> Tensor {
+        // ⚡ Bolt: Use .take() instead of .as_ref().clone() to avoid costly O(N) heap allocations
         let last_z = self
             .last_z
-            .as_ref()
-            .expect("Forward must be called before backward")
-            .clone();
+            .take()
+            .expect("Forward must be called before backward");
         let last_input = self
             .last_input
-            .as_ref()
-            .expect("Forward must be called before backward")
-            .clone();
+            .take()
+            .expect("Forward must be called before backward");
 
         // Softmax has no elementwise derivative — every output depends on every
         // logit in its row — so it cannot be handled by the multiply below and
