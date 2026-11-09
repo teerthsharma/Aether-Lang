@@ -75,12 +75,15 @@ impl<const D: usize> SystemState<D> {
     /// # Returns
     /// The Euclidean distance between the two states
     pub fn deviation(&self, other: &Self) -> f64 {
-        let mut sum_sq = 0.0;
-
-        for i in 0..D {
-            let diff = self.vector[i] - other.vector[i];
-            sum_sq += diff * diff;
-        }
+        let sum_sq: f64 = self
+            .vector
+            .iter()
+            .zip(other.vector.iter())
+            .map(|(a, b)| {
+                let diff = a - b;
+                diff * diff
+            })
+            .sum();
 
         sqrt(sum_sq)
     }
@@ -89,38 +92,33 @@ impl<const D: usize> SystemState<D> {
     ///
     /// Useful for detecting outliers in specific dimensions.
     pub fn max_deviation(&self, other: &Self) -> f64 {
-        let mut max = 0.0;
-
-        for i in 0..D {
-            let diff = abs(self.vector[i] - other.vector[i]);
-            if diff > max {
-                max = diff;
-            }
-        }
-
-        max
+        self.vector
+            .iter()
+            .zip(other.vector.iter())
+            .fold(0.0, |max_val, (a, b)| {
+                let diff = abs(a - b);
+                if diff > max_val {
+                    diff
+                } else {
+                    max_val
+                }
+            })
     }
 
     /// Calculate the L1 norm (Manhattan distance)
     ///
     /// ||μ - μ'||₁ = Σᵢ|μᵢ - μ'ᵢ|
     pub fn manhattan_deviation(&self, other: &Self) -> f64 {
-        let mut sum = 0.0;
-
-        for i in 0..D {
-            sum += abs(self.vector[i] - other.vector[i]);
-        }
-
-        sum
+        self.vector
+            .iter()
+            .zip(other.vector.iter())
+            .map(|(a, b)| abs(a - b))
+            .sum()
     }
 
     /// Get the magnitude (L2 norm) of this state vector
     pub fn magnitude(&self) -> f64 {
-        let mut sum_sq = 0.0;
-
-        for i in 0..D {
-            sum_sq += self.vector[i] * self.vector[i];
-        }
+        let sum_sq: f64 = self.vector.iter().map(|v| v * v).sum();
 
         sqrt(sum_sq)
     }

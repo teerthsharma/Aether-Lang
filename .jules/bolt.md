@@ -10,3 +10,6 @@
 ## 2026-11-05 - Iterator Vectorization over Manual Loops in Tensor Math
 **Learning:** In `aether-core::ml::linalg`, explicitly indexing into raw tensor data borrows inside a `for` loop (e.g., `for i in 0..n { diff = true_data[i] - pred_data[i]; sum += diff * diff; }`) disables loop unrolling and LLVM auto-vectorization due to bounds checking overhead at each index.
 **Action:** Replace manual indexing with single-pass iterator chains (`.iter().zip().map().sum()`) directly on the underlying tensor data to elide bounds checks and dramatically speed up scalar reduction operations like MSE, MAE, distance functions, and kernels. When needing a max value (Chebyshev distance), use `.fold()` instead of `.max()` because `f64` does not implement `Ord`.
+## 2026-11-09 - Optimizing Array Math in SystemState
+**Learning:** In `SystemState`, operations like `deviation` and `magnitude` were using manual `for i in 0..D` loops to iterate over array data, triggering bounds checks and inhibiting auto-vectorization.
+**Action:** Replace manual loops with single-pass iterator chains like `.iter().zip().map().sum()` to elide bounds checks and dramatically improve performance.
