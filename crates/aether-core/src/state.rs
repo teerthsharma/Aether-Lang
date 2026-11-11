@@ -75,13 +75,16 @@ impl<const D: usize> SystemState<D> {
     /// # Returns
     /// The Euclidean distance between the two states
     pub fn deviation(&self, other: &Self) -> f64 {
-        let mut sum_sq = 0.0;
-
-        for i in 0..D {
-            let diff = self.vector[i] - other.vector[i];
-            sum_sq += diff * diff;
-        }
-
+        // Optimized: Single-pass iterator chain elides bounds checks and allows auto-vectorization
+        let sum_sq: f64 = self
+            .vector
+            .iter()
+            .zip(other.vector.iter())
+            .map(|(a, b)| {
+                let diff = a - b;
+                diff * diff
+            })
+            .sum();
         sqrt(sum_sq)
     }
 
@@ -89,39 +92,33 @@ impl<const D: usize> SystemState<D> {
     ///
     /// Useful for detecting outliers in specific dimensions.
     pub fn max_deviation(&self, other: &Self) -> f64 {
-        let mut max = 0.0;
-
-        for i in 0..D {
-            let diff = abs(self.vector[i] - other.vector[i]);
-            if diff > max {
-                max = diff;
-            }
-        }
-
-        max
+        // Optimized: Single-pass iterator chain elides bounds checks and allows auto-vectorization
+        self.vector
+            .iter()
+            .zip(other.vector.iter())
+            .map(|(a, b)| abs(a - b))
+            .fold(
+                0.0,
+                |max_val, abs_val| if abs_val > max_val { abs_val } else { max_val },
+            )
     }
 
     /// Calculate the L1 norm (Manhattan distance)
     ///
     /// ||μ - μ'||₁ = Σᵢ|μᵢ - μ'ᵢ|
     pub fn manhattan_deviation(&self, other: &Self) -> f64 {
-        let mut sum = 0.0;
-
-        for i in 0..D {
-            sum += abs(self.vector[i] - other.vector[i]);
-        }
-
-        sum
+        // Optimized: Single-pass iterator chain elides bounds checks and allows auto-vectorization
+        self.vector
+            .iter()
+            .zip(other.vector.iter())
+            .map(|(a, b)| abs(a - b))
+            .sum()
     }
 
     /// Get the magnitude (L2 norm) of this state vector
     pub fn magnitude(&self) -> f64 {
-        let mut sum_sq = 0.0;
-
-        for i in 0..D {
-            sum_sq += self.vector[i] * self.vector[i];
-        }
-
+        // Optimized: Single-pass iterator chain elides bounds checks and allows auto-vectorization
+        let sum_sq: f64 = self.vector.iter().map(|&x| x * x).sum();
         sqrt(sum_sq)
     }
 
